@@ -27,7 +27,19 @@ Claude Code のエージェント状態(idle / working / blocked / done)を macO
 
 バックログ(シグナルが来たら検討): `cleanup`(worktree 畳み)、他エージェント、
 launchd 常駐(§8.8)、PreToolUse 連携による blocked 解除の厳密化(§8.7)、
-表示・通知の磨き込み(§8.10)。
+表示・通知の磨き込み(§8.10)、サプライチェーン対策(§10)。
+
+## 10. サプライチェーン対策(保留)
+
+依存は少数の主要クレート(serde / serde_json / tokio / anyhow / tempfile)のみ。現状は
+`Cargo.lock` をコミット済み。過剰にはせず、以下をシグナル待ちで段階導入する:
+
+- **依存 cooldown(pnpm の minimum-release-age 相当)**: cargo 純正の `cargo-min-publish-age`
+  (`~/.cargo/config.toml` の `[registry] global-min-publish-age` + `[resolver] incompatible-publish-age`。
+  Cargo.lock 固定済みの版は対象外)の **stable 化を待つ**方針(2026-07-04 調査時点で stable 未到達・状況が流動的。
+  採用時に rustup / 公式で現物を再確認すること)。急ぎで欲しくなったらサードパーティ `cargo-cooldown`
+- **CI を作るとき**: `cargo build --locked` + `cargo-deny`(advisories / licenses / bans)を最初から入れる。
+  cargo-vet は個人用・小規模には過剰なので採らない
 
 各項目の「なぜ作らないか」と再検討の条件は **§8 決定の記録** にある。実装中に迷ったらまずそちらを読むこと。
 
