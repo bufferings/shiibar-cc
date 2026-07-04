@@ -226,7 +226,9 @@ Rust 製 daemon。tokio + Unix socket。
 {"cmd":"subscribe"}
 // → 最初に {"event":"snapshot","agents":[…]} を 1 行 push(初期スナップショット)。以降:
 //    {"event":"status_changed","agent":{…}}   … status / unreviewed / session_id / cwd / task / message のいずれかが変わったとき
-//    {"event":"agent_removed","target":"…"}   … SessionEnd / stale / remove / reconcile prune
+//    {"event":"agent_removed","target":"…","reason":"session_end"}   … 削除経路を reason で示す:
+//      "session_end"(hook)/ "stale" / "remove"(手動)/ "prune"(reconcile)。
+//      アプリは通知の掃除で session_end を除外するのに使う(§4.5)。未知の reason は "remove" と同扱いでよい
 //    (last_seen だけの更新では配信しない)
 
 // reconcile(claude agents の live 一覧を client が gather して送る。§3.5)
@@ -331,7 +333,8 @@ shiibar-cc doctor             # 診断(下記)
 - **wait の selector 解決**: 開始時に 1 回解決し、以降はその target を追う(未登録なら出現を待つ)。
   `--timeout` 省略時は無限に待つ
 - **resume**: fzf があれば fzf、なければ番号選択のプロンプト。実行中(list に存在する)セッションは候補から除外する
-  (`claude --resume` の二重起動防止)。履歴の cwd が消えていれば警告して `$HOME` で開く
+  (`claude --resume` の二重起動防止)。履歴の cwd が消えていれば警告して `$HOME` で開く。
+  候補ゼロ(履歴なし・全員実行中)と選択の中断(fzf の abort / プロンプトの EOF)は「該当なし」= exit 2(理由は stderr)
 - **doctor**: 以下を順に検査して人間向けに報告する —
   socket 疎通(`info` の応答)/ daemon の version・last_report_at / hooks 設定の有無
   (`~/.claude/settings.json` に report.sh が含まれるか)/ `shiibar-cc` が PATH にあるか /
@@ -370,7 +373,8 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
     2 レベル別の通知/音の種類/オンオフを細かく制御する設定画面は post-v1(§8.14)
   - 遅延通知: 3 秒後にタイマー発火した時点で**最新状態を再確認**し、まだ unreviewed かつ対象が前面でなければ通知(前面抑制はこの発火時点で判定する。`shiibar-cc focused` を叩く)。スリープ跨ぎでも安全
   - 通知の掃除: focus・unreviewed が下りたときに該当 target の配信済み通知を `removeDeliveredNotifications` で消す。
-    **`agent_removed` が SessionEnd(ペイン閉じ)由来のときは消さない**(まだ見ていない完了通知を、タブを閉じただけで撤去しないため)
+    **`agent_removed` の `reason` が `session_end`(ペイン閉じ)のときは消さない**(まだ見ていない完了通知を、
+    タブを閉じただけで撤去しないため。それ以外の reason は掃除してよい。§4.2)
 - **異常の可視化**(黙って機能停止しない): 以下はドロップダウン先頭に警告行を常設表示する —
   daemon と切断中(再接続バックオフ中。古いスナップショットを正常と誤認させない。
   **切断中はトレイ全体もグレー化**する)/ 通知権限が denied / focus が TCC エラー(exit 3)を返した
