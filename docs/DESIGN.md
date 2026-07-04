@@ -227,7 +227,12 @@ shiibarctl doctor             # 診断(下記)
 ```
 
 - **selector**: target の完全一致、または `.`(カレントディレクトリと cwd が一致するエージェント。
-  UUID の手打ちを不要にする)。cwd 部分一致などの拡張は実運用のシグナル待ち(§8.10)
+  UUID の手打ちを不要にする)。cwd 部分一致などの拡張は実運用のシグナル待ち(§8.10)。
+  複数一致は exit 1(該当なしの 2 と区別。理由は stderr)
+- **focus の selector 解決**: 完全一致 target は destination そのものなので daemon を介さず iterm へ直接渡す
+  (daemon が落ちていても・entry が stale で消えていてもタブが生きていれば飛べる。「該当なし」は iTerm2 走査の失敗=exit 2)。
+  daemon の list を引くのは `.`(cwd 一致)を解決するときだけ。focus 成功後の `seen` 送信と `last_focus` 保存は
+  best-effort(失敗しても飛べた事実は覆さない)
 - **exit code(全サブコマンド共通)**: 0 成功 / 1 接続・内部エラー(daemon 不在含む。stderr に理由) /
   2 該当なし(wait では対象消滅。理由は stderr に出す) /
   3 osascript 権限(TCC)エラー / 124 wait タイムアウト。

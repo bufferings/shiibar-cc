@@ -57,6 +57,25 @@ SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
   (install.sh で安定した署名 ID を使う。DESIGN.md §4.5)
 - 「通知が来ない」等の切り分けは `shiibarctl doctor`(M2 で実装)
 
+## M2 実機スモーク(osascript 権限が要るため人間が行う)
+
+`scripts/install.sh` でバイナリ配置後、**tmux -CC の外(素の iTerm2 タブ)で**試すこと
+(tmux -CC 内では focused が実 AppleScript の型エラーになる。§8.1 で非スコープ):
+
+```sh
+SHIIBAR_LOG=debug shiibard --foreground      # 1 タブで起動しておく
+shiibarctl doctor                            # 全項目 [ok]。初回 osascript でオートメーション許可を求められたら許可
+shiibarctl list                              # このセッションが idle で見えるか
+shiibarctl wait . --status done && say done  # このタブで Claude のターンを回して完了を待つ
+shiibarctl focus <list で見えた target>      # 別タブから該当タブが前面に来るか
+shiibarctl focused                           # 前面タブの target が出るか
+shiibarctl focus -                           # 直前の前面タブに戻るか
+shiibarctl focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
+```
+
+- **既知の注意**: osascript 呼び出しにタイムアウトがない。初回 TCC ダイアログ待ちや iTerm2 の応答遅延で
+  focus/focused が一時的にハングし得る(検証中に約 2 分の事例が 1 回、再現性なし)。ハングしたら Ctrl-C でよい
+
 ## ドッグフーディング運用(M2〜M3 の期間)
 
 - daemon は launchd に入れない(DESIGN.md §8.8)。iTerm2 の 1 タブで `shiibard --foreground` を
@@ -68,4 +87,13 @@ SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
 
 ## リリース・インストール(M2 / M4 で追記)
 
-- `scripts/install.sh` / `uninstall.sh` / `dev-reload.sh` の使い方をここに書く
+- `scripts/install.sh`: `cargo build --release` して `shiibard` / `shiibarctl` / `hooks/report.sh` を
+  `~/.local/bin/`(`SHIIBAR_BIN_DIR` で上書き可)に配置する。M2 段階ではバイナリ配置 + hooks 案内のみで、
+  `~/.claude/settings.json` への自動マージはしない(既存設定を壊すリスクを避けるため。
+  `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)。
+  `.app` 化・Login Items・CLI シンボリックリンクの `.app` 由来化は M4
+- `scripts/uninstall.sh`: `~/.local/bin/` に置いたものを削除し、settings.json から hooks を外す案内を表示する
+  (`~/.local/state/shiibar/` は消さない。resume 履歴・ログが要らないなら手動で消す)
+- `scripts/dev-reload.sh`: `cargo build`(デバッグビルド)を再実行するだけの薄いラッパー。
+  daemon は手動運用(§8.8)なので、動かしている `shiibard --foreground` は自分で Ctrl-C → 再実行する
+- 動作確認は `shiibarctl doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)
