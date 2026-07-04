@@ -10,6 +10,15 @@ use serde_json::Value;
 /// prompt / task display truncation (§9): first 80 **characters**, not bytes.
 pub const TASK_TRUNCATE_CHARS: usize = 80;
 
+/// A UserPromptSubmit whose prompt starts with this prefix is Claude Code's
+/// automatic wake-up delivering a background-agent completion to the parent
+/// session, not a user request (observed live 2026-07-05). It must drive
+/// the status transition as usual but must NOT overwrite `task`
+/// (DESIGN.md §3.6). Omitting the prompt from the payload here lets the
+/// daemon's existing "task is only updated by prompt-carrying reports"
+/// rule do the rest — the daemon stays untouched.
+pub const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractError(pub String);
 
@@ -58,7 +67,11 @@ pub fn build_report(
     let source = parse_enum_field::<SessionStartSource>(raw, "source")?;
     let notification_type = parse_enum_field::<NotificationType>(raw, "notification_type")?;
     let message = str_field(raw, "message");
-    let prompt = str_field(raw, "prompt").map(|p| truncate_chars(&p, TASK_TRUNCATE_CHARS));
+    // Task-notification wake-ups keep the event (status transition) but
+    // drop the prompt (no task overwrite, §3.6).
+    let prompt = str_field(raw, "prompt")
+        .filter(|p| !p.starts_with(TASK_NOTIFICATION_PREFIX))
+        .map(|p| truncate_chars(&p, TASK_TRUNCATE_CHARS));
     let background_tasks = raw
         .get("background_tasks")
         .and_then(|v| v.as_array())
@@ -155,6 +168,44 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(r.prompt.unwrap().chars().count(), 80);
+    }
+
+    #[test]
+    fn task_notification_prompt_is_omitted_from_the_payload() {
+        // §3.6: a background-agent completion wake-up must not overwrite
+        // `task`; the extraction drops the prompt so the daemon's
+        // prompt-carrying rule leaves the previous task alone.
+        let raw = json!({
+            "session_id": "s1",
+            "cwd": "/c",
+            "prompt": "<task-notification>Background agent finished: build the docs"
+        });
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.prompt, None, "task-notification prompt must be omitted");
+        assert_eq!(r.event, HookEvent::UserPromptSubmit, "the event itself still goes through");
+    }
+
+    #[test]
+    fn ordinary_prompt_is_still_carried() {
+        let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": "implement the thing"});
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.prompt.as_deref(), Some("implement the thing"));
+    }
+
+    #[test]
+    fn task_notification_prefix_must_be_at_the_start_to_count() {
+        // A user prompt that merely mentions the tag mid-text is a real
+        // request and must keep its prompt.
+        let raw = json!({"session_id": "s1", "cwd": "/c",
+            "prompt": "explain what <task-notification> means"});
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert!(r.prompt.is_some());
     }
 
     #[test]

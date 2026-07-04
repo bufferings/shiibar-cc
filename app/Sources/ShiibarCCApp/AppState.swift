@@ -100,7 +100,29 @@ final class AppState: ObservableObject {
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)
 
     func rowClicked(target: String) {
+        // §4.5: a row click runs focus AND closes the dropdown. Focusing
+        // iTerm2 deactivates this app, which usually makes the panel resign
+        // and hide on its own — the explicit dismissal below is the
+        // guarantee for when that alone doesn't close it.
+        dismissDropdown()
         focus(target: target)
+    }
+
+    /// Close the MenuBarExtra window-style dropdown panel (§4.5).
+    ///
+    /// macOS 13 has no public API we could verify for dismissing this panel
+    /// programmatically (`@Environment(\.dismiss)` is not documented to
+    /// cover MenuBarExtra), so this closes the app's visible windows,
+    /// excluding the status item's own host window (class
+    /// `NSStatusBarWindow` — closing that would remove the tray icon).
+    /// This app is an accessory with no other windows, so the only thing
+    /// this can hit is the dropdown panel; the class-name exclusion is the
+    /// one private-API assumption (on-device checkpoint: the tray icon must
+    /// survive a row click).
+    private func dismissDropdown() {
+        for window in NSApp.windows where window.isVisible && !window.className.contains("NSStatusBarWindow") {
+            window.close()
+        }
     }
 
     func focus(target: String) {
