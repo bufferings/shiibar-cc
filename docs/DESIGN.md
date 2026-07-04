@@ -295,7 +295,8 @@ shiibar/
 ├── docs/
 │   ├── DESIGN.md           # 本書(挙動の正)
 │   ├── menubar-design.html # メニューバー確定デザイン(見た目の正)
-│   └── DEVELOPMENT.md      # 開発メモ(手順・運用。実装の進行に合わせて追記)
+│   ├── DEVELOPMENT.md      # 開発メモ(手順・運用。実装の進行に合わせて追記)
+│   └── tasks/              # マイルストーンごとの実装指示書(M1.md, …)
 ├── CLAUDE.md
 ├── LICENSE-MIT / LICENSE-APACHE
 └── README.md

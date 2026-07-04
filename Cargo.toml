@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shiibar-proto",
+    "crates/shiibar-client",
+    "crates/shiibard",
+    "crates/shiibarctl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"

@@ -1,0 +1,11 @@
+[package]
+name = "shiibarctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+shiibar-proto = { path = "../shiibar-proto" }
+shiibar-client = { path = "../shiibar-client" }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
