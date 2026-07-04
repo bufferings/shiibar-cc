@@ -20,9 +20,9 @@
 
 - **Rust**: `rust-toolchain.toml` でバージョン固定(rustup が自動でダウンロードする)。mise は使わない
 - **Swift**: Command Line Tools のみでビルド可。Xcode 本体は不要
-- **fzf**(任意): `shiibar-cc resume` の選択 UI が快適になる。なければ番号選択
+- **fzf**(任意): `shiibar-cc resume`(M3 で実装)の選択 UI が快適になる。なければ番号選択
 
-## よく使うコマンド(M1 で追記)
+## よく使うコマンド
 
 ```sh
 cargo build
@@ -38,13 +38,13 @@ cargo run -p shiibar-cc -- watch
 SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ```
 
-## hooks の検証(M1)
+## hooks の検証
 
 - `hooks/settings-snippet.json` は `$HOME/.local/bin/report.sh` を指す(install.sh 導入後の配置。M2)。
   それ以前に実機で試す場合は、コマンドをリポジトリ内 `hooks/report.sh` の絶対パスに読み替え、
   `shiibar-cc` は `cargo build` 後に `target/debug/` を PATH に入れる
 
-- 実ペイロードの採取: hooks を設定した実セッションで動かし、実 hook JSON を `fixtures/` に保存する(手順は M1 実装時に追記)
+- 実ペイロードの採取: hooks を設定した実セッションで対象イベントを発生させ、受信した実 hook JSON を `fixtures/` に保存する
 - 偽装再生: `echo '<hook JSON>' | shiibar-cc report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
 - 要検証リスト(DESIGN.md §7-3): `elicitation_*` の実際の意味 / `PostToolUseFailure` の実発火
 
@@ -93,7 +93,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 - アプリ(M4 以降)は起動時に既存 daemon にアタッチするので、手動 daemon と併用しても壊れない。
   ただしアプリを Quit すると daemon も止まる(仕様)
 
-## リリース・インストール(M2 / M4 で追記)
+## リリース・インストール(`.app` 化まわりは M4 で追記)
 
 - `scripts/install.sh`: `cargo build --release` して `shiibar-ccd` / `shiibar-cc` / `hooks/report.sh` を
   `~/.local/bin/`(`SHIIBAR_CC_BIN_DIR` で上書き可)に配置する。M2 段階ではバイナリ配置 + hooks 案内のみで、

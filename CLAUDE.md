@@ -12,6 +12,7 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
 ## Rules for implementation work
 
 - Work from the task brief in `docs/tasks/` for your milestone. Stay inside its scope.
+  Briefs with a completed Status line at the top are historical records — never re-execute them.
 - If the spec is ambiguous, contradictory, or wrong: **stop and report** the issue in your final summary. Do not invent behavior or silently deviate.
 - Language: **Japanese is allowed ONLY in `docs/`**. Everything else — source code, code comments,
   doc comments, test names, string literals, log messages, commit messages, fixtures — MUST be English.
@@ -24,6 +25,22 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
 - All state paths go through the state dir (`SHIIBAR_CC_STATE_DIR` override, default `~/.local/state/shiibar-cc/`). Tests MUST use a temp state dir and never touch the real one.
 - iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-cc-client` (design principle 2).
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
+
+## Rules for documentation work
+
+- **Write for the repo-only reader.** Every sentence in a doc must be meaningful to someone who sees
+  nothing but this repository. Before writing a sentence, ask: "what can a repo-only reader do with this?"
+  If the answer is nothing, don't write it.
+- Concretely, never write: references to superseded or never-implemented past designs; doc version
+  numbers ("v1", "2nd edition") or revision-history phrasing ("changed from...", "fully revised");
+  pointers to artifacts outside the repo (session mockups, conversations); deictic phrasing that only
+  works inside a conversation ("this time", "as discussed"). Docs state the current agreed content,
+  in present tense.
+  Exceptions: `docs/DESIGN.md` §8 (decision log — history is its purpose) and completed migration
+  briefs in `docs/tasks/` where the transition itself is the subject.
+- **After ANY doc edit** (`docs/`, `CLAUDE.md`, READMEs), before committing: have a separate review
+  agent check the changed docs against this section (repo-only reader test, plus stale cross-references
+  to files/sections that no longer exist). Do not skip this because the change "looks trivial".
 
 ## Don't trust your training knowledge for anything versioned or external
 

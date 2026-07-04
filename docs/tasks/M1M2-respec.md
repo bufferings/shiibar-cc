@@ -1,5 +1,7 @@
 # M1/M2 再整合(respec)実装指示書: 旧状態モデル → 新状態モデル
 
+> **Status: 完了(2026-07-04)**。移行作業の記録として保存(旧 state.json の互換判断などを含む)。
+> 現行の挙動仕様は `docs/DESIGN.md` が正。
 > 読む順番: ルートの `CLAUDE.md` → この指示書 → `docs/DESIGN.md`(特に §2 / §3 全部 / §4)。
 > 参考: `docs/tasks/M1.md` / `M2.md`(新モデルに更新済み。完成形の定義)。
 > 仕様の正はあくまで DESIGN.md。食い違い・曖昧さを見つけたら実装で解決せず、完了報告で指摘すること。
@@ -28,6 +30,7 @@ seen = done→idle)で実装・テスト済み。その後 `docs/DESIGN.md` が*
 ## 変更箇所インベントリ(調査済み)
 
 これは出発点であり網羅保証ではない。最後に `blocked` / `done` / `session:` を全 grep して掃くこと。
+行番号は移行前コード時点のもので、現在のコードとは一致しない。
 
 ### crates/shiibar-cc-proto
 - `src/lib.rs:19-28` `Status` enum: `Blocked`→`Waiting`、`Done` 削除、`Unknown`(`#[serde(other)]`)維持
