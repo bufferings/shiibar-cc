@@ -1,0 +1,7 @@
+{
+  "session_id": "11111111-1111-1111-1111-111111111111",
+  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar",
+  "hook_event_name": "Stop",
+  "background_tasks": []
+}

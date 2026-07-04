@@ -9,3 +9,6 @@ shiibar-proto = { path = "../shiibar-proto" }
 shiibar-client = { path = "../shiibar-client" }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
