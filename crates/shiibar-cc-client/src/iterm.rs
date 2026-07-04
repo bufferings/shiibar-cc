@@ -140,15 +140,31 @@ fn escape_as_string_literal(s: &str) -> String {
 /// (DESIGN.md §4.3: "if iTerm2 isn't running, return 'no match' without
 /// launching it"; a bare `tell application "iTerm2"` would auto-launch it).
 /// Prints `FOUND` or `NOTFOUND` as the last line of stdout.
+///
+/// Uses explicit numeric indices (`session si of t`) with a per-session
+/// `try`, NOT `repeat with s in sessions of t`. The plural form makes
+/// iTerm2 resolve "item N of every session of ..." during iteration, which
+/// intermittently throws `-1719` (invalid index) on split-pane tabs
+/// (real-machine M2 smoke test). Indexing one session at a time inside a
+/// `try` lets a transient bad element be skipped instead of aborting the
+/// whole scan. The window/tab/session `select` + `activate` stay outside
+/// the `try`, so a real error (e.g. TCC denial) still surfaces.
 pub fn build_focus_script(uuid: &str) -> String {
     let uuid = escape_as_string_literal(uuid);
     format!(
         r#"if application "iTerm2" is running then
     tell application "iTerm2"
-        repeat with w in windows
-            repeat with t in tabs of w
-                repeat with s in sessions of t
-                    if id of s is "{uuid}" then
+        repeat with wi from 1 to (count of windows)
+            set w to window wi
+            repeat with ti from 1 to (count of tabs of w)
+                set t to tab ti of w
+                repeat with si from 1 to (count of sessions of t)
+                    set sid to ""
+                    try
+                        set sid to id of (session si of t)
+                    end try
+                    if sid is "{uuid}" then
+                        set s to session si of t
                         tell w to select
                         tell t to select
                         tell s to select
@@ -366,7 +382,7 @@ mod tests {
     #[test]
     fn focus_script_only_activates_after_a_match_is_found() {
         let script = build_focus_script("SOME-UUID");
-        let if_match = script.find("if id of s is").unwrap();
+        let if_match = script.find("if sid is").unwrap();
         let activate = script.find("activate").unwrap();
         let found = script.find("\"FOUND\"").unwrap();
         assert!(
