@@ -1,6 +1,6 @@
 //! `shiibarctl list [--json]` (DESIGN.md §4.4): `--json` forwards the wire
 //! `list` response verbatim; the default text form is an aligned
-//! "状態 / ラベル / 経過時間 / target" table.
+//! "status / label / elapsed time / target" table.
 
 use crate::exitcode;
 use shiibar_client::label::format_cwd_label;

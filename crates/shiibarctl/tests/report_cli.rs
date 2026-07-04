@@ -92,9 +92,9 @@ fn exits_0_when_event_argument_is_missing() {
 #[test]
 fn other_subcommands_exit_nonzero_when_the_daemon_is_absent() {
     // `list` is implemented (M2), but with no daemon listening at
-    // SHIIBAR_STATE_DIR it must exit 1 (§4.4: "接続・内部エラー
-    // (daemon不在含む)") rather than 0 — `report`'s always-exit-0 rule is
-    // the one deliberate exception (§4.4).
+    // SHIIBAR_STATE_DIR it must exit 1 (§4.4: "connection / internal error,
+    // including daemon absent") rather than 0 — `report`'s always-exit-0
+    // rule is the one deliberate exception (§4.4).
     let dir = tempfile::tempdir().unwrap();
     let status = Command::new(bin())
         .arg("list")
@@ -139,7 +139,7 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     assert_eq!(payload.event, shiibar_proto::HookEvent::UserPromptSubmit);
     assert_eq!(
         payload.prompt.as_deref(),
-        Some("focus の AppleScript を実装して")
+        Some("Implement the focus AppleScript")
     );
     assert_eq!(payload.session_id, "11111111-1111-1111-1111-111111111111");
 }

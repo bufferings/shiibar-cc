@@ -45,14 +45,14 @@ fn existing(status: Status) -> AgentEntry {
 /// What a table cell says should happen.
 #[derive(Debug, Clone, Copy)]
 enum Cell {
-    /// "無視": unregistered target, event produces no entry at all.
+    /// "ignore": unregistered target, event produces no entry at all.
     Ignore,
-    /// "登録(x)": unregistered target becomes a fresh entry with status x.
+    /// "register(x)": unregistered target becomes a fresh entry with status x.
     Register(Status),
     /// A registered entry's resulting status (covers both "—" cells, where
     /// this equals the starting status, and real transitions).
     ToStatus(Status),
-    /// "削除": registered entry is deleted.
+    /// "remove": registered entry is deleted.
     Removed,
 }
 
@@ -77,13 +77,13 @@ fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 5])
 
         match cell {
             Cell::Ignore => {
-                assert_eq!(outcome, Outcome::Ignored, "{case}: expected 無視 (Ignored)");
+                assert_eq!(outcome, Outcome::Ignored, "{case}: expected ignore (Ignored)");
             }
             Cell::Register(expected) => {
                 let Outcome::Updated { entry, previous } = outcome else {
-                    panic!("{case}: expected Updated (登録), got {outcome:?}");
+                    panic!("{case}: expected Updated (register), got {outcome:?}");
                 };
-                assert!(previous.is_none(), "{case}: 登録 must have no previous entry");
+                assert!(previous.is_none(), "{case}: register must have no previous entry");
                 assert_eq!(entry.status, expected, "{case}: registered status");
                 assert_eq!(entry.since, NOW, "{case}: since on fresh registration");
                 assert_eq!(entry.last_seen, NOW, "{case}: last_seen on fresh registration");
@@ -110,7 +110,7 @@ fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 5])
             }
             Cell::Removed => {
                 let Outcome::Removed { previous } = outcome else {
-                    panic!("{case}: expected Removed (削除), got {outcome:?}");
+                    panic!("{case}: expected Removed (remove), got {outcome:?}");
                 };
                 assert_eq!(
                     previous.status,
@@ -326,7 +326,7 @@ fn session_end_deletes_registered_and_ignores_unregistered() {
 fn seen_only_moves_done_to_idle() {
     // `seen` isn't a `report` event, so it's exercised directly against
     // `apply_seen` rather than through `assert_row`.
-    assert_eq!(apply_seen(None, NOW), Outcome::Ignored, "unregistered: 無視");
+    assert_eq!(apply_seen(None, NOW), Outcome::Ignored, "unregistered: ignore");
 
     for status in [Status::Idle, Status::Working, Status::Blocked] {
         let prev = existing(status);

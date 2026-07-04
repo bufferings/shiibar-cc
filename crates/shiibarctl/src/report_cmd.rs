@@ -2,7 +2,7 @@
 //! Moved here unchanged in behavior from the M1 `main.rs` (only the socket
 //! path resolution now goes through `shiibar_client::connection`, removing
 //! the duplicate copy that used to live in this crate — DESIGN.md §4.3 M2
-//! brief: "M1 の shiibarctl 側と重複するなら整理する").
+//! brief: "clean it up if it duplicates the M1 shiibarctl side").
 
 use shiibar_proto::{HookEvent, ReportPayload, Request, codec, extract};
 use std::io::{Read, Write};
@@ -10,7 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// hooks 送信タイムアウト (§9).
+/// hooks send timeout (§9).
 const SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Always succeeds from the caller's point of view: `report` is the sole

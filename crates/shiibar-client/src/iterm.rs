@@ -133,8 +133,9 @@ fn escape_as_string_literal(s: &str) -> String {
 /// activates iTerm2. Deliberately checks `application "iTerm2" is running`
 /// first and only opens a `tell application "iTerm2"` block inside that
 /// guard — this is what keeps `focus` from launching iTerm2 when it isn't
-/// running (DESIGN.md §4.3: "iTerm2 が未起動なら起動せずに「該当なし」を
-/// 返す"; a bare `tell application "iTerm2"` would auto-launch it). Prints
+/// running (DESIGN.md §4.3: "if iTerm2 isn't running, return 'no match'
+/// without launching it"; a bare `tell application "iTerm2"` would
+/// auto-launch it). Prints
 /// `FOUND` or `NOTFOUND` as the last line of stdout.
 pub fn build_focus_script(uuid: &str) -> String {
     let uuid = escape_as_string_literal(uuid);

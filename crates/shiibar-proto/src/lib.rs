@@ -73,7 +73,7 @@ pub enum SessionStartSource {
 
 /// `Notification` sub-type (§3.1). Any value this build doesn't recognize
 /// falls into `Unknown`, which is deliberately treated as blocked-inducing
-/// ("見逃しより誤報を許容").
+/// (prefer a false alarm over a miss, DESIGN.md §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationType {
@@ -114,7 +114,7 @@ pub struct ReportPayload {
     pub background_tasks: Option<Vec<serde_json::Value>>,
 }
 
-/// A `sessions.jsonl` line / `sessions` response entry (§4.2, §4.2 運用).
+/// A `sessions.jsonl` line / `sessions` response entry (§4.2, §4.2 Operations).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub session_id: String,

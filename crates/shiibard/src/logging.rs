@@ -1,4 +1,4 @@
-//! Minimal stderr logger (§4.2 運用): level via `SHIIBAR_LOG`
+//! Minimal stderr logger (§4.2 Operations): level via `SHIIBAR_LOG`
 //! (error/info/debug, default info). `report` receipt logs at debug,
 //! transitions and removals log at info.
 //!

@@ -3,8 +3,8 @@
 //! last two path components (or fewer, if the path is shorter). This lives
 //! in shiibar-client (rather than duplicated in `shiibarctl` and the menu
 //! bar app) because both consumers need the exact same rule (§4.5:
-//! "この整形は後で app と CLI 双方で使うので shiibar-client 側に置くのが
-//! 望ましい").
+//! "this formatting will later be used by both the app and the CLI, so it
+//! belongs in shiibar-client").
 //!
 //! DESIGN.md only spells out the home-relative case; for a `cwd` outside
 //! the home directory this always falls back to "last two path components,
@@ -54,10 +54,10 @@ mod tests {
     fn home_relative_path_gets_tilde_and_last_two_components() {
         assert_eq!(
             format_cwd_label_with_home(
-                "/Users/example/Documents/my/shiibar",
+                "/Users/example/projects/shiibar",
                 Some("/Users/example")
             ),
-            "~/my/shiibar"
+            "~/projects/shiibar"
         );
     }
 
@@ -99,7 +99,7 @@ mod tests {
         // string, but not as a path component boundary.
         assert_eq!(
             format_cwd_label_with_home("/Users/example-other/x", Some("/Users/example")),
-            "bufferings-other/x"
+            "example-other/x"
         );
     }
 }

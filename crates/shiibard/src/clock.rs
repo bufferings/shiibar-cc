@@ -1,5 +1,5 @@
-//! Injectable clock (DESIGN.md §3.2: "時刻はすべて daemon の時計"). Needed so
-//! the stale-sweep (24h) test doesn't have to sleep for a day.
+//! Injectable clock (DESIGN.md §3.2: "all times are the daemon's clock").
+//! Needed so the stale-sweep (24h) test doesn't have to sleep for a day.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

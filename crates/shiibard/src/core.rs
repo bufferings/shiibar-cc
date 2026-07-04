@@ -1,7 +1,7 @@
 //! Shared daemon state: the agent table, session history, and the request
 //! handlers that mutate them (§4.2). Deliberately synchronous/lock-free by
 //! itself — `server.rs` wraps one `Core` in a `std::sync::Mutex` so
-//! connections process in accept/receive order (§4.2 プロトコル契約).
+//! connections process in accept/receive order (§4.2 Protocol contract).
 
 use crate::clock::Clock;
 use crate::state::{self, AgentEntry};

@@ -1,6 +1,7 @@
 //! `wait` integration tests against a real (in-process) shiibard, per the
-//! M2 task brief: "既存 blocked に即成立 / 出現待ち→成立 / タイムアウト /
-//! 対象消滅" — the four `WaitOutcome` branches. Exit-code mapping (124/2)
+//! M2 task brief: "already blocked resolves immediately / waits for
+//! appearance then resolves / timeout / target disappears" — the four
+//! `WaitOutcome` branches. Exit-code mapping (124/2)
 //! is shiibarctl's job and is tested there; here we assert the
 //! `WaitOutcome` shiibar-client hands back.
 

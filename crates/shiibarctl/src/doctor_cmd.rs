@@ -25,8 +25,8 @@ pub fn run_doctor(
 ) -> DoctorReport {
     let mut lines = Vec::new();
     // Daemon reachability is the one check that decides the exit code
-    // (DESIGN.md §4.4's common exit-code table: 1 = "接続・内部エラー
-    // (daemon不在含む)"). Every other check here is advisory: doctor's job
+    // (DESIGN.md §4.4's common exit-code table: 1 = "connection / internal
+    // error, including daemon absent"). Every other check here is advisory: doctor's job
     // is to show every problem in one pass, not to gate on all of them.
     let mut exit_code = exitcode::OK;
 

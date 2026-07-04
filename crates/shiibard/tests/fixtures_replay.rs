@@ -42,7 +42,7 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
     match sub.next_event().await {
         SubscribeEvent::StatusChanged { agent } => {
             assert_eq!(agent.status, Status::Working);
-            assert_eq!(agent.task.as_deref(), Some("focus の AppleScript を実装して"));
+            assert_eq!(agent.task.as_deref(), Some("Implement the focus AppleScript"));
         }
         other => panic!("expected status_changed(working), got {other:?}"),
     }

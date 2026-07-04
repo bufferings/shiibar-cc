@@ -8,8 +8,8 @@
 //! matches yet, the selector predicate itself (exact target, or cwd
 //! equality for `.`) is applied to each subsequent `status_changed` until
 //! something matches — at which point *that* target is locked in
-//! (DESIGN.md §4.4: "開始時に1回解決し、以降はその target を追う(未登録
-//! なら出現を待つ)").
+//! (DESIGN.md §4.4: "resolve once at the start, then follow that target
+//! from then on (waiting for it to appear if unregistered)").
 
 use crate::connection::{ClientError, Subscription};
 use crate::selector::{SelectError, Selector, resolve_selector};

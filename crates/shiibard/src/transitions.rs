@@ -8,7 +8,7 @@ use shiibar_proto::{HookEvent, NotificationType, ReportPayload, SessionStartSour
 /// Result of applying one event to (possibly absent) existing state.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
-    /// Unregistered target + an event the table marks "無視": nothing
+    /// Unregistered target + an event the table marks "ignore": nothing
     /// happens (no entry created, nothing persisted, nothing broadcast).
     Ignored,
     /// A registered entry was deleted (`SessionEnd`). `previous` is the
@@ -115,7 +115,7 @@ fn apply_notification(existing: Option<&AgentEntry>, report: &ReportPayload, now
     match report.notification_type {
         // Missing notification_type on a Notification event is undefined by
         // the table; treated the same as an unrecognized type (blocked-
-        // inducing) — "見逃しより誤報を許容" (§3.1).
+        // inducing) — prefer a false alarm over a miss (DESIGN.md §3.1).
         None | Some(PermissionPrompt) | Some(AgentNeedsInput) | Some(ElicitationDialog) | Some(Unknown) => {
             apply_transition(
                 existing,
@@ -150,7 +150,7 @@ fn apply_notification(existing: Option<&AgentEntry>, report: &ReportPayload, now
 fn apply_stop(existing: Option<&AgentEntry>, report: &ReportPayload, now: i64) -> Outcome {
     // background_tasks shape is still unverified against real payloads
     // (DESIGN.md §7-2c); only emptiness matters here. A missing field is
-    // treated the same as an empty array (§3.1 "空" branch).
+    // treated the same as an empty array (§3.1 "empty" branch).
     let has_background_tasks = report
         .background_tasks
         .as_ref()
@@ -245,7 +245,7 @@ fn apply_common_overwrites(entry: &mut AgentEntry, report: &ReportPayload, now: 
 }
 
 /// Assign `new_status`, bumping `since` only on an actual value change
-/// (§3.1 "同値遷移の since 維持"), and clearing `message` whenever the
+/// (§3.1 "same-value transitions preserve `since`"), and clearing `message` whenever the
 /// entry is not (or is no longer) `blocked` (§3.2).
 fn set_status(entry: &mut AgentEntry, new_status: Status, now: i64) {
     if entry.status != new_status {

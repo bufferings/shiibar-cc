@@ -1,6 +1,6 @@
 //! Unix socket server: startup sequence (stale-socket / dup-instance
-//! detection, §4.2 運用), the accept loop, and per-connection request
-//! handling (§4.2 プロトコル契約).
+//! detection, §4.2 Operations), the accept loop, and per-connection request
+//! handling (§4.2 Protocol contract).
 
 use crate::core::{BroadcastEvent, Core, SWEEP_INTERVAL_SECS};
 use crate::paths::StateDir;
@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
 
-/// A live daemon already owns the socket (§4.2 起動シーケンス).
+/// A live daemon already owns the socket (§4.2 Operations: startup sequence).
 #[derive(Debug)]
 pub struct AlreadyRunning;
 

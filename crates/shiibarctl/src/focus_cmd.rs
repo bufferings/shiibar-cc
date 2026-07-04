@@ -31,7 +31,7 @@ fn err(code: i32, msg: impl Into<String>) -> FocusReport {
     }
 }
 
-/// `focus <selector>` (§4.4 "focus の selector 解決"): an exact-match
+/// `focus <selector>` (§4.4 "focus's selector resolution"): an exact-match
 /// target *is* the destination, so it goes straight to `jump_to` without
 /// consulting the daemon's `list` — the jump can succeed even if the
 /// daemon is down or the entry has gone stale, as long as the iTerm2 tab
@@ -363,7 +363,7 @@ mod tests {
     }
 
     // ---- run_focus: exact-match target bypasses the daemon entirely
-    // (DESIGN.md §4.4 "focus の selector 解決"), `.` still needs it ----
+    // (DESIGN.md §4.4 "focus's selector resolution"), `.` still needs it ----
 
     #[test]
     fn run_focus_with_exact_target_jumps_without_the_daemon() {

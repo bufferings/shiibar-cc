@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn truncates_prompt_to_80_chars_by_char_not_byte() {
         // multi-byte chars: naive byte-slicing at 80 could split a codepoint.
-        let long_prompt: String = "あ".repeat(100);
+        let long_prompt: String = "€".repeat(100);
         let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": long_prompt});
         let r = build_report(HookEvent::UserPromptSubmit, &raw, None, 1).unwrap();
         assert_eq!(r.prompt.unwrap().chars().count(), 80);

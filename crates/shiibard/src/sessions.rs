@@ -1,4 +1,4 @@
-//! `sessions.jsonl` history (§4.2 運用): one line per SessionStart / Stop /
+//! `sessions.jsonl` history (§4.2 Operations): one line per SessionStart / Stop /
 //! SessionEnd, deduped by `session_id` (latest wins) for the `sessions`
 //! response, and physically compacted at startup once the file exceeds
 //! 1000 lines (§9).

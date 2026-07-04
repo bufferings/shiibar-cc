@@ -4,8 +4,9 @@
 //! `std::os::unix::net::UnixStream` connections — i.e. exactly what
 //! `shiibar-client`'s blocking client code does. This lets `wait`'s
 //! integration tests exercise the real M1 daemon rather than a mock
-//! (DESIGN.md / M2 task brief: "daemon は M1 の実バイナリ or ライブラリを
-//! 一時 SHIIBAR_STATE_DIR で起動して結合テスト").
+//! (DESIGN.md / M2 task brief: "the daemon should be the real M1 binary or
+//! library, started against a temp SHIIBAR_STATE_DIR, for integration
+//! testing").
 #![allow(dead_code)]
 
 use shiibar_proto::codec;

@@ -1,5 +1,5 @@
 //! Agent entry storage: the in-memory table plus atomic persistence to
-//! `state.json` (§4.2 運用).
+//! `state.json` (§4.2 Operations).
 
 use serde::{Deserialize, Serialize};
 use shiibar_proto::{Agent, Status};
@@ -18,7 +18,7 @@ pub struct AgentEntry {
     /// Epoch seconds of the last report received for this target.
     pub last_seen: i64,
     /// First 80 chars of the last `UserPromptSubmit` prompt. Persists
-    /// across status changes (§3.2: "最後の...prompt").
+    /// across status changes (§3.2: "the last ... prompt").
     pub task: Option<String>,
     /// blocked reason (last Notification message that caused/held blocked).
     /// Cleared whenever the entry leaves `blocked` (§3.2).
@@ -40,8 +40,8 @@ impl AgentEntry {
     }
 
     /// The subset of fields whose change triggers a `status_changed`
-    /// broadcast (§4.2: "status / session_id / cwd / task / message の
-    /// いずれかが変わったとき").
+    /// broadcast (§4.2: "whenever any of status / session_id / cwd / task /
+    /// message changes").
     fn observable(&self) -> (Status, &str, &str, Option<&str>, Option<&str>) {
         (
             self.status,
@@ -77,7 +77,7 @@ pub fn load(path: &Path) -> anyhow::Result<Vec<AgentEntry>> {
     }
 }
 
-/// Atomically persist `agents` to `path` (tmp file + rename, §4.2 運用).
+/// Atomically persist `agents` to `path` (tmp file + rename, §4.2 Operations).
 pub fn save(path: &Path, agents: &[AgentEntry]) -> anyhow::Result<()> {
     let file = StateFile {
         agents: agents.to_vec(),

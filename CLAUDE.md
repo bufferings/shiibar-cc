@@ -13,7 +13,13 @@ macOS menu bar app + CLI that tracks Claude Code agent status (idle / working / 
 
 - Work from the task brief in `docs/tasks/` for your milestone. Stay inside its scope.
 - If the spec is ambiguous, contradictory, or wrong: **stop and report** the issue in your final summary. Do not invent behavior or silently deviate.
-- Language: code, comments, and commit messages in English. Docs in Japanese.
+- Language: **Japanese is allowed ONLY in `docs/`**. Everything else — source code, code comments,
+  doc comments, test names, string literals, log messages, commit messages, fixtures — MUST be English.
+  When a comment needs to reference a spec rule written in Japanese, translate it to English and cite the
+  section number (e.g. `// prefer a false alarm over a miss (DESIGN.md §3.1)`), do not paste the Japanese.
+- Never hardcode machine-specific absolute paths (`/Users/<name>/...`, real `$HOME`) anywhere in the repo,
+  including test fixtures and test cases. Use a neutral placeholder (e.g. `/Users/example/...`) or, better,
+  a path built at runtime from a temp dir. Fixtures and tests must be portable across machines.
 - Tests must mirror DESIGN.md §3.1 exactly (table-driven). Never weaken a test or the spec to make an implementation pass.
 - All state paths go through the state dir (`SHIIBAR_STATE_DIR` override, default `~/.local/state/shiibar/`). Tests MUST use a temp state dir and never touch the real one.
 - iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-client` (design principle 2).

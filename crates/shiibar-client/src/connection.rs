@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// Errors from talking to shiibard. Every variant maps to shiibarctl exit
-/// code 1 ("接続・内部エラー(daemon不在含む)", DESIGN.md §4.4) unless a
+/// code 1 ("connection / internal error, including daemon absent", DESIGN.md §4.4) unless a
 /// caller specifically reinterprets it (e.g. `wait`'s timeout, which is
 /// modeled as `Ok(WaitOutcome::TimedOut)`, not an error at all).
 #[derive(Debug)]

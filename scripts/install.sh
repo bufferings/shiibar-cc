@@ -6,7 +6,7 @@
 #     (`shiibard --foreground`, DESIGN.md §8.8) until the menu bar app
 #     exists.
 #   - M4: .app bundling, Login Items, and switching the CLI symlink target
-#     to the .app's embedded binaries (DESIGN.md §4.5 "同梱").
+#     to the .app's embedded binaries (DESIGN.md §4.5 "bundling").
 #
 # Deliberately does NOT touch ~/.claude/settings.json: merging hooks into
 # a user's existing settings safely (preserving unrelated hooks/config,
