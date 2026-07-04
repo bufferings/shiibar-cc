@@ -1,10 +1,11 @@
-// The shared "terminal window" glyph (menubar-design.html): a rounded
-// line-drawn window frame + bold prompt ❯ + a status character. Used at
-// two sizes — the tray icon (with the red unreviewed dot overlaid by
-// `TrayIconView`) and the dropdown group headers (~24px per the mock).
-// Factoring it here keeps the tray and the headers the same shape, as the
-// design requires ("group heading: window icon of the same shape as the
-// tray").
+// The "terminal window" glyph for the dropdown group headers
+// (menubar-design.html: a rounded line-drawn window frame + bold prompt ❯
+// + the group's status character, ~24px, the same shape as the tray).
+// This SwiftUI version renders correctly inside the dropdown window; the
+// tray itself cannot use it — the MenuBarExtra label drops Shape strokes
+// and flattens text layout — so the tray draws the same shape via
+// `TrayIconRenderer` (NSImage) instead. Keep the two visually in sync when
+// tuning either.
 //
 // `✳` is the plain U+2733 EIGHT SPOKED ASTERISK character (menubar-design.html
 // implementation notes: must not be reshaped into the Anthropic sunburst

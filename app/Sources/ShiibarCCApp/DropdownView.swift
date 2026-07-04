@@ -65,7 +65,14 @@ private struct TopBar: View {
             } label: {
                 Text("⌄").font(.system(size: 13, weight: .semibold))
             }
+            // The macOS Menu draws its own pull-down disclosure indicator
+            // next to the label, which stacked a second chevron under our ⌄
+            // text (seen on-device). Hide it so exactly one ⌄ shows. If a
+            // macOS version ignores `menuIndicator(.hidden)` for this style,
+            // the fallback is the inverse: keep the system indicator and
+            // make the label empty.
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             Spacer()
         }

@@ -1,40 +1,25 @@
-// Tray icon rendering (the tray section of menubar-design.html): the shared
-// window glyph (`WindowGlyphView`: rounded window + ❯ + status character),
-// two-layer composited — the glyph renders as ordinary SwiftUI content
-// inside the `MenuBarExtra` label (which NSStatusItem automatically tints
-// to match the menu bar's foreground color, the same effect a template
-// NSImage gets), with the red unreviewed dot drawn as a literal
-// (non-tinted) color overhanging the top-right corner, with a light halo
-// ring (menubar-design.html: halo always drawn; invisible on light bars by
-// design, since a template image can't know the bar color).
+// Tray icon label for the MenuBarExtra: a single `Image(nsImage:)` produced
+// by `TrayIconRenderer`. Composed SwiftUI views do NOT render reliably in a
+// MenuBarExtra label (on-device, Shape strokes were dropped and the text
+// layout was flattened to a bare menu-bar-styled ❯), so everything —
+// window frame, prompt, status character, red dot, dim level — is baked
+// into the image, per DESIGN.md §4.5's NSImage-compositing instruction.
+// See TrayIconRenderer for the template/non-template two-layer rule and
+// the tunable geometry constants.
 //
-// The dim level applies to the WHOLE composition, red dot included
-// (menubar-design.html: while disconnected the entire tray grays out).
+// `colorScheme` reflects the menu bar appearance the label is hosted in;
+// it only matters for the non-template (red dot) variant, whose glyph
+// monochrome must be picked manually since a non-template image doesn't
+// auto-tint.
 
 import ShiibarCCCore
 import SwiftUI
 
 struct TrayIconView: View {
     let state: TrayIconState
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            WindowGlyphView(glyph: state.glyph, size: 16)
-                .padding(.top, 2)
-
-            if state.hasUnreviewedDot {
-                Circle()
-                    .fill(Color.white.opacity(0.9))
-                    .frame(width: 8, height: 8)
-                    .overlay(
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 6, height: 6)
-                    )
-                    .offset(x: 3, y: -2)
-            }
-        }
-        .opacity(state.dim)
-        .frame(width: 22, height: 18)
+        Image(nsImage: TrayIconRenderer.render(state: state, darkMenuBar: colorScheme == .dark))
     }
 }
