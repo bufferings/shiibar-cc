@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shiibar メニューバー確定デザイン</title>
+<style>
+  :root {
+    --bg: #f2f2f4; --surface: #fff; --text: #1d1d1f; --text2: #6e6e73; --line: #d9d9de;
+    --accent: #b45309;
+    --mbar-bg: rgba(250,250,252,.92); --mbar-text: #1d1d1f; --tray-fill: #dfdfe3;
+    --menu-bg: rgba(252,252,254,.97); --menu-text: #1d1d1f; --menu-text2: #7c7c82;
+    --menu-sep: rgba(0,0,0,.08); --menu-hover: #3478f6;
+    --menu-shadow: 0 10px 34px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.12);
+    --st-blocked: #e5484d; --st-working: #e8a10e; --st-done: #2ea043; --st-idle: #9b9ba1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171719; --surface: #232326; --text: #ededf0; --text2: #9b9ba3; --line: #38383d;
+      --accent: #e8a10e;
+      --mbar-bg: rgba(38,38,42,.94); --mbar-text: #f2f2f5; --tray-fill: #3b3b40;
+      --menu-bg: rgba(44,44,48,.97); --menu-text: #f2f2f5; --menu-text2: #a5a5ad;
+      --menu-sep: rgba(255,255,255,.1);
+      --menu-shadow: 0 12px 40px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.14);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.65;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+  .eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 10px; }
+  h1 { font-size: 27px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 8px; }
+  h2 { font-size: 19px; letter-spacing: -.01em; margin: 44px 0 14px; }
+  p.lede { color: var(--text2); margin: 0 0 8px; max-width: 46em; }
+  .note { font-size: 13px; color: var(--text2); }
+
+  .mock { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .mock-label { font-size: 11px; letter-spacing: .08em; color: var(--text2); margin: 2px 2px -8px; }
+  .mbar { display: flex; align-items: center; justify-content: flex-end; background: var(--mbar-bg); color: var(--mbar-text);
+    border-radius: 8px; padding: 0 12px; height: 30px; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,.12); overflow-x: auto; }
+  .mitem { padding: 0 9px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; height: 100%; }
+  .mitem.tray { background: rgba(127,127,127,.22); border-radius: 5px; height: 24px; }
+  .mitem.dim { opacity: .55; }
+  .mclock { font-variant-numeric: tabular-nums; }
+
+  .icdots { position: relative; display: inline-block; width: 21px; height: 21px; vertical-align: middle; }
+  .icdots .frame { position: absolute; inset: 3.5px; border: 1.2px solid rgba(128,128,128,.55); border-radius: 50%; }
+  .vdot { position: absolute; width: 7px; height: 7px; border-radius: 50%; }
+  .vdot.off { background: var(--tray-fill); border: 1.4px solid rgba(128,128,128,.65); }
+  .vdot.pn { top: 0; left: 50%; transform: translateX(-50%); }
+  .vdot.pe { right: 0; top: 50%; transform: translateY(-50%); }
+  .vdot.ps { bottom: 0; left: 50%; transform: translateX(-50%); }
+  .vdot.pw { left: 0; top: 50%; transform: translateY(-50%); }
+
+  .menu { width: 320px; max-width: 100%; background: var(--menu-bg); color: var(--menu-text); border-radius: 11px; padding: 5px;
+    box-shadow: var(--menu-shadow); font-size: 13px; }
+  .mi { display: flex; align-items: flex-start; gap: 9px; padding: 7px 10px; border-radius: 7px; }
+  .mi .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; margin-top: 4px; }
+  .mi .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi .sub { display: block; font-size: 11px; color: var(--menu-text2); line-height: 1.35; }
+  .mi.hover { background: var(--menu-hover); color: #fff; }
+  .mi.hover .sub { color: rgba(255,255,255,.75); }
+  .msep { height: 1px; background: var(--menu-sep); margin: 5px 10px; }
+  .back { font-size: 12.5px; color: var(--menu-text2); padding: 5px 10px; }
+  .b { background: var(--st-blocked); } .w { background: var(--st-working); }
+  .d { background: var(--st-done); } .i { background: var(--st-idle); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: none; }
+  th { font-size: 12px; color: var(--text2); font-weight: 600; }
+  td .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+  ul { margin: 8px 0; padding-left: 1.4em; }
+  li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">shiibar — 確定デザイン(2026-07-04 決定)</div>
+  <h1>メニューバー表示仕様</h1>
+  <p class="lede">見た目の正はこのファイル。挙動(状態モデル・通知・接続)の正は DESIGN.md §4.5。</p>
+
+  <h2>トレイ: 円の枠線 + 上下左右 4 ランプ(点灯 / 消灯式)</h2>
+  <table>
+    <tr><th>位置</th><th>状態</th><th>点灯色</th><th>意味</th></tr>
+    <tr><td>上</td><td>blocked</td><td><span class="sw b"></span>赤</td><td>許可・入力待ち(ユーザーの番)が 1 台以上いる</td></tr>
+    <tr><td>右</td><td>working</td><td><span class="sw w"></span>黄</td><td>実行中が 1 台以上いる</td></tr>
+    <tr><td>下</td><td>done</td><td><span class="sw d"></span>緑</td><td>完了直後(結果を見てほしい)が 1 台以上いる</td></tr>
+    <tr><td>左</td><td>idle</td><td><span class="sw i"></span>灰</td><td>待機中が 1 台以上いる</td></tr>
+  </table>
+  <ul>
+    <li>該当エージェントがいれば<strong>色で点灯</strong>、いなければ<strong>輪郭線のみ(消灯)</strong>。件数は表現しない</li>
+    <li>アイコンは<strong>塗りなしの円形の枠線のみ</strong>(内側は背景そのまま)。塗りがないため
+      idle の灰ランプと混ざらない。ランプは枠線の上下左右に<strong>直接接続する</strong>(ランプと枠線の間に隙間は入れない)</li>
+    <li>エージェントが 1 台もいないときは <strong>4 つとも消灯</strong>。構造は常に不変で、読み取るのは「どのランプが点いているか」だけ</li>
+  </ul>
+
+  <div class="mock">
+    <div class="mock-label">4 状態すべて点灯</div>
+    <div class="mbar">
+      <span class="mitem tray"><span class="icdots"><span class="frame"></span><span class="vdot pn b"></span><span class="vdot pe w"></span><span class="vdot ps d"></span><span class="vdot pw i"></span></span></span>
+      <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem mclock">7月4日(土) 10:42</span>
+    </div>
+    <div class="mock-label">working + done のみ(上・左は消灯)</div>
+    <div class="mbar">
+      <span class="mitem tray"><span class="icdots"><span class="frame"></span><span class="vdot pn off"></span><span class="vdot pe w"></span><span class="vdot ps d"></span><span class="vdot pw off"></span></span></span>
+      <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem mclock">7月4日(土) 10:42</span>
+    </div>
+    <div class="mock-label">全 idle(左だけ点灯)/ エージェントなし(全消灯)</div>
+    <div class="mbar">
+      <span class="mitem tray"><span class="icdots"><span class="frame"></span><span class="vdot pn off"></span><span class="vdot pe off"></span><span class="vdot ps off"></span><span class="vdot pw i"></span></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="icdots"><span class="frame"></span><span class="vdot pn off"></span><span class="vdot pe off"></span><span class="vdot ps off"></span><span class="vdot pw off"></span></span></span>
+      <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem mclock">7月4日(土) 10:42</span>
+    </div>
+  </div>
+
+  <h2>ドロップダウン: 作業内容の副題付き 2 行</h2>
+  <ul>
+    <li>1 行目 = ラベル(cwd。ホーム配下は <code>~</code> 起点で末尾 2 要素)</li>
+    <li>2 行目 = 状態 + 経過時間 + 作業内容。blocked は <strong>許可内容(Notification の message)</strong>、それ以外は<strong>最後の依頼文の先頭(UserPromptSubmit の prompt、80 文字)</strong></li>
+    <li>並び順: blocked → working → done → idle。グループ内は登場順で安定。先頭に「← 戻る」</li>
+  </ul>
+  <div class="mock">
+    <div class="menu">
+      <div class="back">← 戻る</div>
+      <div class="msep"></div>
+      <div class="mi hover"><span class="dot b"></span><span class="grow">shiibar/main<span class="sub">許可待ち 2分 — Bash: cargo test --workspace</span></span></div>
+      <div class="msep"></div>
+      <div class="mi"><span class="dot w"></span><span class="grow">shiibar/wt-focus<span class="sub">実行中 12分 — focus の AppleScript を実装して</span></span></div>
+      <div class="mi"><span class="dot w"></span><span class="grow">blog/draft-post<span class="sub">実行中 34秒 — 記事の誤字を直して</span></span></div>
+      <div class="mi"><span class="dot d"></span><span class="grow">sandbox/experiment<span class="sub">完了 5分前 — hook ペイロードのログ採取を試す</span></span></div>
+      <div class="mi"><span class="dot i"></span><span class="grow">dotfiles<span class="sub">待機 1時間</span></span></div>
+    </div>
+  </div>
+
+  <h2>実装ノート</h2>
+  <ul>
+    <li>トレイは NSImage 合成: 円の枠線を描き、その上に上下左右 4 ランプを描く(点灯 = 円を塗り、消灯 = リングを線で。ランプが枠線を覆うので、くり抜き処理は不要)。状態変化のたびに描き直して <code>NSStatusItem</code> に渡す</li>
+    <li>ダーク / ライト両テーマで描き分ける(このページをテーマ切り替えで見比べたのと同じ配色方針)</li>
+    <li><strong>実機確認項目</strong>: ランプ実寸(7px 前後を想定)・消灯リングと枠線の濃さ・太さ</li>
+  </ul>
+  <p class="note">検討過程(5 パターン比較)はセッションのモックアーティファクトにあり、リポジトリにはこの確定版のみを置く。</p>
+</div>
+</body>
+</html>
