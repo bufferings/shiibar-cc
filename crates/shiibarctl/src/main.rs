@@ -1,123 +1,184 @@
 //! shiibarctl: CLI for shiibard (report / list / wait / watch / focus / ...).
 //!
-//! Spec: docs/DESIGN.md §4.4. M1 implements only the `report` subcommand;
-//! everything else is out of scope until M2 (no stubs either, per the M1
-//! task brief).
+//! Spec: docs/DESIGN.md §4.4. Thin by design: argument parsing and wiring
+//! the real environment (socket path, `$HOME/.claude/settings.json`,
+//! `$PATH`, the real `osascript` runner) into `shiibarctl`'s library
+//! functions, which do the actual work and are what the test suite drives.
 
-use shiibar_proto::{codec, extract, HookEvent, Request, ReportPayload};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use shiibar_client::iterm::Osascript;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-/// hooks 送信タイムアウト (§9).
-const SEND_TIMEOUT: Duration = Duration::from_secs(1);
+use std::time::Duration;
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        Some("report") => {
-            // §4.4: `report` is the one exception to normal exit codes — it
-            // must always exit 0 (daemon absent, timeout, malformed input),
-            // so hooks are never blocked or shown a hook "failure".
-            run_report(args.next());
-            std::process::exit(0);
-        }
+    let cmd = args.next();
+    let rest: Vec<String> = args.collect();
+
+    // §4.4: `report` is the sole exception to the exit-code rules — always
+    // exit 0, even on failure, so hooks are never blocked.
+    if cmd.as_deref() == Some("report") {
+        shiibarctl::report_cmd::run(
+            rest.into_iter().next(),
+            &shiibar_client::resolve_socket_path(),
+        );
+        std::process::exit(0);
+    }
+
+    let code = match cmd.as_deref() {
+        Some("list") => cmd_list(&rest),
+        Some("wait") => cmd_wait(&rest),
+        Some("watch") => cmd_watch(&rest),
+        Some("focus") => cmd_focus(&rest),
+        Some("focused") => cmd_focused(&rest),
+        Some("remove") => cmd_remove(&rest),
+        Some("doctor") => cmd_doctor(&rest),
         _ => {
-            eprintln!("usage: shiibarctl report <event>");
-            eprintln!("(other subcommands are not implemented yet — see docs/tasks/M1.md)");
-            std::process::exit(1);
+            print_usage();
+            1
+        }
+    };
+    std::process::exit(code);
+}
+
+fn print_usage() {
+    eprintln!("usage: shiibarctl <report|list|wait|watch|focus|focused|remove|doctor> ...");
+    eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
+}
+
+fn current_dir_or_dot() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn cmd_list(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
+    let report = shiibarctl::list_cmd::run_list(&shiibar_client::resolve_socket_path(), json);
+    if !report.stdout.is_empty() {
+        println!("{}", report.stdout);
+    }
+    if let Some(e) = report.stderr {
+        eprintln!("{e}");
+    }
+    report.exit_code
+}
+
+fn cmd_wait(args: &[String]) -> i32 {
+    let mut selector = None;
+    let mut status_arg = None;
+    let mut timeout = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--status" => status_arg = it.next().cloned(),
+            "--timeout" => {
+                timeout = it
+                    .next()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(Duration::from_secs)
+            }
+            other if selector.is_none() => selector = Some(other.to_string()),
+            other => {
+                eprintln!("shiibarctl wait: unexpected argument '{other}'");
+                return 1;
+            }
         }
     }
-}
-
-fn run_report(event_arg: Option<String>) {
-    let Some(event_arg) = event_arg else {
-        eprintln!("shiibarctl report: missing <event> argument");
-        return;
+    let (Some(selector), Some(status_arg)) = (selector, status_arg) else {
+        eprintln!(
+            "usage: shiibarctl wait <selector> --status idle|working|blocked|done [--timeout SEC]"
+        );
+        return 1;
     };
-    let event = match parse_event(&event_arg) {
-        Some(e) => e,
-        None => {
-            eprintln!("shiibarctl report: unknown event '{event_arg}'");
-            return;
-        }
+    let Some(want) = shiibarctl::wait_cmd::parse_status(&status_arg) else {
+        eprintln!(
+            "shiibarctl wait: unknown status '{status_arg}' (expected idle|working|blocked|done)"
+        );
+        return 1;
     };
 
-    let mut raw_stdin = String::new();
-    if let Err(e) = std::io::stdin().read_to_string(&mut raw_stdin) {
-        eprintln!("shiibarctl report: failed to read stdin: {e}");
-        return;
+    let (code, err) = shiibarctl::wait_cmd::run_wait(
+        &shiibar_client::resolve_socket_path(),
+        &selector,
+        current_dir_or_dot(),
+        want,
+        timeout,
+    );
+    if let Some(e) = err {
+        eprintln!("{e}");
     }
-    let raw: serde_json::Value = match serde_json::from_str(&raw_stdin) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("shiibarctl report: invalid hook JSON on stdin: {e}");
-            return;
-        }
+    code
+}
+
+fn cmd_watch(_args: &[String]) -> i32 {
+    shiibarctl::watch_cmd::run_watch(&shiibar_client::resolve_socket_path(), std::io::stdout())
+}
+
+fn cmd_focus(args: &[String]) -> i32 {
+    let Some(selector) = args.first() else {
+        eprintln!("usage: shiibarctl focus <selector>|-");
+        return 1;
     };
-
-    // Target generation rule (§4.1): $ITERM_SESSION_ID verbatim, else
-    // `session:<session_id>`.
-    let iterm_session_id = std::env::var("ITERM_SESSION_ID").ok();
-    let now = now_epoch_secs();
-
-    let payload = match extract::build_report(event, &raw, iterm_session_id.as_deref(), now) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("shiibarctl report: {e}");
-            return;
-        }
+    let runner = Osascript;
+    let socket_path = shiibar_client::resolve_socket_path();
+    let last_focus_path = shiibar_client::resolve_last_focus_path();
+    let report = if selector == "-" {
+        shiibarctl::focus_cmd::run_focus_back(&socket_path, &last_focus_path, &runner)
+    } else {
+        shiibarctl::focus_cmd::run_focus(
+            &socket_path,
+            &last_focus_path,
+            selector,
+            current_dir_or_dot(),
+            &runner,
+        )
     };
-
-    // From here on, failures (no daemon, timeout, broken pipe, ...) are
-    // expected/routine and must stay silent (§4.1: hooks must not be
-    // disturbed by shiibard being absent).
-    send_with_timeout(payload);
+    if let Some(m) = report.message {
+        eprintln!("{m}");
+    }
+    report.exit_code
 }
 
-fn parse_event(s: &str) -> Option<HookEvent> {
-    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+fn cmd_focused(_args: &[String]) -> i32 {
+    let runner = Osascript;
+    let report = shiibarctl::focus_cmd::run_focused(&runner);
+    if let Some(t) = &report.target {
+        println!("{t}");
+    }
+    if let Some(m) = &report.message {
+        eprintln!("{m}");
+    }
+    report.exit_code
 }
 
-fn now_epoch_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+fn cmd_remove(args: &[String]) -> i32 {
+    let Some(selector) = args.first() else {
+        eprintln!("usage: shiibarctl remove <selector>");
+        return 1;
+    };
+    let (code, err) = shiibarctl::remove_cmd::run_remove(
+        &shiibar_client::resolve_socket_path(),
+        selector,
+        current_dir_or_dot(),
+    );
+    if let Some(e) = err {
+        eprintln!("{e}");
+    }
+    code
 }
 
-fn socket_path() -> PathBuf {
-    let root = std::env::var_os("SHIIBAR_STATE_DIR")
+fn cmd_doctor(_args: &[String]) -> i32 {
+    let runner = Osascript;
+    let settings_path = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            home.join(".local/state/shiibar")
-        });
-    root.join("shiibard.sock")
-}
-
-/// Best-effort, bounded to ~1s total (§9). Connecting to a Unix socket
-/// either succeeds or fails near-instantly, so a real hang would only come
-/// from a stalled daemon; run the attempt on a side thread and give up
-/// (silently) once the deadline passes, regardless of outcome.
-fn send_with_timeout(payload: ReportPayload) {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
-        let _ = tx.send(try_send(payload));
-    });
-    let _ = rx.recv_timeout(SEND_TIMEOUT);
-    // Not joined on purpose: if try_send is still stuck past the deadline,
-    // waiting on it would defeat the whole point of the timeout. The
-    // process exits right after this call, tearing the thread down with it.
-    drop(handle);
-}
-
-fn try_send(payload: ReportPayload) -> std::io::Result<()> {
-    let mut stream = UnixStream::connect(socket_path())?;
-    let line = codec::encode_line(&Request::Report(payload)).map_err(std::io::Error::other)?;
-    stream.write_all(line.as_bytes())?;
-    Ok(())
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude/settings.json");
+    let report = shiibarctl::doctor_cmd::run_doctor(
+        &shiibar_client::resolve_socket_path(),
+        &settings_path,
+        std::env::var_os("PATH").as_deref(),
+        &runner,
+    );
+    for line in &report.lines {
+        println!("{line}");
+    }
+    report.exit_code
 }

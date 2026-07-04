@@ -17,10 +17,17 @@ fn bin() -> &'static str {
 }
 
 fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(name)
 }
 
-fn run_report(event: &str, stdin_bytes: &[u8], state_dir: &std::path::Path, iterm_session_id: Option<&str>) -> (i32, Duration) {
+fn run_report(
+    event: &str,
+    stdin_bytes: &[u8],
+    state_dir: &std::path::Path,
+    iterm_session_id: Option<&str>,
+) -> (i32, Duration) {
     let mut cmd = Command::new(bin());
     cmd.arg("report")
         .arg(event)
@@ -83,7 +90,11 @@ fn exits_0_when_event_argument_is_missing() {
 }
 
 #[test]
-fn exits_nonzero_for_an_unimplemented_subcommand() {
+fn other_subcommands_exit_nonzero_when_the_daemon_is_absent() {
+    // `list` is implemented (M2), but with no daemon listening at
+    // SHIIBAR_STATE_DIR it must exit 1 (§4.4: "接続・内部エラー
+    // (daemon不在含む)") rather than 0 — `report`'s always-exit-0 rule is
+    // the one deliberate exception (§4.4).
     let dir = tempfile::tempdir().unwrap();
     let status = Command::new(bin())
         .arg("list")
@@ -92,7 +103,7 @@ fn exits_nonzero_for_an_unimplemented_subcommand() {
         .stderr(Stdio::null())
         .status()
         .unwrap();
-    assert_ne!(status.code(), Some(0), "M1 only implements `report`");
+    assert_ne!(status.code(), Some(0));
 }
 
 #[test]
@@ -156,5 +167,8 @@ fn falls_back_to_session_target_without_iterm_session_id() {
     let shiibar_proto::Request::Report(payload) = request else {
         panic!("expected a report request");
     };
-    assert_eq!(payload.target, "session:11111111-1111-1111-1111-111111111111");
+    assert_eq!(
+        payload.target,
+        "session:11111111-1111-1111-1111-111111111111"
+    );
 }
