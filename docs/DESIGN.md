@@ -358,7 +358,8 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   未知の event / status は無視する(前方互換)
 - **ドロップダウン**: グループ見出し **Waiting / Working / Idle**(トレイと同形の窓アイコン付き。空グループは非表示)
   の下に、グループごとのカードで行を並べる。行は 2 行 — **1 行目 = 作業内容**(waiting は `message`(許可内容 /
-  `waitingFor`)、それ以外は `task`(最後の依頼文)。どちらも無ければラベルを昇格。§3.6)、**2 行目 = ラベル + 経過時間**。
+  `waitingFor`)、それ以外は `task`(最後の依頼文)。どちらも無ければラベルを昇格。§3.6)、**2 行目 = ラベル + 経過時間**
+  (開いた時点の値で固定。毎秒の更新はしない — 開き直せば最新値になる)。
   未読は 1 行目太字 + 赤ドット。並び順は waiting → working → idle、unreviewed のものを各グループ内で上に
   (開くたびに並びが安定)。クリックで `shiibar-cc focus <target>` を subprocess 実行し、**ドロップダウンを閉じる**。
   `agent_removed` で行を消す。

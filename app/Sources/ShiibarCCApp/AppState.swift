@@ -14,10 +14,15 @@ final class AppState: ObservableObject {
     @Published private(set) var connected = false
     @Published var focusTCCWarning = false
     @Published var muted: Bool
+    /// Elapsed-time base for the dropdown (DESIGN.md §4.5): captured when
+    /// the dropdown opens, fixed while it stays open, refreshed on reopen.
+    /// See `observeDropdownOpen` for the open signal.
+    @Published private(set) var dropdownOpenedAt: Int64 = Int64(Date().timeIntervalSince1970)
 
     let notificationManager: NotificationManager
     private let lifecycle: DaemonLifecycleManager
     private let helpersDirectory: URL?
+    private var dropdownOpenObserver: NSObjectProtocol?
 
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
 
@@ -37,6 +42,49 @@ final class AppState: ObservableObject {
         notificationManager.onFocusRequested = { [weak self] target in
             self?.focus(target: target)
         }
+        observeDropdownOpen()
+    }
+
+    deinit {
+        if let observer = dropdownOpenObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Refresh `dropdownOpenedAt` every time the dropdown panel opens.
+    ///
+    /// The open signal is `NSWindow.didBecomeKeyNotification`: the
+    /// MenuBarExtra window-style panel becomes the key window on every
+    /// open (it's an interactive panel — that's also why clicking outside
+    /// closes it: it resigns key), and key status is granted anew per
+    /// open, so this fires per open by AppKit window-lifecycle semantics.
+    /// `onAppear` on the dropdown view is NOT reliable here: the hosted
+    /// view stays alive across open/close (verified on-device — that's
+    /// what froze the old render-time elapsed values on reopen), so it may
+    /// fire only once at launch. NSWindow notifications are per-process;
+    /// the only other window this app owns is the status item's host
+    /// (class `NSStatusBarWindow`), which is filtered out — the same
+    /// assumption `dismissDropdown` relies on.
+    private func observeDropdownOpen() {
+        dropdownOpenObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow,
+                  !window.className.contains("NSStatusBarWindow"),
+                  let self else { return }
+            Task { @MainActor in
+                self.captureDropdownOpenTime()
+            }
+        }
+    }
+
+    /// Also called from the dropdown's `onAppear` as a belt-and-braces
+    /// second trigger (harmless if both fire on the same open; covers a
+    /// macOS version whose panel mounts the view fresh per open).
+    func captureDropdownOpenTime() {
+        dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
     }
 
     func start() {

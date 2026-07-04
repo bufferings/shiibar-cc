@@ -24,38 +24,40 @@ struct DropdownView: View {
                 WarningRow(text: "Focus failed: automation permission needed (run \"shiibar-cc doctor\")")
             }
 
-            // The agent list renders inside a TimelineView so the "label ·
-            // elapsed" second lines stay live: without it, this body is only
-            // re-evaluated when AppState publishes a change, so the elapsed
-            // strings froze at the last state mutation (seen on-device —
-            // reopening the dropdown doesn't re-render either, since the
-            // hosted view stays alive). Rows are recomputed from each
-            // agent's `since` epoch against the timeline's date on every
-            // tick. Cadence = 1s because the elapsed format has 1-second
-            // granularity below one minute ("5s"), and the schedule only
-            // ticks while the dropdown is actually visible.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let groups = state.groups(now: Int64(context.date.timeIntervalSince1970))
-                if groups.isEmpty {
-                    Text("No agents")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(groups) { group in
-                                GroupSection(group: group, state: state)
-                            }
+            // Elapsed times are computed against `dropdownOpenedAt` — the
+            // instant this open of the dropdown was captured (DESIGN.md
+            // §4.5: fixed while open, no per-second ticking, fresh on
+            // reopen). The capture is @Published, so the reopen refresh
+            // re-renders these rows; agent changes while open still render
+            // immediately via `agents`, only the elapsed base stays put
+            // (Grouping's max(0, now - since) clamps rows whose transition
+            // happens after the capture).
+            let groups = state.groups(now: state.dropdownOpenedAt)
+            if groups.isEmpty {
+                Text("No agents")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(groups) { group in
+                            GroupSection(group: group, state: state)
                         }
                     }
-                    .frame(maxHeight: 360)
                 }
+                .frame(maxHeight: 360)
             }
         }
         .padding(.vertical, 6)
         .frame(width: 340)
+        // Belt and braces for the per-open capture: the primary signal is
+        // NSWindow.didBecomeKeyNotification (see AppState.observeDropdownOpen
+        // — the hosted view stays alive across open/close, so onAppear may
+        // fire only once at launch). If some macOS version does remount the
+        // view per open, both triggers land on the same second — harmless.
+        .onAppear { state.captureDropdownOpenTime() }
     }
 }
 
