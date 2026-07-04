@@ -12,8 +12,7 @@ pub fn parse_status(s: &str) -> Option<Status> {
     match s {
         "idle" => Some(Status::Idle),
         "working" => Some(Status::Working),
-        "blocked" => Some(Status::Blocked),
-        "done" => Some(Status::Done),
+        "waiting" => Some(Status::Waiting),
         _ => None,
     }
 }

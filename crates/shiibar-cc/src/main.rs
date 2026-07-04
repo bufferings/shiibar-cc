@@ -30,6 +30,7 @@ fn main() {
         Some("watch") => cmd_watch(&rest),
         Some("focus") => cmd_focus(&rest),
         Some("focused") => cmd_focused(&rest),
+        Some("reconcile") => cmd_reconcile(&rest),
         Some("remove") => cmd_remove(&rest),
         Some("doctor") => cmd_doctor(&rest),
         _ => {
@@ -41,7 +42,9 @@ fn main() {
 }
 
 fn print_usage() {
-    eprintln!("usage: shiibar-cc <report|list|wait|watch|focus|focused|remove|doctor> ...");
+    eprintln!(
+        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|doctor> ..."
+    );
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
 
@@ -84,13 +87,13 @@ fn cmd_wait(args: &[String]) -> i32 {
     }
     let (Some(selector), Some(status_arg)) = (selector, status_arg) else {
         eprintln!(
-            "usage: shiibar-cc wait <selector> --status idle|working|blocked|done [--timeout SEC]"
+            "usage: shiibar-cc wait <selector> --status idle|working|waiting [--timeout SEC]"
         );
         return 1;
     };
     let Some(want) = shiibar_cc::wait_cmd::parse_status(&status_arg) else {
         eprintln!(
-            "shiibar-cc wait: unknown status '{status_arg}' (expected idle|working|blocked|done)"
+            "shiibar-cc wait: unknown status '{status_arg}' (expected idle|working|waiting)"
         );
         return 1;
     };
@@ -147,6 +150,22 @@ fn cmd_focused(_args: &[String]) -> i32 {
         eprintln!("{m}");
     }
     report.exit_code
+}
+
+fn cmd_reconcile(_args: &[String]) -> i32 {
+    let claude_runner = shiibar_cc_client::RealClaudeAgents;
+    let ps_runner = shiibar_cc_client::iterm::RealPs;
+    let script_runner = Osascript;
+    let (code, err) = shiibar_cc::reconcile_cmd::run_reconcile(
+        &shiibar_cc_client::resolve_socket_path(),
+        &claude_runner,
+        &ps_runner,
+        &script_runner,
+    );
+    if let Some(e) = err {
+        eprintln!("{e}");
+    }
+    code
 }
 
 fn cmd_remove(args: &[String]) -> i32 {

@@ -6,11 +6,17 @@ use shiibar_cc_proto::{Agent, Status};
 use std::io::Write;
 use std::path::Path;
 
-/// Internal representation of one tracked agent (§3.2).
+/// Internal representation of one tracked agent (§3.6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentEntry {
     pub target: String,
     pub status: Status,
+    /// Not yet focused since entering the current your-turn state (§3.2).
+    /// `#[serde(default)]` so a pre-respec `state.json` (no `unreviewed`
+    /// field at all) still loads instead of failing (M1M2 respec brief:
+    /// "old state.json must not crash the daemon").
+    #[serde(default)]
+    pub unreviewed: bool,
     pub session_id: String,
     pub cwd: String,
     /// Epoch seconds the entry entered its *current* status.
@@ -18,10 +24,11 @@ pub struct AgentEntry {
     /// Epoch seconds of the last report received for this target.
     pub last_seen: i64,
     /// First 80 chars of the last `UserPromptSubmit` prompt. Persists
-    /// across status changes (§3.2: "the last ... prompt").
+    /// across status changes (§3.6: "the last ... prompt").
     pub task: Option<String>,
-    /// blocked reason (last Notification message that caused/held blocked).
-    /// Cleared whenever the entry leaves `blocked` (§3.2).
+    /// waiting reason (last Notification message that caused/held waiting,
+    /// or a reconcile's `waitingFor`). Cleared whenever the entry leaves
+    /// `waiting` (§3.6).
     pub message: Option<String>,
 }
 
@@ -30,6 +37,7 @@ impl AgentEntry {
         Agent {
             target: self.target.clone(),
             status: self.status,
+            unreviewed: self.unreviewed,
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             task: self.task.clone(),
@@ -40,11 +48,12 @@ impl AgentEntry {
     }
 
     /// The subset of fields whose change triggers a `status_changed`
-    /// broadcast (§4.2: "whenever any of status / session_id / cwd / task /
-    /// message changes").
-    fn observable(&self) -> (Status, &str, &str, Option<&str>, Option<&str>) {
+    /// broadcast (§4.2: "whenever any of status / unreviewed / session_id /
+    /// cwd / task / message changes").
+    fn observable(&self) -> (Status, bool, &str, &str, Option<&str>, Option<&str>) {
         (
             self.status,
+            self.unreviewed,
             self.session_id.as_str(),
             self.cwd.as_str(),
             self.task.as_deref(),
@@ -101,6 +110,7 @@ mod tests {
         AgentEntry {
             target: target.to_string(),
             status,
+            unreviewed: false,
             session_id: "s".into(),
             cwd: "/c".into(),
             since: 1,
@@ -114,7 +124,7 @@ mod tests {
     fn round_trips_through_save_and_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let agents = vec![entry("a", Status::Blocked), entry("b", Status::Idle)];
+        let agents = vec![entry("a", Status::Waiting), entry("b", Status::Idle)];
         save(&path, &agents).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded, agents);
@@ -125,6 +135,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("does-not-exist.json");
         assert_eq!(load(&path).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn loads_pre_respec_state_json_without_an_unreviewed_field() {
+        // Migration guarantee (M1M2 respec brief): a state.json written by
+        // the old 4-value-status model (no `unreviewed` key at all) must
+        // still load, defaulting `unreviewed` to false rather than failing.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"agents":[{"target":"a","status":"waiting","session_id":"s","cwd":"/c","since":1,"last_seen":2,"task":null,"message":null}]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert!(!loaded[0].unreviewed);
     }
 
     #[test]
@@ -139,6 +166,14 @@ mod tests {
 
         b.status = a.status;
         a.task = Some("x".into());
+        assert!(a.observably_differs_from(&b));
+    }
+
+    #[test]
+    fn observably_differs_on_unreviewed_flag_alone() {
+        let a = entry("a", Status::Waiting);
+        let mut b = a.clone();
+        b.unreviewed = true;
         assert!(a.observably_differs_from(&b));
     }
 }

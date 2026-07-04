@@ -7,6 +7,7 @@
 pub mod connection;
 pub mod iterm;
 pub mod label;
+pub mod reconcile;
 pub mod selector;
 pub mod wait;
 
@@ -14,6 +15,7 @@ pub use connection::{
     ClientError, resolve_last_focus_path, resolve_socket_path, resolve_state_dir,
 };
 pub use label::format_cwd_label;
+pub use reconcile::{ClaudeAgentsRunner, GatherResult, RealClaudeAgents, gather as gather_reconcile};
 pub use selector::{SelectError, Selector, resolve_selector};
 pub use wait::{WaitError, WaitOutcome, wait as run_wait};
 

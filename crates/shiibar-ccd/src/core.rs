@@ -10,7 +10,10 @@ use crate::transitions::{self, Outcome};
 use crate::{log_debug, log_info};
 use crate::logging::Logger;
 use crate::paths::StateDir;
-use shiibar_cc_proto::{Agent, HookEvent, InfoResponse, ListResponse, ReportPayload, SessionsResponse, Status};
+use shiibar_cc_proto::{
+    Agent, HookEvent, InfoResponse, ListResponse, ReconcileSession, ReportPayload, SessionsResponse, Status,
+};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -202,6 +205,87 @@ impl Core {
             let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                 target: removed.target,
             });
+        }
+    }
+
+    /// Handle `{"cmd":"reconcile","complete":...,"sessions":[...]}` (§3.5).
+    /// `sessions` is the client's gathered live list from `claude agents`
+    /// (translated to shiibar's status vocabulary and matched to iTerm2
+    /// targets already, §3.5); `complete` says whether the client's iTerm2
+    /// scan was trustworthy enough to prune from (§7-1: a partial/failed
+    /// scan must never be treated as "this session is gone").
+    pub fn handle_reconcile(&mut self, complete: bool, sessions: &[ReconcileSession]) {
+        let now = self.clock.now();
+        let mut broadcasts = Vec::new();
+        let mut changed = false;
+
+        for session in sessions {
+            let idx = self.find(&session.target);
+            let existing = idx.map(|i| &self.agents[i]);
+            let Outcome::Updated { entry, previous } =
+                transitions::apply_reconcile_session(existing, session, now)
+            else {
+                unreachable!("apply_reconcile_session never returns Ignored/Removed");
+            };
+            changed = true;
+
+            match &previous {
+                None => log_info!(
+                    self.logger,
+                    "registered target={} status={:?} (reconcile)",
+                    entry.target,
+                    entry.status
+                ),
+                Some(prev) if prev.status != entry.status => log_info!(
+                    self.logger,
+                    "transition target={} {:?} -> {:?} (reconcile)",
+                    entry.target,
+                    prev.status,
+                    entry.status
+                ),
+                Some(_) => {}
+            }
+
+            let should_broadcast = match &previous {
+                None => true,
+                Some(prev) => entry.observably_differs_from(prev),
+            };
+            match idx {
+                Some(i) => self.agents[i] = entry.clone(),
+                None => self.agents.push(entry.clone()),
+            }
+            if should_broadcast {
+                broadcasts.push(BroadcastEvent::StatusChanged(entry.to_wire()));
+            }
+        }
+
+        if complete {
+            let live: HashSet<&str> = sessions.iter().map(|s| s.target.as_str()).collect();
+            let mut i = 0;
+            while i < self.agents.len() {
+                if live.contains(self.agents[i].target.as_str()) {
+                    i += 1;
+                    continue;
+                }
+                let removed = self.agents.remove(i);
+                log_info!(
+                    self.logger,
+                    "removed target={} (reconcile prune, was {:?})",
+                    removed.target,
+                    removed.status
+                );
+                broadcasts.push(BroadcastEvent::AgentRemoved {
+                    target: removed.target,
+                });
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.persist_state();
+        }
+        for event in broadcasts {
+            let _ = self.events_tx.send(event);
         }
     }
 

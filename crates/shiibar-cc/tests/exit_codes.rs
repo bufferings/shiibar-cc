@@ -48,7 +48,7 @@ fn wait_exits_1_when_daemon_absent() {
     let dir = tempdir();
     let out = shiibar_cc(
         dir.path(),
-        &["wait", "some-target", "--status", "done", "--timeout", "2"],
+        &["wait", "some-target", "--status", "waiting", "--timeout", "2"],
     );
     assert_eq!(out.code, 1);
 }
@@ -76,7 +76,7 @@ fn doctor_exits_0_when_daemon_is_reachable() {
 fn wait_exits_0_when_already_in_the_wanted_status() {
     let dir = tempdir();
     let daemon = TestDaemon::start(dir.path());
-    let mut payload = report_payload(HookEvent::Notification, "t-blocked", "/proj/a", 1);
+    let mut payload = report_payload(HookEvent::Notification, "t-waiting", "/proj/a", 1);
     payload.notification_type = Some(NotificationType::PermissionPrompt);
     payload.message = Some("Bash: rm -rf /".to_string());
     daemon.report(payload);
@@ -84,7 +84,7 @@ fn wait_exits_0_when_already_in_the_wanted_status() {
 
     let out = shiibar_cc(
         &daemon.state_dir,
-        &["wait", "t-blocked", "--status", "blocked", "--timeout", "5"],
+        &["wait", "t-waiting", "--status", "waiting", "--timeout", "5"],
     );
     assert_eq!(out.code, 0, "stderr={}", out.stderr);
 }
@@ -99,7 +99,7 @@ fn wait_exits_124_on_timeout() {
             "wait",
             "never-appears",
             "--status",
-            "done",
+            "waiting",
             "--timeout",
             "1",
         ],
@@ -123,7 +123,7 @@ fn wait_exits_2_when_the_target_is_removed_while_waiting() {
         });
         shiibar_cc(
             &daemon.state_dir,
-            &["wait", "t-removed", "--status", "done", "--timeout", "5"],
+            &["wait", "t-removed", "--status", "waiting", "--timeout", "5"],
         )
     });
     assert_eq!(out.code, 2, "stderr={}", out.stderr);

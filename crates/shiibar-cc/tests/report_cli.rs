@@ -135,7 +135,9 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     let shiibar_cc_proto::Request::Report(payload) = request else {
         panic!("expected a report request, got {request:?}");
     };
-    assert_eq!(payload.target, "w0t0p0:D2DA6A1F-TEST");
+    // Target is the bare UUID half only (§2/§4.1) — not the whole
+    // $ITERM_SESSION_ID string, so it matches what iterm_targets derives.
+    assert_eq!(payload.target, "D2DA6A1F-TEST");
     assert_eq!(payload.event, shiibar_cc_proto::HookEvent::UserPromptSubmit);
     assert_eq!(
         payload.prompt.as_deref(),
@@ -144,31 +146,42 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     assert_eq!(payload.session_id, "11111111-1111-1111-1111-111111111111");
 }
 
+/// §8.11: outside iTerm2 (no `$ITERM_SESSION_ID`), there is no fallback
+/// target — the report is dropped before ever touching the socket. Still
+/// exits 0 (this command's always-succeed contract, §4.4).
 #[test]
-fn falls_back_to_session_target_without_iterm_session_id() {
+fn drops_the_report_without_connecting_when_there_is_no_iterm_session_id() {
     let dir = tempfile::tempdir().unwrap();
     let sock_path = dir.path().join("shiibar-ccd.sock");
     let listener = UnixListener::bind(&sock_path).unwrap();
-
-    let accept_thread = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept one connection");
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
-        reader.read_line(&mut line).expect("read line");
-        line
-    });
+    listener.set_nonblocking(true).unwrap();
 
     let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
     let (code, _) = run_report("SessionStart", &stdin, dir.path(), None);
     assert_eq!(code, 0);
 
-    let line = accept_thread.join().unwrap();
-    let request: shiibar_cc_proto::Request = shiibar_cc_proto::codec::decode_line(&line).unwrap();
-    let shiibar_cc_proto::Request::Report(payload) = request else {
-        panic!("expected a report request");
-    };
-    assert_eq!(
-        payload.target,
-        "session:11111111-1111-1111-1111-111111111111"
-    );
+    // Bounded, but generous, window to prove a connection *never* arrives —
+    // not a synchronization mechanism, just there to catch a regression
+    // reliably rather than racing the child process.
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut connected = false;
+    while Instant::now() < deadline {
+        if listener.accept().is_ok() {
+            connected = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!connected, "a dropped report must never connect to the socket at all");
+}
+
+/// Same drop rule, but for an `$ITERM_SESSION_ID` that doesn't contain the
+/// documented `wNtNpN:UUID` `:` separator at all — treated the same as
+/// absent rather than guessed at (§4.1).
+#[test]
+fn drops_the_report_when_iterm_session_id_has_no_colon() {
+    let dir = tempfile::tempdir().unwrap();
+    let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
+    let (code, _) = run_report("SessionStart", &stdin, dir.path(), Some("not-the-right-shape"));
+    assert_eq!(code, 0);
 }

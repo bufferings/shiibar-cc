@@ -324,7 +324,7 @@ mod tests {
         );
         assert_eq!(report.exit_code, exitcode::OK);
         let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "w0t0p0:BEFORE-UUID");
+        assert_eq!(saved, "BEFORE-UUID");
     }
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
         // cd -/toggle semantics: last_focus now points at where we jumped
         // *from* this time, ready for a subsequent `focus -` to swap back.
         let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "w0t0p0:CURRENT-UUID");
+        assert_eq!(saved, "CURRENT-UUID");
     }
 
     // ---- run_focus: exact-match target bypasses the daemon entirely
@@ -433,7 +433,7 @@ mod tests {
         let runner = ScriptedRunner::new(vec![out(true, "FOCUSED:UUID-1\n", "")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::OK);
-        assert_eq!(report.target, Some("w0t0p0:UUID-1".to_string()));
+        assert_eq!(report.target, Some("UUID-1".to_string()));
         assert_eq!(report.message, None);
     }
 

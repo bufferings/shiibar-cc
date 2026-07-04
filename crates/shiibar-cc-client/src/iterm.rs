@@ -86,29 +86,33 @@ pub type ItermResult<T> = Result<T, ItermError>;
 // Pure: target <-> UUID
 // ---------------------------------------------------------------------
 
-/// Extract the UUID portion of a target in the `wNtNpN:UUID` shape
-/// (DESIGN.md §7-1, verified 2026-07-04: iTerm2's AppleScript `id of
-/// session` is the bare UUID, and it matches the UUID half of
-/// `$ITERM_SESSION_ID` for a plain — non-tmux — session). Anything else,
-/// including the `session:<id>` fallback target used when
-/// `$ITERM_SESSION_ID` was absent at report time, returns `None`: DESIGN.md
-/// §4.3 calls this out explicitly as "no match", so it's handled here
-/// rather than left to accidentally (mis)match a real session.
+/// Extract the UUID a target refers to (DESIGN.md §2/§4.3). A target is
+/// normally already a bare UUID (that's the wire format since the M1M2
+/// respec: `shiibar-cc report` and `iterm_targets` both derive the *same*
+/// bare UUID for the same session, §2). The `wNtNpN:UUID` shape (the raw
+/// `$ITERM_SESSION_ID` value, §7-1) is also accepted — for pre-respec
+/// callers and defensiveness — by taking the part after the `:`; anything
+/// with a `:` that *doesn't* match that shape returns `None` ("no match"),
+/// rather than being guessed at.
 pub fn extract_uuid(target: &str) -> Option<&str> {
-    let (prefix, uuid) = target.split_once(':')?;
-    if uuid.is_empty() {
-        return None;
+    match target.split_once(':') {
+        None => (!target.is_empty()).then_some(target),
+        Some((prefix, uuid)) => {
+            if uuid.is_empty() {
+                return None;
+            }
+            let rest = prefix.strip_prefix('w')?;
+            let (w, rest) = split_leading_digits(rest)?;
+            let rest = rest.strip_prefix('t')?;
+            let (_t, rest) = split_leading_digits(rest)?;
+            let rest = rest.strip_prefix('p')?;
+            let (_p, rest) = split_leading_digits(rest)?;
+            if !rest.is_empty() || w.is_empty() {
+                return None;
+            }
+            Some(uuid)
+        }
     }
-    let rest = prefix.strip_prefix('w')?;
-    let (w, rest) = split_leading_digits(rest)?;
-    let rest = rest.strip_prefix('t')?;
-    let (_t, rest) = split_leading_digits(rest)?;
-    let rest = rest.strip_prefix('p')?;
-    let (_p, rest) = split_leading_digits(rest)?;
-    if !rest.is_empty() || w.is_empty() {
-        return None;
-    }
-    Some(uuid)
 }
 
 fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
@@ -269,12 +273,10 @@ pub fn parse_focused_output(output: &AppleScriptOutput) -> ItermResult<Option<St
     if uuid.is_empty() {
         return Err(bad_output(stdout));
     }
-    // Reassemble a target in the `wNtNpN:UUID` shape `extract_uuid` expects,
-    // so this can round-trip through `focus` later (e.g. for `focus -`). The
-    // w/t/p numbers are placeholders: `focus` only ever looks at the UUID
-    // half (§7-1), and iTerm2 can't give us a tab index anyway (see
-    // `build_focused_script`).
-    Ok(Some(format!("w0t0p0:{uuid}")))
+    // The target IS the bare UUID (§2) — no `wNtNpN` prefix to reassemble:
+    // `focus` only ever looks at the UUID half anyway (§7-1), and iTerm2
+    // can't give us a tab index (see `build_focused_script`).
+    Ok(Some(uuid.to_string()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +336,202 @@ pub fn probe(runner: &dyn AppleScriptRunner) -> ItermResult<ProbeOutcome> {
     parse_probe_output(&output)
 }
 
+// ---------------------------------------------------------------------
+// iterm_targets: reconcile's pid -> target derivation (DESIGN.md §3.5/§4.3)
+// ---------------------------------------------------------------------
+
+/// Output of one `ps` invocation, mirroring `AppleScriptOutput`'s
+/// success/stdout split so a failed `ps` degrades the same way a failed
+/// `osascript` does (§3.5: "an incomplete scan must not prune").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PsOutput {
+    pub success: bool,
+    pub stdout: String,
+}
+
+/// Runs `ps` to resolve pid -> tty. Injected so tests never shell out to the
+/// real `ps` (DESIGN.md / M2 task brief test-separation requirement).
+pub trait PsRunner {
+    fn run(&self, pids: &[u32]) -> std::io::Result<PsOutput>;
+}
+
+/// Real `ps` runner: `ps -o pid=,tty= -p <comma-separated pids>` (verified
+/// on a real machine 2026-07-04: prints `"<pid> <tty>"` per line, `tty`
+/// without a `/dev/` prefix, e.g. `ttys003`; a pid that isn't running is
+/// silently omitted from the output rather than erroring).
+pub struct RealPs;
+
+impl PsRunner for RealPs {
+    fn run(&self, pids: &[u32]) -> std::io::Result<PsOutput> {
+        let pid_list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let output = Command::new("ps")
+            .args(["-o", "pid=,tty=", "-p", &pid_list])
+            .output()?;
+        Ok(PsOutput {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        })
+    }
+}
+
+/// Parse `ps -o pid=,tty=` output into a pid -> tty map. Lines that don't
+/// parse as `<pid> <tty>` are skipped rather than failing the whole batch
+/// (defensive: a stray warning line on stderr wouldn't land here, but this
+/// keeps the parser total).
+pub fn parse_ps_tty_output(stdout: &str) -> std::collections::HashMap<u32, String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let pid: u32 = parts.next()?.parse().ok()?;
+            let tty = parts.next()?.to_string();
+            Some((pid, tty))
+        })
+        .collect()
+}
+
+/// Normalize a tty path for comparison: `ps` prints it bare (`ttys003`),
+/// iTerm2's AppleScript `tty of session` prints it with a `/dev/` prefix
+/// (`/dev/ttys003`) — verified on a real machine 2026-07-04. Stripping the
+/// prefix (if present) makes the two comparable regardless of source.
+fn normalize_tty(tty: &str) -> &str {
+    tty.strip_prefix("/dev/").unwrap_or(tty)
+}
+
+/// AppleScript that enumerates every iTerm2 session's `tty` and `id` (§3.5).
+/// Same explicit-index-plus-`try` scanning pattern as `build_focus_script`
+/// (§7-1: the plural `repeat with s in sessions of t` form intermittently
+/// throws `-1719` on split-pane tabs) — a `try` failure here increments a
+/// counter instead of aborting the whole scan, so one bad session doesn't
+/// erase everything else that *did* enumerate cleanly. Output is one
+/// `SESSION<TAB>tty<TAB>uuid` line per session found, followed by a final
+/// `DONE<TAB><failure count>` line; `failures > 0` is the signal callers use
+/// to treat the scan as incomplete (§3.5: skip pruning that round).
+pub fn build_iterm_targets_script() -> String {
+    r#"if application "iTerm2" is running then
+    tell application "iTerm2"
+        set failures to 0
+        set outputLines to {}
+        repeat with wi from 1 to (count of windows)
+            set w to window wi
+            repeat with ti from 1 to (count of tabs of w)
+                set t to tab ti of w
+                repeat with si from 1 to (count of sessions of t)
+                    try
+                        set thisSession to session si of t
+                        set theTty to tty of thisSession
+                        set theId to id of thisSession
+                        set end of outputLines to ("SESSION" & (ASCII character 9) & theTty & (ASCII character 9) & theId)
+                    on error
+                        set failures to failures + 1
+                    end try
+                end repeat
+            end repeat
+        end repeat
+        set AppleScript's text item delimiters to linefeed
+        set outputText to outputLines as text
+        set AppleScript's text item delimiters to ""
+        return outputText & linefeed & "DONE" & (ASCII character 9) & failures
+    end tell
+else
+    return "DONE" & (ASCII character 9) & "0"
+end if
+"#
+    .to_string()
+}
+
+/// Parse `build_iterm_targets_script`'s output into `(tty, uuid)` pairs plus
+/// whether the scan was complete (no `try` failures, §3.5).
+pub fn parse_iterm_targets_output(output: &AppleScriptOutput) -> ItermResult<(Vec<(String, String)>, bool)> {
+    if is_permission_denied(output) {
+        return Err(ItermError::PermissionDenied);
+    }
+    if !output.success {
+        return Err(ItermError::Other(output.stderr.trim().to_string()));
+    }
+
+    let mut sessions = Vec::new();
+    let mut failures: Option<u32> = None;
+    for line in output.stdout.lines() {
+        if let Some(rest) = line.strip_prefix("SESSION\t") {
+            let (tty, uuid) = rest.split_once('\t').ok_or_else(|| bad_output(line))?;
+            sessions.push((tty.to_string(), uuid.to_string()));
+        } else if let Some(rest) = line.strip_prefix("DONE\t") {
+            failures = Some(rest.trim().parse().map_err(|_| bad_output(line))?);
+        }
+    }
+    let failures = failures.ok_or_else(|| bad_output(output.stdout.trim()))?;
+    Ok((sessions, failures == 0))
+}
+
+/// One pid -> target(bare UUID) mapping, plus whether the underlying scan
+/// (both `ps` and the iTerm2 AppleScript enumeration) was complete enough to
+/// trust for pruning (§3.5: reconcile only prunes when this is `true`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItermTargets {
+    pub targets: std::collections::HashMap<u32, String>,
+    pub complete: bool,
+}
+
+/// `iterm_targets(pids)` (DESIGN.md §3.5/§4.3): resolve `claude agents`' pids
+/// to shiibar targets by matching `ps`'s pid -> tty against iTerm2's own
+/// tty -> uuid enumeration. A pid with no matching iTerm2 session (not
+/// running inside iTerm2 at all) is simply absent from `targets` — that
+/// session is out of scope for shiibar (§8.11), not a scan failure.
+///
+/// Error handling is two-tiered, matching the exit-code contract (§4.4):
+/// - **TCC (Automation) denial is `Err(PermissionDenied)`** — not a
+///   transient scan hiccup but a configuration problem that makes every
+///   future scan fail the same way, and callers must be able to map it to
+///   exit 3 (`shiibar-cc reconcile`, same rule as `focus`/`focused`).
+/// - Every other failure (I/O error on `ps` or `osascript`, unparseable
+///   output, per-session `-1719`s) degrades to `Ok` with `complete: false`
+///   and whatever could still be resolved (§3.5: caller sends
+///   `complete:false` and skips pruning, but still adds/updates from what
+///   it *did* get).
+pub fn iterm_targets(
+    pids: &[u32],
+    ps_runner: &dyn PsRunner,
+    script_runner: &dyn AppleScriptRunner,
+) -> ItermResult<ItermTargets> {
+    if pids.is_empty() {
+        return Ok(ItermTargets {
+            targets: std::collections::HashMap::new(),
+            complete: true,
+        });
+    }
+
+    let (pid_tty, ps_ok) = match ps_runner.run(pids) {
+        Ok(output) if output.success => (parse_ps_tty_output(&output.stdout), true),
+        Ok(output) => (parse_ps_tty_output(&output.stdout), false),
+        Err(_) => (std::collections::HashMap::new(), false),
+    };
+
+    let (sessions, scan_complete) = match script_runner.run(&build_iterm_targets_script()) {
+        Ok(output) => match parse_iterm_targets_output(&output) {
+            Ok(v) => v,
+            Err(ItermError::PermissionDenied) => return Err(ItermError::PermissionDenied),
+            Err(_) => (Vec::new(), false),
+        },
+        Err(_) => (Vec::new(), false),
+    };
+
+    let mut targets = std::collections::HashMap::new();
+    for (&pid, tty) in &pid_tty {
+        if let Some((_, uuid)) = sessions
+            .iter()
+            .find(|(session_tty, _)| normalize_tty(session_tty) == normalize_tty(tty))
+        {
+            targets.insert(pid, uuid.clone());
+        }
+    }
+
+    Ok(ItermTargets {
+        targets,
+        complete: ps_ok && scan_complete,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,22 +539,26 @@ mod tests {
     // ---- extract_uuid ----
 
     #[test]
-    fn extracts_uuid_from_well_formed_target() {
+    fn extracts_uuid_from_a_bare_uuid_target() {
+        // The normal shape since the M1M2 respec (§2): target IS the UUID.
+        assert_eq!(extract_uuid("D2DA6A1F-TEST"), Some("D2DA6A1F-TEST"));
+    }
+
+    #[test]
+    fn extracts_uuid_from_well_formed_wntnpn_target() {
+        // Still accepted (the raw $ITERM_SESSION_ID shape, §7-1) for
+        // defensiveness / pre-respec callers.
         assert_eq!(extract_uuid("w0t0p0:D2DA6A1F-TEST"), Some("D2DA6A1F-TEST"));
         assert_eq!(extract_uuid("w12t3p0:UUID-1"), Some("UUID-1"));
     }
 
     #[test]
-    fn session_fallback_target_does_not_match() {
-        assert_eq!(
-            extract_uuid("session:11111111-1111-1111-1111-111111111111"),
-            None
-        );
+    fn empty_target_does_not_match() {
+        assert_eq!(extract_uuid(""), None);
     }
 
     #[test]
-    fn malformed_targets_do_not_match() {
-        assert_eq!(extract_uuid("no-colon-here"), None);
+    fn malformed_colon_targets_do_not_match() {
         assert_eq!(extract_uuid("w0t0p0:"), None); // empty uuid
         assert_eq!(extract_uuid("wXtYpZ:UUID"), None); // non-numeric indices
         assert_eq!(extract_uuid("t0p0:UUID"), None); // missing leading w
@@ -479,10 +681,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_focused_output_reassembles_target() {
+    fn parse_focused_output_returns_the_bare_uuid_as_target() {
         assert_eq!(
             parse_focused_output(&out(true, "FOCUSED:ABCD-1234\n", "")),
-            Ok(Some("w0t0p0:ABCD-1234".to_string()))
+            Ok(Some("ABCD-1234".to_string()))
         );
     }
 
@@ -533,14 +735,14 @@ mod tests {
     }
 
     #[test]
-    fn focus_with_session_fallback_target_never_runs_osascript() {
+    fn focus_with_malformed_colon_target_never_runs_osascript() {
         struct PanicRunner;
         impl AppleScriptRunner for PanicRunner {
             fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
-                panic!("osascript should not be invoked for a session: fallback target");
+                panic!("osascript should not be invoked for an unparseable target");
             }
         }
-        let result = focus("session:11111111-1111-1111-1111-111111111111", &PanicRunner);
+        let result = focus("not-w-t-p-shaped:garbage", &PanicRunner);
         assert_eq!(result, Err(ItermError::NoMatch));
     }
 
@@ -572,7 +774,7 @@ mod tests {
         let runner = FakeRunner {
             output: out(true, "FOCUSED:UUID\n", ""),
         };
-        assert_eq!(focused(&runner), Ok(Some("w0t0p0:UUID".to_string())));
+        assert_eq!(focused(&runner), Ok(Some("UUID".to_string())));
     }
 
     #[test]
@@ -581,5 +783,213 @@ mod tests {
             output: out(true, "NOT_RUNNING\n", ""),
         };
         assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
+    }
+
+    // ---- iterm_targets: build_iterm_targets_script / parsing ----
+
+    #[test]
+    fn iterm_targets_script_never_activates_and_guards_on_running() {
+        let script = build_iterm_targets_script();
+        assert!(!script.contains("activate"));
+        assert!(script.contains(r#"application "iTerm2" is running"#));
+        assert!(script.contains("DONE"));
+    }
+
+    #[test]
+    fn iterm_targets_script_uses_explicit_index_and_try_like_focus() {
+        // Same -1719 avoidance as build_focus_script (§7-1).
+        let script = build_iterm_targets_script();
+        assert!(script.contains("session si of t"));
+        assert!(script.contains("try"));
+        assert!(!script.contains("repeat with s in sessions"));
+    }
+
+    #[test]
+    fn parse_iterm_targets_output_extracts_sessions_and_zero_failures_is_complete() {
+        let output = out(
+            true,
+            "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys003\tUUID-B\nDONE\t0\n",
+            "",
+        );
+        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        assert_eq!(
+            sessions,
+            vec![
+                ("/dev/ttys000".to_string(), "UUID-A".to_string()),
+                ("/dev/ttys003".to_string(), "UUID-B".to_string()),
+            ]
+        );
+        assert!(complete);
+    }
+
+    #[test]
+    fn parse_iterm_targets_output_nonzero_failures_is_incomplete() {
+        let output = out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", "");
+        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(!complete, "a nonzero failure count must mark the scan incomplete");
+    }
+
+    #[test]
+    fn parse_iterm_targets_output_iterm2_not_running_is_empty_and_complete() {
+        let output = out(true, "DONE\t0\n", "");
+        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        assert!(sessions.is_empty());
+        assert!(complete, "no iTerm2 at all is zero sessions, not a failed scan");
+    }
+
+    #[test]
+    fn parse_iterm_targets_output_permission_denied() {
+        let stderr = "Not authorized to send Apple events to iTerm2. (-1743)";
+        assert_eq!(
+            parse_iterm_targets_output(&out(false, "", stderr)),
+            Err(ItermError::PermissionDenied)
+        );
+    }
+
+    // ---- iterm_targets: ps output parsing ----
+
+    #[test]
+    fn parse_ps_tty_output_builds_a_pid_to_tty_map() {
+        let map = parse_ps_tty_output("20124 ttys000\n16437 ttys001\n");
+        assert_eq!(map.get(&20124).map(String::as_str), Some("ttys000"));
+        assert_eq!(map.get(&16437).map(String::as_str), Some("ttys001"));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parse_ps_tty_output_skips_unparseable_lines() {
+        let map = parse_ps_tty_output("not a line\n20124 ttys000\n");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(&20124).map(String::as_str), Some("ttys000"));
+    }
+
+    #[test]
+    fn normalize_tty_strips_dev_prefix() {
+        assert_eq!(normalize_tty("/dev/ttys003"), "ttys003");
+        assert_eq!(normalize_tty("ttys003"), "ttys003");
+    }
+
+    // ---- iterm_targets: end-to-end wiring with fake runners ----
+
+    struct FakePs {
+        output: PsOutput,
+    }
+
+    impl PsRunner for FakePs {
+        fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+            Ok(self.output.clone())
+        }
+    }
+
+    #[test]
+    fn iterm_targets_matches_pid_to_target_via_tty() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n222 ttys003\n".to_string(),
+            },
+        };
+        let script_runner = FakeRunner {
+            output: out(
+                true,
+                "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys003\tUUID-B\nDONE\t0\n",
+                "",
+            ),
+        };
+        let result = iterm_targets(&[111, 222], &ps, &script_runner).unwrap();
+        assert_eq!(result.targets.get(&111).map(String::as_str), Some("UUID-A"));
+        assert_eq!(result.targets.get(&222).map(String::as_str), Some("UUID-B"));
+        assert!(result.complete);
+    }
+
+    #[test]
+    fn iterm_targets_omits_a_pid_with_no_matching_iterm2_session() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys009\n".to_string(), // no iTerm2 session on this tty
+            },
+        };
+        let script_runner = FakeRunner {
+            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
+        };
+        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
+        assert!(result.targets.is_empty());
+        assert!(result.complete, "a pid outside iTerm2 isn't a scan failure");
+    }
+
+    #[test]
+    fn iterm_targets_is_incomplete_when_the_applescript_scan_reports_failures() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n".to_string(),
+            },
+        };
+        let script_runner = FakeRunner {
+            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", ""),
+        };
+        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
+        assert_eq!(result.targets.get(&111).map(String::as_str), Some("UUID-A"));
+        assert!(!result.complete);
+    }
+
+    #[test]
+    fn iterm_targets_is_incomplete_when_ps_fails() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: false,
+                stdout: String::new(),
+            },
+        };
+        let script_runner = FakeRunner {
+            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
+        };
+        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
+        assert!(!result.complete);
+    }
+
+    #[test]
+    fn iterm_targets_surfaces_tcc_denial_as_permission_denied() {
+        // TCC denial must NOT degrade to complete:false (that would make
+        // reconcile a permanent silent no-op); it must surface as an error
+        // so `shiibar-cc reconcile` can map it to exit 3 (§4.4).
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n".to_string(),
+            },
+        };
+        let script_runner = FakeRunner {
+            output: out(
+                false,
+                "",
+                "Not authorized to send Apple events to iTerm2. (-1743)",
+            ),
+        };
+        assert_eq!(
+            iterm_targets(&[111], &ps, &script_runner),
+            Err(ItermError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn iterm_targets_with_no_pids_never_runs_ps_or_osascript() {
+        struct PanicPs;
+        impl PsRunner for PanicPs {
+            fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+                panic!("ps must not run when there are no pids to resolve");
+            }
+        }
+        struct PanicScript;
+        impl AppleScriptRunner for PanicScript {
+            fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+                panic!("osascript must not run when there are no pids to resolve");
+            }
+        }
+        let result = iterm_targets(&[], &PanicPs, &PanicScript).unwrap();
+        assert!(result.targets.is_empty());
+        assert!(result.complete);
     }
 }

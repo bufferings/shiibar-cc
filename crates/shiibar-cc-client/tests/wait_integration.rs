@@ -1,5 +1,5 @@
 //! `wait` integration tests against a real (in-process) shiibar-ccd, per the
-//! M2 task brief: "already blocked resolves immediately / waits for
+//! M2 task brief: "already waiting resolves immediately / waits for
 //! appearance then resolves / timeout / target disappears" — the four
 //! `WaitOutcome` branches. Exit-code mapping (124/2)
 //! is shiibar-cc's job and is tested there; here we assert the
@@ -20,7 +20,7 @@ fn matches_immediately_when_already_in_the_wanted_status() {
     let mut payload = report_payload(HookEvent::Notification, "target-1", "/proj/a", 1);
     payload.notification_type = Some(NotificationType::PermissionPrompt);
     payload.message = Some("Bash: rm -rf /".to_string());
-    daemon.report(payload); // unregistered + Notification(permission_prompt) => registered blocked
+    daemon.report(payload); // unregistered + Notification(permission_prompt) => registered waiting
 
     // Give the fire-and-forget report a moment to be processed before we
     // open the subscribe connection (otherwise the snapshot could beat it —
@@ -32,14 +32,14 @@ fn matches_immediately_when_already_in_the_wanted_status() {
     let outcome = wait(
         &daemon.sock_path,
         &selector,
-        Status::Blocked,
+        Status::Waiting,
         Some(Duration::from_secs(5)),
     )
     .unwrap();
     match outcome {
         WaitOutcome::Matched(agent) => {
             assert_eq!(agent.target, "target-1");
-            assert_eq!(agent.status, Status::Blocked);
+            assert_eq!(agent.status, Status::Waiting);
         }
         other => panic!("expected Matched, got {other:?}"),
     }
@@ -60,7 +60,7 @@ fn matches_after_the_agent_appears_and_reaches_the_wanted_status() {
             wait(
                 &sock_path,
                 &selector,
-                Status::Blocked,
+                Status::Waiting,
                 Some(Duration::from_secs(5)),
             )
         }
@@ -92,7 +92,7 @@ fn times_out_when_the_status_never_arrives() {
     let outcome = wait(
         &daemon.sock_path,
         &selector,
-        Status::Done,
+        Status::Idle,
         Some(Duration::from_millis(200)),
     )
     .unwrap();
@@ -110,6 +110,9 @@ fn returns_removed_when_the_tracked_agent_is_removed_while_waiting() {
     daemon.report(payload); // registers idle
     std::thread::sleep(Duration::from_millis(50));
 
+    // Wait for a status the entry never reaches (it stays idle until
+    // removed), so the removal — not an immediate match — is what resolves
+    // this `wait`.
     let selector = Selector::parse("target-4", "/irrelevant");
     let wait_thread = std::thread::spawn({
         let sock_path = daemon.sock_path.clone();
@@ -117,7 +120,7 @@ fn returns_removed_when_the_tracked_agent_is_removed_while_waiting() {
             wait(
                 &sock_path,
                 &selector,
-                Status::Done,
+                Status::Waiting,
                 Some(Duration::from_secs(5)),
             )
         }

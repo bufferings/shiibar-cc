@@ -1,6 +1,7 @@
-//! Restart persistence test (M1 acceptance criterion): a few reports ->
-//! shutdown -> restart -> `list` must show the same `blocked` entry
-//! restored from `state.json`.
+//! Restart persistence test (M1 acceptance criterion, extended for the
+//! respec'd model): a few reports -> shutdown -> restart -> `list` must show
+//! the same `waiting` entry, **with `unreviewed` still set**, restored from
+//! `state.json`.
 //!
 //! Ordering (report has landed before we act on it) is confirmed by
 //! reading the `subscribe` stream, never by sleeping.
@@ -12,10 +13,11 @@ use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
-const TARGET: &str = "session:11111111-1111-1111-1111-111111111111";
+const TARGET: &str = "11111111-1111-1111-1111-111111111111";
+const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
 
 #[tokio::test]
-async fn blocked_entry_survives_a_restart() {
+async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
 
     {
@@ -24,7 +26,9 @@ async fn blocked_entry_survives_a_restart() {
         assert!(matches!(sub.next_event().await, SubscribeEvent::Snapshot { .. }));
 
         let prompt = load_fixture("user_prompt_submit.json");
-        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, None, 1_700_000_000).unwrap();
+        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, Some(ITERM_SESSION_ID), 1_700_000_000)
+            .unwrap()
+            .unwrap();
         daemon.report(payload).await;
         match sub.next_event().await {
             SubscribeEvent::StatusChanged { agent } => assert_eq!(agent.status, Status::Working),
@@ -32,14 +36,19 @@ async fn blocked_entry_survives_a_restart() {
         }
 
         let notif = load_fixture("notification_permission_prompt.json");
-        let payload = build_report(HookEvent::Notification, &notif, None, 1_700_000_100).unwrap();
+        let payload = build_report(HookEvent::Notification, &notif, Some(ITERM_SESSION_ID), 1_700_000_100)
+            .unwrap()
+            .unwrap();
         daemon.report(payload).await;
         match sub.next_event().await {
-            SubscribeEvent::StatusChanged { agent } => assert_eq!(agent.status, Status::Blocked),
-            other => panic!("expected blocked, got {other:?}"),
+            SubscribeEvent::StatusChanged { agent } => {
+                assert_eq!(agent.status, Status::Waiting);
+                assert!(agent.unreviewed);
+            }
+            other => panic!("expected waiting, got {other:?}"),
         }
 
-        // Only send `shutdown` once we've *observed* the blocked transition,
+        // Only send `shutdown` once we've *observed* the waiting transition,
         // so we know state.json already reflects it (persist happens before
         // the broadcast in Core::handle_report).
         daemon.shutdown_and_join().await;
@@ -53,7 +62,8 @@ async fn blocked_entry_survives_a_restart() {
         .iter()
         .find(|a| a.target == TARGET)
         .unwrap_or_else(|| panic!("target not restored, agents = {:?}", resp.agents));
-    assert_eq!(restored.status, Status::Blocked);
+    assert_eq!(restored.status, Status::Waiting);
+    assert!(restored.unreviewed, "unreviewed flag must survive a restart too");
     assert_eq!(restored.message.as_deref(), Some("Bash: cargo test"));
 
     daemon2.shutdown_and_join().await;

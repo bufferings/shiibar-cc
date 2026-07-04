@@ -155,6 +155,12 @@ async fn handle_connection(stream: UnixStream, core: Arc<Mutex<Core>>, shutdown:
         Request::Subscribe => {
             handle_subscribe(reader, write_half, core, shutdown).await;
         }
+        Request::Reconcile { complete, sessions } => {
+            core.lock()
+                .expect("core mutex poisoned")
+                .handle_reconcile(complete, &sessions);
+            respond(&mut write_half, &shiibar_cc_proto::AckResponse::default()).await;
+        }
     }
 }
 

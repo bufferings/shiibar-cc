@@ -69,6 +69,7 @@ mod tests {
         Agent {
             target: target.to_string(),
             status: Status::Idle,
+            unreviewed: false,
             session_id: "s".into(),
             cwd: cwd.to_string(),
             task: None,

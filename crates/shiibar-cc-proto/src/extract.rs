@@ -23,18 +23,30 @@ impl std::error::Error for ExtractError {}
 
 /// Build the `report` wire payload for `event` from the raw hook JSON `raw`.
 ///
-/// `iterm_session_id` is `$ITERM_SESSION_ID` (target generation rule, §4.1):
-/// used verbatim if non-empty, else `target` falls back to
-/// `session:<session_id>`.
+/// `iterm_session_id` is `$ITERM_SESSION_ID` (target generation rule, §2/§4.1):
+/// its shape is `wNtNpN:UUID`, and the target is the **`:` -onward UUID**
+/// half only (not the whole `$ITERM_SESSION_ID` string) — this is what lets
+/// `iterm_targets` (reconcile, derived independently via AppleScript) land on
+/// the same target for the same session, since AppleScript can't reproduce
+/// the `wNtNpN` position prefix (§7-1).
+///
+/// A session outside iTerm2 (no `$ITERM_SESSION_ID`, or one that doesn't
+/// contain a `:`) can never be focused, so it isn't tracked at all (§8.11):
+/// this returns `Ok(None)` to mean "drop this report, don't send it" — there
+/// is no fallback target.
 ///
 /// `now` is the report timestamp (epoch seconds) — display-only on the wire
-/// (§3.2), supplied by the caller so this function stays a pure fn.
+/// (§3.6), supplied by the caller so this function stays a pure fn.
 pub fn build_report(
     event: HookEvent,
     raw: &Value,
     iterm_session_id: Option<&str>,
     now: i64,
-) -> Result<ReportPayload, ExtractError> {
+) -> Result<Option<ReportPayload>, ExtractError> {
+    let Some(target) = target_from_iterm_session_id(iterm_session_id) else {
+        return Ok(None);
+    };
+
     let session_id = str_field(raw, "session_id")
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ExtractError("hook JSON missing non-empty session_id".to_string()))?;
@@ -42,11 +54,6 @@ pub fn build_report(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ExtractError("hook JSON missing non-empty cwd".to_string()))?;
     let transcript_path = str_field(raw, "transcript_path");
-
-    let target = match iterm_session_id.filter(|s| !s.is_empty()) {
-        Some(id) => id.to_string(),
-        None => format!("session:{session_id}"),
-    };
 
     let source = parse_enum_field::<SessionStartSource>(raw, "source")?;
     let notification_type = parse_enum_field::<NotificationType>(raw, "notification_type")?;
@@ -57,7 +64,7 @@ pub fn build_report(
         .and_then(|v| v.as_array())
         .cloned();
 
-    Ok(ReportPayload {
+    Ok(Some(ReportPayload {
         event,
         target,
         session_id,
@@ -69,7 +76,17 @@ pub fn build_report(
         message,
         prompt,
         background_tasks,
-    })
+    }))
+}
+
+/// Extract the target from `$ITERM_SESSION_ID` (`wNtNpN:UUID`, §2): the UUID
+/// half after the first `:`. `None` (absent, empty, or missing a `:`
+/// entirely — not the shape `$ITERM_SESSION_ID` is documented to always
+/// have) means "drop the report" (§4.1/§8.11), decided by the caller.
+fn target_from_iterm_session_id(iterm_session_id: Option<&str>) -> Option<String> {
+    let id = iterm_session_id.filter(|s| !s.is_empty())?;
+    let (_prefix, uuid) = id.split_once(':')?;
+    if uuid.is_empty() { None } else { Some(uuid.to_string()) }
 }
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
@@ -98,24 +115,35 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn uses_iterm_session_id_as_target_when_present() {
+    fn uses_the_uuid_half_of_iterm_session_id_as_target() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("w0t0p0:UUID"), 100).unwrap();
-        assert_eq!(r.target, "w0t0p0:UUID");
+        let r = build_report(HookEvent::SessionStart, &raw, Some("w0t0p0:UUID"), 100)
+            .unwrap()
+            .expect("should not be dropped");
+        assert_eq!(r.target, "UUID");
     }
 
     #[test]
-    fn falls_back_to_session_target_when_no_iterm_session_id() {
+    fn drops_the_report_when_no_iterm_session_id() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
         let r = build_report(HookEvent::SessionStart, &raw, None, 100).unwrap();
-        assert_eq!(r.target, "session:s1");
+        assert_eq!(r, None, "outside iTerm2: no fallback target, drop it (§8.11)");
     }
 
     #[test]
-    fn falls_back_to_session_target_when_iterm_session_id_is_empty() {
+    fn drops_the_report_when_iterm_session_id_is_empty() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
         let r = build_report(HookEvent::SessionStart, &raw, Some(""), 100).unwrap();
-        assert_eq!(r.target, "session:s1");
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn drops_the_report_when_iterm_session_id_has_no_colon() {
+        // Not the documented wNtNpN:UUID shape (§7-1): can't extract a UUID
+        // half, so this is treated the same as "absent" rather than guessed at.
+        let raw = json!({"session_id": "s1", "cwd": "/c"});
+        let r = build_report(HookEvent::SessionStart, &raw, Some("no-colon-here"), 100).unwrap();
+        assert_eq!(r, None);
     }
 
     #[test]
@@ -123,34 +151,42 @@ mod tests {
         // multi-byte chars: naive byte-slicing at 80 could split a codepoint.
         let long_prompt: String = "€".repeat(100);
         let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": long_prompt});
-        let r = build_report(HookEvent::UserPromptSubmit, &raw, None, 1).unwrap();
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(r.prompt.unwrap().chars().count(), 80);
     }
 
     #[test]
     fn missing_session_id_is_an_error() {
         let raw = json!({"cwd": "/c"});
-        assert!(build_report(HookEvent::SessionStart, &raw, None, 1).is_err());
+        assert!(build_report(HookEvent::SessionStart, &raw, Some("w0t0p0:UUID"), 1).is_err());
     }
 
     #[test]
     fn unknown_notification_type_becomes_unknown_variant() {
         let raw = json!({"session_id": "s1", "cwd": "/c", "notification_type": "totally_new"});
-        let r = build_report(HookEvent::Notification, &raw, None, 1).unwrap();
+        let r = build_report(HookEvent::Notification, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(r.notification_type, Some(NotificationType::Unknown));
     }
 
     #[test]
     fn background_tasks_array_is_passed_through_opaquely() {
         let raw = json!({"session_id": "s1", "cwd": "/c", "background_tasks": [{"id":"1","status":"running"}]});
-        let r = build_report(HookEvent::Stop, &raw, None, 1).unwrap();
+        let r = build_report(HookEvent::Stop, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(r.background_tasks.unwrap().len(), 1);
     }
 
     #[test]
     fn missing_background_tasks_is_none() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::Stop, &raw, None, 1).unwrap();
+        let r = build_report(HookEvent::Stop, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(r.background_tasks, None);
     }
 }

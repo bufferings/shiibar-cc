@@ -43,13 +43,17 @@ pub fn run(event_arg: Option<String>, socket_path: &Path) {
         }
     };
 
-    // Target generation rule (§4.1): $ITERM_SESSION_ID verbatim, else
-    // `session:<session_id>`.
+    // Target generation rule (§2/§4.1): the UUID half of $ITERM_SESSION_ID
+    // (`wNtNpN:UUID`). No $ITERM_SESSION_ID (or one with no `:`) means this
+    // session isn't in iTerm2 at all (§8.11) — build_report signals that
+    // with `Ok(None)`, and the report is dropped without ever touching the
+    // socket (still exit 0, per this command's always-succeed contract).
     let iterm_session_id = std::env::var("ITERM_SESSION_ID").ok();
     let now = now_epoch_secs();
 
     let payload = match extract::build_report(event, &raw, iterm_session_id.as_deref(), now) {
-        Ok(p) => p,
+        Ok(Some(p)) => p,
+        Ok(None) => return, // outside iTerm2: drop, no fallback target (§8.11)
         Err(e) => {
             eprintln!("shiibar-cc report: {e}");
             return;

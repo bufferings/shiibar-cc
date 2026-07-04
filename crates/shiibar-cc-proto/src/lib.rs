@@ -10,7 +10,10 @@ pub mod extract;
 
 use serde::{Deserialize, Serialize};
 
-/// Agent status. `idle` / `working` / `blocked` / `done` per DESIGN.md §3.
+/// Agent status. `idle` / `working` / `waiting` per DESIGN.md §3.1 (3 values;
+/// `blocked` was renamed to `waiting` and `done` was dropped in the state
+/// model respec — `seen` no longer moves `done` to `idle`, it only clears
+/// `unreviewed`, §3.2).
 ///
 /// `Unknown` only exists for forward-compatible *deserialization* on the
 /// client side (a future daemon version emitting a status this build
@@ -21,8 +24,7 @@ use serde::{Deserialize, Serialize};
 pub enum Status {
     Idle,
     Working,
-    Blocked,
-    Done,
+    Waiting,
     #[serde(other)]
     Unknown,
 }
@@ -32,6 +34,10 @@ pub enum Status {
 pub struct Agent {
     pub target: String,
     pub status: Status,
+    /// Not yet focused since entering the current your-turn state (`waiting`,
+    /// or `idle` right after completion). Only meaningful for `waiting` /
+    /// `idle` (§3.2); `working` never carries it.
+    pub unreviewed: bool,
     pub session_id: String,
     pub cwd: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -71,9 +77,9 @@ pub enum SessionStartSource {
     Other,
 }
 
-/// `Notification` sub-type (§3.1). Any value this build doesn't recognize
-/// falls into `Unknown`, which is deliberately treated as blocked-inducing
-/// (prefer a false alarm over a miss, DESIGN.md §3.1).
+/// `Notification` sub-type (§3.4). Any value this build doesn't recognize
+/// falls into `Unknown`, which is deliberately treated the same as the
+/// waiting-inducing family (prefer a false alarm over a miss, DESIGN.md §3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationType {
@@ -123,6 +129,23 @@ pub struct SessionRecord {
     pub last_seen: i64,
 }
 
+/// One live session as gathered by the client from `claude agents --json` +
+/// `iterm_targets` (§3.5), sent as part of a `reconcile` request. `status`
+/// is already translated to shiibar's 3-value vocabulary by the client
+/// (busy/shell -> working, waiting -> waiting, idle -> idle, §3.5) — the
+/// daemon never sees the `claude agents` vocabulary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReconcileSession {
+    pub target: String,
+    pub session_id: String,
+    pub cwd: String,
+    pub status: Status,
+    /// `waitingFor` from `claude agents`, only meaningful when `status` is
+    /// `waiting` (§3.5/§3.6).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub waiting_for: Option<String>,
+}
+
 /// Requests a client may send, tagged by `cmd` (§4.2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -135,6 +158,15 @@ pub enum Request {
     Sessions,
     Info,
     Shutdown,
+    /// `claude agents` reconciliation (§3.5). `complete` is whether the
+    /// client's iTerm2 scan was complete (§7-1: iTerm2 AppleScript scanning
+    /// can intermittently fail on split panes) — `false` tells the daemon to
+    /// skip pruning this round, since a partial scan can't be trusted to
+    /// mean "this session is really gone".
+    Reconcile {
+        complete: bool,
+        sessions: Vec<ReconcileSession>,
+    },
 }
 
 /// Generic `{"ok":false,"error":"..."}` response, used for malformed JSON
@@ -248,6 +280,19 @@ mod tests {
     }
 
     #[test]
+    fn pre_respec_status_strings_fall_back_to_unknown() {
+        // M1M2 respec migration policy: a state.json written by the old
+        // 4-value-status model has `blocked` / `done` strings that no
+        // longer exist. No migration code is written for this — they
+        // deserialize to `Unknown` and get corrected/pruned by the next
+        // reconcile (M1M2-respec brief).
+        for legacy in ["blocked", "done"] {
+            let v: Status = serde_json::from_str(&format!("{legacy:?}")).unwrap();
+            assert_eq!(v, Status::Unknown, "legacy status {legacy:?} must fall back to Unknown");
+        }
+    }
+
+    #[test]
     fn unknown_subscribe_event_falls_back_to_unknown() {
         let v: SubscribeEvent = serde_json::from_str(r#"{"event":"future_event","foo":"bar"}"#).unwrap();
         assert_eq!(v, SubscribeEvent::Unknown);
@@ -275,6 +320,7 @@ mod tests {
         let agent = Agent {
             target: "t".into(),
             status: Status::Idle,
+            unreviewed: false,
             session_id: "s".into(),
             cwd: "/c".into(),
             task: None,
@@ -285,5 +331,21 @@ mod tests {
         let s = serde_json::to_string(&agent).unwrap();
         assert!(!s.contains("task"));
         assert!(!s.contains("message"));
+    }
+
+    #[test]
+    fn reconcile_request_round_trips_and_matches_wire_example() {
+        let line = r#"{"cmd":"reconcile","complete":true,"sessions":[{"target":"D2DA6A1F","session_id":"s1","cwd":"/path","status":"waiting","waiting_for":"permission prompt"}]}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        match req {
+            Request::Reconcile { complete, sessions } => {
+                assert!(complete);
+                assert_eq!(sessions.len(), 1);
+                assert_eq!(sessions[0].target, "D2DA6A1F");
+                assert_eq!(sessions[0].status, Status::Waiting);
+                assert_eq!(sessions[0].waiting_for.as_deref(), Some("permission prompt"));
+            }
+            other => panic!("expected Reconcile, got {other:?}"),
+        }
     }
 }
