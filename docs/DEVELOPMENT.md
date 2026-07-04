@@ -20,7 +20,7 @@
 
 - **Rust**: `rust-toolchain.toml` でバージョン固定(rustup が自動でダウンロードする)。mise は使わない
 - **Swift**: Command Line Tools のみでビルド可。Xcode 本体は不要
-- **fzf**(任意): `shiibarctl resume` の選択 UI が快適になる。なければ番号選択
+- **fzf**(任意): `shiibar-cc resume` の選択 UI が快適になる。なければ番号選択
 
 ## よく使うコマンド(M1 で追記)
 
@@ -29,23 +29,23 @@ cargo build
 cargo test
 
 # daemon をログ付きフォアグラウンドで起動(開発中の基本形)
-SHIIBAR_LOG=debug cargo run -p shiibard -- --foreground
+SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground
 
 # 別ターミナルからイベント観測
-cargo run -p shiibarctl -- watch
+cargo run -p shiibar-cc -- watch
 
-# テスト・実験用に状態ディレクトリを分離(本物の ~/.local/state/shiibar を汚さない)
-SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
+# テスト・実験用に状態ディレクトリを分離(本物の ~/.local/state/shiibar-cc を汚さない)
+SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ```
 
 ## hooks の検証(M1)
 
 - `hooks/settings-snippet.json` は `$HOME/.local/bin/report.sh` を指す(install.sh 導入後の配置。M2)。
   それ以前に実機で試す場合は、コマンドをリポジトリ内 `hooks/report.sh` の絶対パスに読み替え、
-  `shiibarctl` は `cargo build` 後に `target/debug/` を PATH に入れる
+  `shiibar-cc` は `cargo build` 後に `target/debug/` を PATH に入れる
 
 - 実ペイロードの採取: hooks を設定した実セッションで動かし、実 hook JSON を `fixtures/` に保存する(手順は M1 実装時に追記)
-- 偽装再生: `echo '<hook JSON>' | shiibarctl report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
+- 偽装再生: `echo '<hook JSON>' | shiibar-cc report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
 - 要検証リスト(DESIGN.md §7-2): `idle_prompt` の発火条件と対象状態 / `elicitation_*` の実際の意味 / `background_tasks` の実ペイロード形式
 
 ## macOS 権限まわり
@@ -55,7 +55,7 @@ SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
   ターミナルから実行する CLI と、メニューバーアプリからの実行では**許可が別々に**必要
 - **M4(アプリ初回起動時)**: 通知の許可ダイアログ。ad-hoc 署名は再ビルドで権限がリセットされることがある
   (install.sh で安定した署名 ID を使う。DESIGN.md §4.5)
-- 「通知が来ない」等の切り分けは `shiibarctl doctor`(M2 で実装)
+- 「通知が来ない」等の切り分けは `shiibar-cc doctor`(M2 で実装)
 
 ## M2 実機スモーク(osascript 権限が要るため人間が行う)
 
@@ -63,14 +63,14 @@ SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
 (tmux -CC 内では focused が実 AppleScript の型エラーになる。§8.1 で非スコープ):
 
 ```sh
-SHIIBAR_LOG=debug shiibard --foreground      # 1 タブで起動しておく
-shiibarctl doctor                            # 全項目 [ok]。初回 osascript でオートメーション許可を求められたら許可
-shiibarctl list                              # このセッションが idle で見えるか
-shiibarctl wait . --status done && say done  # このタブで Claude のターンを回して完了を待つ
-shiibarctl focus <list で見えた target>      # 別タブから該当タブが前面に来るか
-shiibarctl focused                           # 前面タブの target が出るか
-shiibarctl focus -                           # 直前の前面タブに戻るか
-shiibarctl focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
+SHIIBAR_CC_LOG=debug shiibar-ccd --foreground      # 1 タブで起動しておく
+shiibar-cc doctor                            # 全項目 [ok]。初回 osascript でオートメーション許可を求められたら許可
+shiibar-cc list                              # このセッションが idle で見えるか
+shiibar-cc wait . --status done && say done  # このタブで Claude のターンを回して完了を待つ
+shiibar-cc focus <list で見えた target>      # 別タブから該当タブが前面に来るか
+shiibar-cc focused                           # 前面タブの target が出るか
+shiibar-cc focus -                           # 直前の前面タブに戻るか
+shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 ```
 
 - **既知の注意**: osascript 呼び出しにタイムアウトがない。初回 TCC ダイアログ待ちや iTerm2 の応答遅延で
@@ -78,22 +78,22 @@ shiibarctl focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 ## ドッグフーディング運用(M2〜M3 の期間)
 
-- daemon は launchd に入れない(DESIGN.md §8.8)。iTerm2 の 1 タブで `shiibard --foreground` を
+- daemon は launchd に入れない(DESIGN.md §8.8)。iTerm2 の 1 タブで `shiibar-ccd --foreground` を
   動かしておく(ログが見えるので開発中はむしろ都合が良い)
-- 状態ファイルは `~/.local/state/shiibar/`。壊れたら丸ごと消してよい
+- 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
   (`sessions.jsonl` だけは resume 履歴なので、消すと履歴も消える)
 - アプリ(M4 以降)は起動時に既存 daemon にアタッチするので、手動 daemon と併用しても壊れない。
   ただしアプリを Quit すると daemon も止まる(仕様)
 
 ## リリース・インストール(M2 / M4 で追記)
 
-- `scripts/install.sh`: `cargo build --release` して `shiibard` / `shiibarctl` / `hooks/report.sh` を
-  `~/.local/bin/`(`SHIIBAR_BIN_DIR` で上書き可)に配置する。M2 段階ではバイナリ配置 + hooks 案内のみで、
+- `scripts/install.sh`: `cargo build --release` して `shiibar-ccd` / `shiibar-cc` / `hooks/report.sh` を
+  `~/.local/bin/`(`SHIIBAR_CC_BIN_DIR` で上書き可)に配置する。M2 段階ではバイナリ配置 + hooks 案内のみで、
   `~/.claude/settings.json` への自動マージはしない(既存設定を壊すリスクを避けるため。
   `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)。
   `.app` 化・Login Items・CLI シンボリックリンクの `.app` 由来化は M4
 - `scripts/uninstall.sh`: `~/.local/bin/` に置いたものを削除し、settings.json から hooks を外す案内を表示する
-  (`~/.local/state/shiibar/` は消さない。resume 履歴・ログが要らないなら手動で消す)
+  (`~/.local/state/shiibar-cc/` は消さない。resume 履歴・ログが要らないなら手動で消す)
 - `scripts/dev-reload.sh`: `cargo build`(デバッグビルド)を再実行するだけの薄いラッパー。
-  daemon は手動運用(§8.8)なので、動かしている `shiibard --foreground` は自分で Ctrl-C → 再実行する
-- 動作確認は `shiibarctl doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)
+  daemon は手動運用(§8.8)なので、動かしている `shiibar-ccd --foreground` は自分で Ctrl-C → 再実行する
+- 動作確認は `shiibar-cc doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)

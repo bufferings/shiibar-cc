@@ -1,4 +1,4 @@
-# shiibar
+# shiibar-cc
 
 macOS menu bar app + CLI that tracks Claude Code agent status (idle / working / blocked / done) via hooks and jumps to the corresponding iTerm2 tab.
 
@@ -21,8 +21,8 @@ macOS menu bar app + CLI that tracks Claude Code agent status (idle / working / 
   including test fixtures and test cases. Use a neutral placeholder (e.g. `/Users/example/...`) or, better,
   a path built at runtime from a temp dir. Fixtures and tests must be portable across machines.
 - Tests must mirror DESIGN.md §3.1 exactly (table-driven). Never weaken a test or the spec to make an implementation pass.
-- All state paths go through the state dir (`SHIIBAR_STATE_DIR` override, default `~/.local/state/shiibar/`). Tests MUST use a temp state dir and never touch the real one.
-- iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-client` (design principle 2).
+- All state paths go through the state dir (`SHIIBAR_CC_STATE_DIR` override, default `~/.local/state/shiibar-cc/`). Tests MUST use a temp state dir and never touch the real one.
+- iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-cc-client` (design principle 2).
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
 
 ## Don't trust your training knowledge for anything versioned or external
@@ -44,7 +44,7 @@ or hook-field fact from memory — verify against the real thing and cite how yo
 cargo build                 # workspace build
 cargo test                  # all tests
 cargo clippy --all-targets  # keep it warning-free
-SHIIBAR_LOG=debug cargo run -p shiibard -- --foreground   # run daemon with logs
+SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground   # run daemon with logs
 ```
 
 Toolchain is pinned by `rust-toolchain.toml` (rustup picks it up automatically).

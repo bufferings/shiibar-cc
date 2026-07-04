@@ -228,20 +228,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "shiibar-client"
+name = "shiibar-cc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "shiibar-cc-client",
+ "shiibar-cc-proto",
+ "tempfile",
+]
+
+[[package]]
+name = "shiibar-cc-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "shiibar-proto",
- "shiibard",
+ "shiibar-cc-proto",
+ "shiibar-ccd",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
-name = "shiibar-proto"
+name = "shiibar-cc-proto"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -249,24 +260,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "shiibarctl"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "shiibar-client",
- "shiibar-proto",
- "tempfile",
-]
-
-[[package]]
-name = "shiibard"
+name = "shiibar-ccd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "shiibar-proto",
+ "shiibar-cc-proto",
  "tempfile",
  "tokio",
 ]

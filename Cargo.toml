@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/shiibar-proto",
-    "crates/shiibar-client",
-    "crates/shiibard",
-    "crates/shiibarctl",
+    "crates/shiibar-cc-proto",
+    "crates/shiibar-cc-client",
+    "crates/shiibar-ccd",
+    "crates/shiibar-cc",
 ]
 
 [workspace.package]

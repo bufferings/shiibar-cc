@@ -1,0 +1,16 @@
+[package]
+name = "shiibar-cc-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+shiibar-cc-proto = { path = "../shiibar-cc-proto" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+shiibar-ccd = { path = "../shiibar-ccd" }
+tokio = { workspace = true }
+tempfile = "3"

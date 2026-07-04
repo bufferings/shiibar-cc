@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# shiibar M2 install: build shiibard/shiibarctl in release mode, place them
+# shiibar-cc M2 install: build shiibar-ccd/shiibar-cc in release mode, place them
 # (plus hooks/report.sh) under ~/.local/bin, and print hooks-configuration
 # guidance. DESIGN.md §5 / §4.5 for what belongs here vs. M4:
 #   - M2 (this script): binaries + hooks only. daemon lifecycle is manual
-#     (`shiibard --foreground`, DESIGN.md §8.8) until the menu bar app
+#     (`shiibar-ccd --foreground`, DESIGN.md §8.8) until the menu bar app
 #     exists.
 #   - M4: .app bundling, Login Items, and switching the CLI symlink target
 #     to the .app's embedded binaries (DESIGN.md §4.5 "bundling").
@@ -18,21 +18,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_DIR="${SHIIBAR_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 
-echo "==> Building shiibard / shiibarctl (release)..."
-(cd "$ROOT" && cargo build --release -p shiibard -p shiibarctl)
+echo "==> Building shiibar-ccd / shiibar-cc (release)..."
+(cd "$ROOT" && cargo build --release -p shiibar-ccd -p shiibar-cc)
 
 echo "==> Installing to $BIN_DIR"
 mkdir -p "$BIN_DIR"
-install -m 755 "$ROOT/target/release/shiibard" "$BIN_DIR/shiibard"
-install -m 755 "$ROOT/target/release/shiibarctl" "$BIN_DIR/shiibarctl"
+install -m 755 "$ROOT/target/release/shiibar-ccd" "$BIN_DIR/shiibar-ccd"
+install -m 755 "$ROOT/target/release/shiibar-cc" "$BIN_DIR/shiibar-cc"
 install -m 755 "$ROOT/hooks/report.sh" "$BIN_DIR/report.sh"
 
 echo
 echo "Installed:"
-echo "  $BIN_DIR/shiibard"
-echo "  $BIN_DIR/shiibarctl"
+echo "  $BIN_DIR/shiibar-ccd"
+echo "  $BIN_DIR/shiibar-cc"
 echo "  $BIN_DIR/report.sh"
 
 case ":$PATH:" in
@@ -69,9 +69,9 @@ fi
 
 echo
 echo "==> daemon"
-echo "shiibar has no launchd/background service yet (M2): start it manually"
+echo "shiibar-cc has no launchd/background service yet (M2): start it manually"
 echo "in a terminal you keep around, e.g. in an iTerm2 tab:"
-echo "  $BIN_DIR/shiibard --foreground"
+echo "  $BIN_DIR/shiibar-ccd --foreground"
 echo
 echo "Then check everything end to end with:"
-echo "  $BIN_DIR/shiibarctl doctor"
+echo "  $BIN_DIR/shiibar-cc doctor"

@@ -5,9 +5,9 @@
 
 set -euo pipefail
 
-BIN_DIR="${SHIIBAR_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 
-for f in shiibard shiibarctl report.sh; do
+for f in shiibar-ccd shiibar-cc report.sh; do
   path="$BIN_DIR/$f"
   if [ -e "$path" ]; then
     rm -f "$path"
@@ -21,10 +21,10 @@ if [ -f "$SETTINGS" ] && grep -q "report.sh" "$SETTINGS" 2>/dev/null; then
   echo "$SETTINGS still references report.sh."
   echo "Remove the SessionStart/UserPromptSubmit/PostToolUse/PostToolUseFailure/"
   echo "Notification/Stop/SessionEnd hook entries that call report.sh by hand"
-  echo "(see hooks/settings-snippet.json for exactly which ones shiibar added)."
+  echo "(see hooks/settings-snippet.json for exactly which ones shiibar-cc added)."
 fi
 
 echo
-echo "Note: this does not touch ~/.local/state/shiibar/ (state.json,"
+echo "Note: this does not touch ~/.local/state/shiibar-cc/ (state.json,"
 echo "sessions.jsonl, logs). Remove that directory yourself if you want to"
 echo "drop resume history / logs too."
