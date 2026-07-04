@@ -294,7 +294,8 @@ shiibar/
 ├── fixtures/               # 実 hook JSON の採取物(M1 で採取・コミット。統合テストが再生する)
 ├── docs/
 │   ├── DESIGN.md           # 本書(挙動の正)
-│   └── menubar-design.html # メニューバー確定デザイン(見た目の正)
+│   ├── menubar-design.html # メニューバー確定デザイン(見た目の正)
+│   └── DEVELOPMENT.md      # 開発メモ(手順・運用。実装の進行に合わせて追記)
 ├── CLAUDE.md
 ├── LICENSE-MIT / LICENSE-APACHE
 └── README.md
