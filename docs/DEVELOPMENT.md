@@ -10,7 +10,7 @@
 マイルストーンごとに 3 段階で受け入れる:
 
 1. **実装エージェント**: 実装 + 自身のテスト(指示書 `docs/tasks/Mx.md` に従う)
-2. **spec 突き合わせレビュー**: 遷移表(DESIGN.md §3.1)・決定の記録(§8)・プロトコル契約(§4.2)との整合を確認
+2. **spec 突き合わせレビュー**: 遷移表(DESIGN.md §3.4)・決定の記録(§8)・プロトコル契約(§4.2)との整合を確認
 3. **独立検証エージェント**(実装者とは別に起動): 実装知識に引きずられないよう、
    **先に spec と指示書だけから期待動作を導出**し、ブラックボックスで検証する
    (daemon を実際に起動して socket に生 NDJSON を打つ、再起動復元、exit code など)。
@@ -46,7 +46,8 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 - 実ペイロードの採取: hooks を設定した実セッションで動かし、実 hook JSON を `fixtures/` に保存する(手順は M1 実装時に追記)
 - 偽装再生: `echo '<hook JSON>' | shiibar-cc report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
-- 要検証リスト(DESIGN.md §7-2): `idle_prompt` の発火条件と対象状態 / `elicitation_*` の実際の意味 / `background_tasks` の実ペイロード形式
+- 要検証リスト(DESIGN.md §7-3): `elicitation_*` の実際の意味 / `PostToolUseFailure` の実発火 /
+  `waiting` が実「許可プロンプト」でも出るか
 
 ## macOS 権限まわり
 
@@ -70,7 +71,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 SHIIBAR_CC_LOG=debug shiibar-ccd --foreground      # 1 タブで起動しておく
 shiibar-cc doctor                            # 全項目 [ok]。初回 osascript でオートメーション許可を求められたら許可
 shiibar-cc list                              # このセッションが idle で見えるか
-shiibar-cc wait . --status done && say done  # このタブで Claude のターンを回して完了を待つ
+shiibar-cc wait . --status idle && say done  # このタブで Claude のターンを回して完了を待つ
 shiibar-cc focus <list で見えた target>      # 別タブから該当タブが前面に来るか
 shiibar-cc focused                           # 前面タブの target が出るか
 shiibar-cc focus -                           # 直前の前面タブに戻るか
