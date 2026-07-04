@@ -129,14 +129,17 @@ fn escape_as_string_literal(s: &str) -> String {
 // ---------------------------------------------------------------------
 
 /// AppleScript that scans iTerm2 for a session whose `id` equals `uuid`,
-/// and if found: selects its tab, brings its window to the front, and
-/// activates iTerm2. Deliberately checks `application "iTerm2" is running`
-/// first and only opens a `tell application "iTerm2"` block inside that
-/// guard — this is what keeps `focus` from launching iTerm2 when it isn't
-/// running (DESIGN.md §4.3: "if iTerm2 isn't running, return 'no match'
-/// without launching it"; a bare `tell application "iTerm2"` would
-/// auto-launch it). Prints
-/// `FOUND` or `NOTFOUND` as the last line of stdout.
+/// and if found: selects that session (pane), its tab, brings its window
+/// to the front, and activates iTerm2. `tell s to select` is essential for
+/// split panes — selecting only the window/tab leaves the tab's previously
+/// active pane focused, so a jump to a session in a split would land on the
+/// wrong pane (verified on a real machine 2026-07-04, M2 smoke test).
+/// Deliberately checks `application "iTerm2" is running` first and only
+/// opens a `tell application "iTerm2"` block inside that guard — this is
+/// what keeps `focus` from launching iTerm2 when it isn't running
+/// (DESIGN.md §4.3: "if iTerm2 isn't running, return 'no match' without
+/// launching it"; a bare `tell application "iTerm2"` would auto-launch it).
+/// Prints `FOUND` or `NOTFOUND` as the last line of stdout.
 pub fn build_focus_script(uuid: &str) -> String {
     let uuid = escape_as_string_literal(uuid);
     format!(
@@ -148,6 +151,7 @@ pub fn build_focus_script(uuid: &str) -> String {
                     if id of s is "{uuid}" then
                         tell w to select
                         tell t to select
+                        tell s to select
                         activate
                         return "FOUND"
                     end if
@@ -370,6 +374,17 @@ mod tests {
             "activate must be inside the match branch"
         );
         assert!(activate < found, "activate must run before reporting FOUND");
+    }
+
+    #[test]
+    fn focus_script_selects_the_session_for_split_panes() {
+        // Selecting only window/tab lands on the wrong pane in a split;
+        // `tell s to select` is required (real-machine finding).
+        let script = build_focus_script("SOME-UUID");
+        assert!(
+            script.contains("tell s to select"),
+            "must select the matched session (pane), not just its tab"
+        );
     }
 
     #[test]
