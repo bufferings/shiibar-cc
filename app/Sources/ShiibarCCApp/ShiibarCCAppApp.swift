@@ -17,7 +17,13 @@ struct ShiibarCCAppApp: App {
         MenuBarExtra {
             DropdownView(state: appDelegate.state)
         } label: {
-            TrayIconView(state: appDelegate.state.trayIcon)
+            // The label must receive the observable AppState itself, not a
+            // precomputed TrayIconState value: SwiftUI only re-evaluates
+            // this closure when something it observes changes, and a plain
+            // value snapshot observes nothing — that froze the tray at its
+            // launch-time rendering (seen on-device). TrayIconView holds it
+            // as @ObservedObject and derives the icon state per render.
+            TrayIconView(state: appDelegate.state)
         }
         .menuBarExtraStyle(.window)
     }

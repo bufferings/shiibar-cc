@@ -11,15 +11,21 @@
 // it only matters for the non-template (red dot) variant, whose glyph
 // monochrome must be picked manually since a non-template image doesn't
 // auto-tint.
+//
+// This view observes AppState directly (rather than taking a TrayIconState
+// value): a MenuBarExtra label is only re-evaluated when something a view
+// inside it observes changes, so a value snapshot passed in from the label
+// closure would freeze the tray at its launch-time rendering (seen
+// on-device).
 
 import ShiibarCCCore
 import SwiftUI
 
 struct TrayIconView: View {
-    let state: TrayIconState
+    @ObservedObject var state: AppState
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Image(nsImage: TrayIconRenderer.render(state: state, darkMenuBar: colorScheme == .dark))
+        Image(nsImage: TrayIconRenderer.render(state: state.trayIcon, darkMenuBar: colorScheme == .dark))
     }
 }

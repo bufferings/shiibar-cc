@@ -24,21 +24,34 @@ struct DropdownView: View {
                 WarningRow(text: "Focus failed: automation permission needed (run \"shiibar-cc doctor\")")
             }
 
-            if state.groups.isEmpty {
-                Text("No agents")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(state.groups) { group in
-                            GroupSection(group: group, state: state)
+            // The agent list renders inside a TimelineView so the "label ·
+            // elapsed" second lines stay live: without it, this body is only
+            // re-evaluated when AppState publishes a change, so the elapsed
+            // strings froze at the last state mutation (seen on-device —
+            // reopening the dropdown doesn't re-render either, since the
+            // hosted view stays alive). Rows are recomputed from each
+            // agent's `since` epoch against the timeline's date on every
+            // tick. Cadence = 1s because the elapsed format has 1-second
+            // granularity below one minute ("5s"), and the schedule only
+            // ticks while the dropdown is actually visible.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let groups = state.groups(now: Int64(context.date.timeIntervalSince1970))
+                if groups.isEmpty {
+                    Text("No agents")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(groups) { group in
+                                GroupSection(group: group, state: state)
+                            }
                         }
                     }
+                    .frame(maxHeight: 360)
                 }
-                .frame(maxHeight: 360)
             }
         }
         .padding(.vertical, 6)

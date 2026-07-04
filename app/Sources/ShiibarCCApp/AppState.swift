@@ -89,8 +89,12 @@ final class AppState: ObservableObject {
         )
     }
 
-    var groups: [AgentGroup] {
-        Grouping.groupedRows(agents: agents, now: Int64(Date().timeIntervalSince1970), home: home)
+    /// Grouped dropdown rows as of `now`. `now` is a parameter (not read
+    /// inside) so the caller — a `TimelineView` in `DropdownView` — controls
+    /// the render clock: elapsed times are recomputed from each agent's
+    /// `since` epoch on every tick, never stored as strings.
+    func groups(now: Int64) -> [AgentGroup] {
+        Grouping.groupedRows(agents: agents, now: now, home: home)
     }
 
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)
