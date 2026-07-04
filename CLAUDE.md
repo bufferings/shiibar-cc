@@ -25,6 +25,19 @@ macOS menu bar app + CLI that tracks Claude Code agent status (idle / working / 
 - iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-client` (design principle 2).
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
 
+## Don't trust your training knowledge for anything versioned or external
+
+Your knowledge has a cutoff months in the past. Crate versions, Rust releases, macOS/AppleScript
+behavior, and especially the Claude Code hook payload spec all move. Never state a version, API shape,
+or hook-field fact from memory — verify against the real thing and cite how you checked:
+
+- Crate / toolchain versions: `cargo search <crate>`, `Cargo.lock`, `rustup check` — not recall.
+- Claude Code hook payloads (event names, fields like `notification_type` / `background_tasks` /
+  `source`, whether `PostToolUseFailure` fires): confirm against captured real payloads in `fixtures/`
+  or current official docs, not memory. See DESIGN.md §7-2 for the fields still pending real-log checks.
+- When you can't verify, say so explicitly rather than asserting — don't call something "latest" or
+  "correct" from training data.
+
 ## Commands
 
 ```sh
