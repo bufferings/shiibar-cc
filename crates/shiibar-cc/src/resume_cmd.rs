@@ -624,6 +624,61 @@ mod tests {
         assert_eq!(code, exitcode::OK, "msg={msg:?}");
     }
 
+    /// An `AppleScriptRunner` that must never run: the tests using it
+    /// exercise selection-interpretation failures, which return before
+    /// `open_tab` is ever reached.
+    struct PanicScript;
+    impl AppleScriptRunner for PanicScript {
+        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+            panic!("open_tab must not run when the selected line can't be resolved");
+        }
+    }
+
+    #[test]
+    fn run_resume_exits_1_when_the_selected_line_matches_no_candidate() {
+        let daemon = FakeDaemon::start(
+            r#"{"ok":true,"sessions":[{"session_id":"s-1","cwd":"/proj/a","last_status":"idle","last_seen":10}]}"#,
+            r#"{"ok":true,"agents":[]}"#,
+        );
+        let home = tempfile::tempdir().unwrap();
+        // The trailing token parses fine as a session_id, but no candidate
+        // has it — a selection UI handing back a line that was never one of
+        // the candidate lines is an internal error (exit 1), not "no match"
+        // (exit 2 is reserved for zero candidates / aborted selection, §4.4).
+        let selected_line = format!(
+            "{:<8} {:<24} {:>4}  {}",
+            "idle", "proj/a", "1m", "s-nonexistent"
+        );
+        let selection = FakeSelection {
+            line: Mutex::new(Some(selected_line)),
+        };
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &PanicScript);
+        assert_eq!(code, exitcode::ERROR);
+        assert!(msg.unwrap().contains("did not match a candidate"));
+    }
+
+    #[test]
+    fn run_resume_exits_1_when_the_selected_line_has_no_parseable_session_id() {
+        // A whitespace-only line is the input that reaches the "could not
+        // parse" branch: `session_id_from_selected_line` returns `None`
+        // only when the line has no whitespace-delimited token at all. A
+        // truly empty selection is already modeled as an abort (`Ok(None)`)
+        // by the `SelectionRunner` contract, and the real `FzfRunner` trims
+        // its output into that shape — so only a misbehaving runner can
+        // produce this, which is exactly what the defensive branch is for.
+        let daemon = FakeDaemon::start(
+            r#"{"ok":true,"sessions":[{"session_id":"s-1","cwd":"/proj/a","last_status":"idle","last_seen":10}]}"#,
+            r#"{"ok":true,"agents":[]}"#,
+        );
+        let home = tempfile::tempdir().unwrap();
+        let selection = FakeSelection {
+            line: Mutex::new(Some("   ".to_string())),
+        };
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &PanicScript);
+        assert_eq!(code, exitcode::ERROR);
+        assert!(msg.unwrap().contains("could not parse"));
+    }
+
     #[test]
     fn run_resume_maps_tcc_denial_from_open_tab_to_exit_3() {
         let cwd_dir = tempfile::tempdir().unwrap();
