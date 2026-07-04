@@ -5,6 +5,17 @@
 
 > このメモは実装の進行に合わせて追記する。未実装のものは「(Mx で追記)」と記してある。
 
+## レビュー・検証体制
+
+マイルストーンごとに 3 段階で受け入れる:
+
+1. **実装エージェント**: 実装 + 自身のテスト(指示書 `docs/tasks/Mx.md` に従う)
+2. **spec 突き合わせレビュー**: 遷移表(DESIGN.md §3.1)・決定の記録(§8)・プロトコル契約(§4.2)との整合を確認
+3. **独立検証エージェント**(実装者とは別に起動): 実装知識に引きずられないよう、
+   **先に spec と指示書だけから期待動作を導出**し、ブラックボックスで検証する
+   (daemon を実際に起動して socket に生 NDJSON を打つ、再起動復元、exit code など)。
+   実装コードを読むのは最後(テストの網羅漏れ探しのみ)
+
 ## セットアップ
 
 - **Rust**: `rust-toolchain.toml` でバージョン固定(rustup が自動でダウンロードする)。mise は使わない
@@ -28,6 +39,10 @@ SHIIBAR_STATE_DIR=$(mktemp -d) cargo run -p shiibard -- --foreground
 ```
 
 ## hooks の検証(M1)
+
+- `hooks/settings-snippet.json` は `$HOME/.local/bin/report.sh` を指す(install.sh 導入後の配置。M2)。
+  それ以前に実機で試す場合は、コマンドをリポジトリ内 `hooks/report.sh` の絶対パスに読み替え、
+  `shiibarctl` は `cargo build` 後に `target/debug/` を PATH に入れる
 
 - 実ペイロードの採取: hooks を設定した実セッションで動かし、実 hook JSON を `fixtures/` に保存する(手順は M1 実装時に追記)
 - 偽装再生: `echo '<hook JSON>' | shiibarctl report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
