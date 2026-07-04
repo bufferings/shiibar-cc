@@ -313,8 +313,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let last_focus_path = dir.path().join("last_focus");
         let runner = ScriptedRunner::new(vec![
-            out(true, "FOCUSED:BEFORE-UUID:1:1\n", ""), // focused() before
-            out(true, "FOUND\n", ""),                   // focus() succeeds
+            out(true, "FOCUSED:BEFORE-UUID\n", ""), // focused() before
+            out(true, "FOUND\n", ""),               // focus() succeeds
         ]);
         let report = jump_to(
             &dead_socket(dir.path()),
@@ -324,7 +324,7 @@ mod tests {
         );
         assert_eq!(report.exit_code, exitcode::OK);
         let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "w1t1p0:BEFORE-UUID");
+        assert_eq!(saved, "w0t0p0:BEFORE-UUID");
     }
 
     #[test]
@@ -351,15 +351,15 @@ mod tests {
         std::fs::write(&last_focus_path, "w0t0p0:OLD-UUID").unwrap();
 
         let runner = ScriptedRunner::new(vec![
-            out(true, "FOCUSED:CURRENT-UUID:2:2\n", ""), // focused() before jumping back
-            out(true, "FOUND\n", ""),                    // focus() to OLD-UUID succeeds
+            out(true, "FOCUSED:CURRENT-UUID\n", ""), // focused() before jumping back
+            out(true, "FOUND\n", ""),                // focus() to OLD-UUID succeeds
         ]);
         let report = run_focus_back(&dead_socket(dir.path()), &last_focus_path, &runner);
         assert_eq!(report.exit_code, exitcode::OK);
         // cd -/toggle semantics: last_focus now points at where we jumped
         // *from* this time, ready for a subsequent `focus -` to swap back.
         let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "w2t2p0:CURRENT-UUID");
+        assert_eq!(saved, "w0t0p0:CURRENT-UUID");
     }
 
     // ---- run_focus: exact-match target bypasses the daemon entirely
@@ -430,10 +430,10 @@ mod tests {
 
     #[test]
     fn run_focused_with_a_frontmost_session_is_exit_0_with_its_target() {
-        let runner = ScriptedRunner::new(vec![out(true, "FOCUSED:UUID-1:1:2\n", "")]);
+        let runner = ScriptedRunner::new(vec![out(true, "FOCUSED:UUID-1\n", "")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::OK);
-        assert_eq!(report.target, Some("w1t2p0:UUID-1".to_string()));
+        assert_eq!(report.target, Some("w0t0p0:UUID-1".to_string()));
         assert_eq!(report.message, None);
     }
 

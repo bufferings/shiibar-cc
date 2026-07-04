@@ -162,8 +162,12 @@ return "NOTFOUND"
 }
 
 /// AppleScript that reports the frontmost iTerm2 session, if iTerm2 is the
-/// frontmost application. Prints `FOCUSED:<uuid>:<window index>:<tab
-/// index>` or `NONE`.
+/// frontmost application. Prints `FOCUSED:<uuid>` or `NONE`.
+///
+/// Only the session UUID is returned: `focus` matches on the UUID alone
+/// (§7-1), and iTerm2's AppleScript can't produce a tab index anyway
+/// (`index of tab` errors -1728 on a real machine — verified 2026-07-04,
+/// found by the M2 smoke test; it is NOT a tmux-only issue).
 pub fn build_focused_script() -> String {
     r#"if application "iTerm2" is running then
     tell application "System Events"
@@ -171,10 +175,7 @@ pub fn build_focused_script() -> String {
     end tell
     if frontAppName is "iTerm2" then
         tell application "iTerm2"
-            set w to current window
-            set t to current tab of w
-            set s to current session of t
-            return "FOCUSED:" & (id of s) & ":" & (index of w) & ":" & (index of t)
+            return "FOCUSED:" & (id of current session of current window)
         end tell
     else
         return "NONE"
@@ -242,23 +243,18 @@ pub fn parse_focused_output(output: &AppleScriptOutput) -> ItermResult<Option<St
     if stdout == "NONE" {
         return Ok(None);
     }
-    let Some(rest) = stdout.strip_prefix("FOCUSED:") else {
+    let Some(uuid) = stdout.strip_prefix("FOCUSED:") else {
         return Err(bad_output(stdout));
     };
-    let mut parts = rest.splitn(3, ':');
-    let (Some(uuid), Some(win), Some(tab)) = (parts.next(), parts.next(), parts.next()) else {
-        return Err(bad_output(stdout));
-    };
-    if uuid.is_empty() || win.parse::<u32>().is_err() || tab.parse::<u32>().is_err() {
+    if uuid.is_empty() {
         return Err(bad_output(stdout));
     }
-    // Reassemble a target in the same `wNtNpN:UUID` shape `extract_uuid`
-    // expects, so this can round-trip through `focus` later (e.g. for
-    // `focus -`). The window/tab numbers are cosmetic here: `focus` only
-    // ever looks at the UUID half (§7-1 — the w/t/p numbers in a real
-    // $ITERM_SESSION_ID can go stale as tabs are reordered, so `focus`
-    // never relies on them either).
-    Ok(Some(format!("w{win}t{tab}p0:{uuid}")))
+    // Reassemble a target in the `wNtNpN:UUID` shape `extract_uuid` expects,
+    // so this can round-trip through `focus` later (e.g. for `focus -`). The
+    // w/t/p numbers are placeholders: `focus` only ever looks at the UUID
+    // half (§7-1), and iTerm2 can't give us a tab index anyway (see
+    // `build_focused_script`).
+    Ok(Some(format!("w0t0p0:{uuid}")))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -454,8 +450,8 @@ mod tests {
     #[test]
     fn parse_focused_output_reassembles_target() {
         assert_eq!(
-            parse_focused_output(&out(true, "FOCUSED:ABCD-1234:2:3\n", "")),
-            Ok(Some("w2t3p0:ABCD-1234".to_string()))
+            parse_focused_output(&out(true, "FOCUSED:ABCD-1234\n", "")),
+            Ok(Some("w0t0p0:ABCD-1234".to_string()))
         );
     }
 
@@ -543,9 +539,9 @@ mod tests {
     #[test]
     fn focused_end_to_end_with_fake_runner() {
         let runner = FakeRunner {
-            output: out(true, "FOCUSED:UUID:1:1\n", ""),
+            output: out(true, "FOCUSED:UUID\n", ""),
         };
-        assert_eq!(focused(&runner), Ok(Some("w1t1p0:UUID".to_string())));
+        assert_eq!(focused(&runner), Ok(Some("w0t0p0:UUID".to_string())));
     }
 
     #[test]

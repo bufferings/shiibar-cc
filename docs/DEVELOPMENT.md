@@ -59,8 +59,12 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 ## M2 実機スモーク(osascript 権限が要るため人間が行う)
 
-`scripts/install.sh` でバイナリ配置後、**tmux -CC の外(素の iTerm2 タブ)で**試すこと
-(tmux -CC 内では focused が実 AppleScript の型エラーになる。§8.1 で非スコープ):
+`scripts/install.sh` でバイナリ配置後、素の iTerm2 タブで試すこと
+(tmux は非スコープ。§8.1):
+
+> **フォルダを移動したら `cargo clean` を1回**。`env!("CARGO_MANIFEST_DIR")` がビルド時に
+> 絶対パスを焼き込むため、リポジトリを移動するとテスト(fixtures 読み込み)が旧パスを見て
+> 失敗する。クリーンビルドで直る(2026-07-04 の shiibar → shiibar-cc 移動で遭遇)。
 
 ```sh
 SHIIBAR_CC_LOG=debug shiibar-ccd --foreground      # 1 タブで起動しておく
@@ -75,6 +79,10 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 - **既知の注意**: osascript 呼び出しにタイムアウトがない。初回 TCC ダイアログ待ちや iTerm2 の応答遅延で
   focus/focused が一時的にハングし得る(検証中に約 2 分の事例が 1 回、再現性なし)。ハングしたら Ctrl-C でよい
+- **AppleScript の制約(2026-07-04 実機で確認)**: iTerm2 の `id of session`(UUID)・`index of window` は
+  取れるが `index of tab` は取れない(`-1728`)。focused は UUID のみ返す実装にしてある。
+  この種の「実 iTerm2 と AppleScript の相性」は fake runner の単体テストでは捕まらないので、
+  iterm モジュールを変えたら必ず実機で focus / focused を叩くこと
 
 ## ドッグフーディング運用(M2〜M3 の期間)
 
