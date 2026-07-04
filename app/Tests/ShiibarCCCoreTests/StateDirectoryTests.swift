@@ -22,4 +22,8 @@ final class StateDirectoryTests: XCTestCase {
     func testSocketPathIsRootPlusSockFile() {
         XCTAssertEqual(StateDirectory.socketPath(root: "/tmp/x"), "/tmp/x/shiibar-ccd.sock")
     }
+
+    func testDaemonLogPathIsRootPlusLogFile() {
+        XCTAssertEqual(StateDirectory.daemonLogPath(root: "/tmp/x"), "/tmp/x/shiibar-ccd.log")
+    }
 }

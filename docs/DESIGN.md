@@ -280,7 +280,8 @@ Rust 製 daemon。tokio + Unix socket。
   行の形式は `sessions` 応答と同じ `{session_id, cwd, last_status, last_seen}`(last_status は §3.1 の 3 値。
   SessionEnd 時は直前の状態)。読み込み時に session_id で重複排除(最新優先)。
   起動時に 1000 行を超えていたら重複排除して書き直す
-- **ログ**: stderr に 1 行 1 イベントで出力(launchd 経由では `shiibar-ccd.log` にリダイレクト)。
+- **ログ**: stderr に 1 行 1 イベントで出力。メニューバーアプリが spawn する場合(§4.5)は、アプリが stderr を
+  state dir の `shiibar-ccd.log` にリダイレクトする(上書きでよい。ログレスで切り分け不能な状態を作らない)。
   レベルは `SHIIBAR_CC_LOG`(error / info / debug、既定 info)。report 受信は debug、状態遷移と削除は info で記録する
 - **ライフサイクル**: daemon はメニューバーアプリが起動・停止を管理する(launchd には常駐させない。§8.8)。
   開発時および M4 以前のドッグフーディングは `shiibar-ccd --foreground` で手動起動する。
@@ -382,9 +383,14 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   - 通知の掃除: focus・unreviewed が下りたときに該当 target の配信済み通知を `removeDeliveredNotifications` で消す。
     **`agent_removed` の `reason` が `session_end`(ペイン閉じ)のときは消さない**(まだ見ていない完了通知を、
     タブを閉じただけで撤去しないため。それ以外の reason は掃除してよい。§4.2)
-- **異常の可視化**(黙って機能停止しない): 以下はドロップダウン先頭に警告行を常設表示する —
+- **異常の可視化**(黙って機能停止しない): 以下はドロップダウン**末尾**に警告行を常設表示する
+  (切断はトレイ全体のグレー化が一次シグナルなので、ドロップダウン内は一覧を優先し警告を下に置く) —
   daemon と切断中(再接続バックオフ中。古いスナップショットを正常と誤認させない。
-  **切断中はトレイ全体もグレー化**する)/ 通知権限が denied / focus が TCC エラー(exit 3)を返した
+  **切断中はトレイ全体もグレー化**する)/ 通知権限が denied /
+  **focus・reconcile・focused のいずれかが TCC エラー(exit 3)を返した**(reconcile が権限で沈黙すると
+  backstop ごと失われるため、focus に限定しない)。
+  また、アプリが実行する subprocess の失敗(非ゼロ exit)は exit code と stderr を os_log に記録する
+  (黙って握りつぶさない — 本項の大原則)
 - **daemon のライフサイクル管理**: アプリ起動時に socket へ接続し、応答があれば**既存 daemon にアタッチ**する
   (アプリのクラッシュ等で残った orphan daemon もここで回収される。daemon 側の二重起動防止は §4.2 の
   起動シーケンスが担う)。応答がなければ同梱の `shiibar-ccd` を spawn し、バックオフ再接続で繋ぐ。

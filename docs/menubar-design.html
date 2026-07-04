@@ -119,9 +119,10 @@
   <ul>
     <li>最上部: <strong>⌄ ボタン</strong>(中に Back = <code>focus -</code> / Rescan = <code>reconcile</code> /
       Mute Sound(ミュート中はチェックマーク)/ <strong>Quit</strong>)。
-      <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)。
-      警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)はこの直下に常設表示 —
-      <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。クリック動作なし(切り分けは <code>doctor</code>)</li>
+      <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
+    <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
+      (一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
+      クリック動作なし(切り分けは <code>doctor</code>)</li>
     <li><strong>グループ見出し</strong>: トレイと同形の窓アイコン(線画・24px 相当)+ 太字ラベル
       <strong>Waiting / Working / Idle</strong>(通常文字色)。空グループは見出しごと非表示</li>
     <li>行はグループごとの<strong>薄い背景カード</strong>(inset grouped)でまとめる(字下げはしない)</li>
@@ -152,7 +153,7 @@
       <div class="mi"><span class="grow">dotfiles<span class="sub">1h</span></span><span class="ucol"></span></div>
       </div>
     </div>
-    <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない)</div>
+    <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
     <div class="menu" style="width:380px">
       <div class="topbar"><span class="vbtn">⌄</span></div>
       <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;color:var(--menu-text2);font-size:12px">⚠ Disconnected from daemon — reconnecting…</div>

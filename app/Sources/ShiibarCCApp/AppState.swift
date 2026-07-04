@@ -33,8 +33,11 @@ final class AppState: ObservableObject {
         self.muted = notificationManager.isMuted
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
-        let socketPath = StateDirectory.socketPath(root: root)
-        self.lifecycle = DaemonLifecycleManager(socketPath: socketPath, helpersDirectory: helpersDirectory)
+        self.lifecycle = DaemonLifecycleManager(
+            socketPath: StateDirectory.socketPath(root: root),
+            daemonLogPath: StateDirectory.daemonLogPath(root: root),
+            helpersDirectory: helpersDirectory
+        )
 
         notificationManager.currentlyUnreviewedTargets = { [weak self] in
             Set((self?.agents ?? []).filter(\.unreviewed).map(\.target))
@@ -158,19 +161,43 @@ final class AppState: ObservableObject {
 
     /// Close the MenuBarExtra window-style dropdown panel (§4.5).
     ///
-    /// macOS 13 has no public API we could verify for dismissing this panel
-    /// programmatically (`@Environment(\.dismiss)` is not documented to
-    /// cover MenuBarExtra), so this closes the app's visible windows,
-    /// excluding the status item's own host window (class
-    /// `NSStatusBarWindow` — closing that would remove the tray icon).
-    /// This app is an accessory with no other windows, so the only thing
-    /// this can hit is the dropdown panel; the class-name exclusion is the
-    /// one private-API assumption (on-device checkpoint: the tray icon must
-    /// survive a row click).
+    /// macOS 13 exposes no public dismissal API for this panel and no
+    /// presented-state binding for MenuBarExtra (`isInserted` only controls
+    /// menu bar insertion), so the panel must be closed through
+    /// MenuBarExtra's OWN toggle path: synthesizing a click on the status
+    /// item's button (`performClick`). Closing the panel's window directly
+    /// (`window.close()`) hides it but leaves MenuBarExtra's internal
+    /// open/closed state saying "open" — the next tray click is then
+    /// consumed flipping that state back and appears to do nothing (seen
+    /// on-device). The synthetic click keeps the internal state in sync,
+    /// exactly like a user clicking the tray to close.
+    ///
+    /// Private-API assumptions (shared with `observeDropdownOpen`): the
+    /// status item's host window class is `NSStatusBarWindow`, and its view
+    /// hierarchy contains the status button (an NSButton subclass). Failure
+    /// mode if a macOS version breaks either: we fall back to closing the
+    /// panel window directly, which still closes the dropdown but degrades
+    /// to the consumed-first-click behavior (on-device checkpoint).
     private func dismissDropdown() {
+        if let statusWindow = NSApp.windows.first(where: { $0.className.contains("NSStatusBarWindow") }),
+           let button = firstButton(in: statusWindow.contentView) {
+            button.performClick(nil)
+            return
+        }
+        // Degraded fallback: closes the panel but desyncs MenuBarExtra's
+        // toggle (next tray click gets consumed).
         for window in NSApp.windows where window.isVisible && !window.className.contains("NSStatusBarWindow") {
             window.close()
         }
+    }
+
+    private func firstButton(in view: NSView?) -> NSButton? {
+        guard let view else { return nil }
+        if let button = view as? NSButton { return button }
+        for subview in view.subviews {
+            if let found = firstButton(in: subview) { return found }
+        }
+        return nil
     }
 
     func focus(target: String) {

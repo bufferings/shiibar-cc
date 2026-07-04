@@ -10,6 +10,10 @@ import ShiibarCCCore
 @MainActor
 final class DaemonLifecycleManager {
     private let socketPath: String
+    /// `<state dir>/shiibar-ccd.log` — where an app-spawned daemon's stderr
+    /// goes (§4.2). Derived from the same resolved state dir as the socket,
+    /// so it honors `SHIIBAR_CC_STATE_DIR` like everything else.
+    private let daemonLogPath: String
     private let helpersDirectory: URL?
     private var connection: DaemonConnection?
     private var reconnectAttempt = 0
@@ -24,8 +28,9 @@ final class DaemonLifecycleManager {
     /// Called (main actor) for every decoded subscribe event.
     var onEvent: ((SubscribeEvent) -> Void)?
 
-    init(socketPath: String, helpersDirectory: URL?) {
+    init(socketPath: String, daemonLogPath: String, helpersDirectory: URL?) {
         self.socketPath = socketPath
+        self.daemonLogPath = daemonLogPath
         self.helpersDirectory = helpersDirectory
     }
 
@@ -88,6 +93,23 @@ final class DaemonLifecycleManager {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = []
+        // §4.2: an app-spawned daemon must not be log-less — redirect its
+        // stderr (the daemon's only log stream) to <state dir>/
+        // shiibar-ccd.log, overwriting the previous run's file. The state
+        // dir may not exist yet on a first run (the daemon itself creates
+        // it at bind time, but the log file must exist before the daemon
+        // runs), so create it here too. If any of this fails, still spawn —
+        // a log-less daemon beats no daemon.
+        let logDirectory = (daemonLogPath as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(
+            atPath: logDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        FileManager.default.createFile(atPath: daemonLogPath, contents: nil)
+        if let logHandle = FileHandle(forWritingAtPath: daemonLogPath) {
+            process.standardError = logHandle
+        }
         do {
             try process.run()
             daemonProcess = process

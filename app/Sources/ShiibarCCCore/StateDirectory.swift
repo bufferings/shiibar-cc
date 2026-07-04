@@ -22,4 +22,10 @@ public enum StateDirectory {
     public static func socketPath(root: String) -> String {
         root + "/shiibar-ccd.sock"
     }
+
+    /// Daemon log file (§4.2): where the app redirects an app-spawned
+    /// daemon's stderr. Mirrors `StateDir::log_file` in shiibar-ccd (Rust).
+    public static func daemonLogPath(root: String) -> String {
+        root + "/shiibar-ccd.log"
+    }
 }

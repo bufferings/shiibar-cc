@@ -14,16 +14,6 @@ struct DropdownView: View {
         VStack(alignment: .leading, spacing: 2) {
             TopBar(state: state)
 
-            if !state.connected {
-                WarningRow(text: "Disconnected from daemon — reconnecting…")
-            }
-            if state.notificationManager.permissionDenied {
-                WarningRow(text: "Notifications permission denied")
-            }
-            if state.focusTCCWarning {
-                WarningRow(text: "Focus failed: automation permission needed (run \"shiibar-cc doctor\")")
-            }
-
             // Elapsed times are computed against `dropdownOpenedAt` — the
             // instant this open of the dropdown was captured (DESIGN.md
             // §4.5: fixed while open, no per-second ticking, fresh on
@@ -48,6 +38,21 @@ struct DropdownView: View {
                     }
                 }
                 .frame(maxHeight: 360)
+            }
+
+            // Warning rows live at the BOTTOM of the dropdown (DESIGN.md
+            // §4.5 / menubar-design.html: the tray-wide grayout is the
+            // primary disconnect signal, so the agent list gets priority).
+            // Monochrome + ⚠, never red (red = unreviewed only), no click
+            // action (triage belongs to `shiibar-cc doctor`).
+            if !state.connected {
+                WarningRow(text: "Disconnected from daemon — reconnecting…")
+            }
+            if state.notificationManager.permissionDenied {
+                WarningRow(text: "Notifications permission denied")
+            }
+            if state.focusTCCWarning {
+                WarningRow(text: "Focus failed: automation permission needed (run \"shiibar-cc doctor\")")
             }
         }
         .padding(.vertical, 6)
