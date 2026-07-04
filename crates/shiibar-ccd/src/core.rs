@@ -11,7 +11,8 @@ use crate::{log_debug, log_info};
 use crate::logging::Logger;
 use crate::paths::StateDir;
 use shiibar_cc_proto::{
-    Agent, HookEvent, InfoResponse, ListResponse, ReconcileSession, ReportPayload, SessionsResponse, Status,
+    Agent, HookEvent, InfoResponse, ListResponse, ReconcileSession, RemovalReason, ReportPayload,
+    SessionsResponse, Status,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -33,7 +34,7 @@ pub const BROADCAST_CAPACITY: usize = 1024;
 #[derive(Debug, Clone, PartialEq)]
 pub enum BroadcastEvent {
     StatusChanged(Agent),
-    AgentRemoved { target: String },
+    AgentRemoved { target: String, reason: RemovalReason },
 }
 
 pub struct Core {
@@ -129,6 +130,7 @@ impl Core {
                 self.append_session_record(&previous, last_status);
                 let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                     target: previous.target,
+                    reason: RemovalReason::SessionEnd,
                 });
             }
             Outcome::Updated { entry, previous } => {
@@ -204,6 +206,7 @@ impl Core {
             self.persist_state();
             let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                 target: removed.target,
+                reason: RemovalReason::Remove,
             });
         }
     }
@@ -276,6 +279,7 @@ impl Core {
                 );
                 broadcasts.push(BroadcastEvent::AgentRemoved {
                     target: removed.target,
+                    reason: RemovalReason::Prune,
                 });
                 changed = true;
             }
@@ -307,6 +311,7 @@ impl Core {
                 );
                 let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                     target: removed.target,
+                    reason: RemovalReason::Stale,
                 });
                 removed_any = true;
             } else {

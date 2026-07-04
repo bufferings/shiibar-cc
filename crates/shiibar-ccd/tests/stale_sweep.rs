@@ -9,7 +9,7 @@
 //! wall-clock time to make it fire would add complexity for no additional
 //! coverage of the behavior this test cares about.
 
-use shiibar_cc_proto::{HookEvent, ReportPayload, Status};
+use shiibar_cc_proto::{HookEvent, RemovalReason, ReportPayload, Status};
 use shiibar_ccd::clock::FakeClock;
 use shiibar_ccd::core::{BroadcastEvent, Core, BROADCAST_CAPACITY};
 use shiibar_ccd::logging::{Level, Logger};
@@ -60,7 +60,10 @@ fn stale_entry_is_removed_and_broadcast_fresh_entry_is_kept() {
     assert_eq!(core.agents[0].status, Status::Idle);
 
     match rx.try_recv().expect("expected an agent_removed broadcast") {
-        BroadcastEvent::AgentRemoved { target } => assert_eq!(target, "a"),
+        BroadcastEvent::AgentRemoved { target, reason } => {
+            assert_eq!(target, "a");
+            assert_eq!(reason, RemovalReason::Stale, "stale sweep must report reason=stale (§4.2)");
+        }
         other => panic!("expected AgentRemoved, got {other:?}"),
     }
     assert!(rx.try_recv().is_err(), "b must not be removed/broadcast");

@@ -15,7 +15,7 @@
 
 mod support;
 
-use shiibar_cc_proto::{extract::build_report, HookEvent, Status, SubscribeEvent};
+use shiibar_cc_proto::{extract::build_report, HookEvent, RemovalReason, Status, SubscribeEvent};
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
@@ -96,10 +96,14 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
         other => panic!("expected status_changed(idle), got {other:?}"),
     }
 
-    // 6. SessionEnd -> removed.
+    // 6. SessionEnd -> removed, reason session_end (§4.2: the app must not
+    //    sweep a not-yet-reviewed completion toast for this reason).
     send(&daemon, "session_end.json", HookEvent::SessionEnd).await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target } => assert_eq!(target, TARGET),
+        SubscribeEvent::AgentRemoved { target, reason } => {
+            assert_eq!(target, TARGET);
+            assert_eq!(reason, RemovalReason::SessionEnd);
+        }
         other => panic!("expected agent_removed, got {other:?}"),
     }
 
