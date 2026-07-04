@@ -199,8 +199,8 @@ async fn handle_subscribe(
                             return;
                         }
                     }
-                    Ok(BroadcastEvent::AgentRemoved { target }) => {
-                        if !write_event(&mut write_half, &SubscribeEvent::AgentRemoved { target }).await {
+                    Ok(BroadcastEvent::AgentRemoved { target, reason }) => {
+                        if !write_event(&mut write_half, &SubscribeEvent::AgentRemoved { target, reason }).await {
                             return;
                         }
                     }

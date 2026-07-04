@@ -103,7 +103,7 @@ pub fn wait(
                     }
                 }
             },
-            SubscribeEvent::AgentRemoved { target } => {
+            SubscribeEvent::AgentRemoved { target, .. } => {
                 if tracked.as_deref() == Some(target.as_str()) {
                     return Ok(WaitOutcome::Removed);
                 }

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# shiibar-cc M2 install: build shiibar-ccd/shiibar-cc in release mode, place them
-# (plus hooks/report.sh) under ~/.local/bin, and print hooks-configuration
-# guidance. DESIGN.md §5 / §4.5 for what belongs here vs. M4:
-#   - M2 (this script): binaries + hooks only. daemon lifecycle is manual
-#     (`shiibar-ccd --foreground`, DESIGN.md §8.8) until the menu bar app
-#     exists.
-#   - M4: .app bundling, Login Items, and switching the CLI symlink target
-#     to the .app's embedded binaries (DESIGN.md §4.5 "bundling").
+# shiibar-cc install (M2 binaries+hooks, extended in M4 with .app bundling):
+# build the menu bar app + shiibar-ccd/shiibar-cc in release mode, bundle
+# them into shiibar-cc.app (Contents/Helpers/), ad-hoc sign with a stable
+# local identity, symlink ~/.local/bin/shiibar-cc to the bundled binary,
+# register the app as a Login Item (by launching it once — it
+# self-registers via SMAppService, DESIGN.md §4.5), and print hooks
+# configuration guidance.
 #
 # Deliberately does NOT touch ~/.claude/settings.json: merging hooks into
 # a user's existing settings safely (preserving unrelated hooks/config,
@@ -19,20 +18,104 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
+APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
+APP_NAME="shiibar-cc.app"
+APP_PATH="$APP_DIR/$APP_NAME"
+BUNDLE_ID="cc.shiibar.menubar"
+SIGNING_IDENTITY_CN="shiibar-cc-local-signing"
 
 echo "==> Building shiibar-ccd / shiibar-cc (release)..."
 (cd "$ROOT" && cargo build --release -p shiibar-ccd -p shiibar-cc)
 
-echo "==> Installing to $BIN_DIR"
+echo "==> Building the menu bar app (release)..."
+(cd "$ROOT/app" && swift build -c release)
+APP_BIN_DIR="$(cd "$ROOT/app" && swift build -c release --show-bin-path)"
+
+echo "==> Assembling $APP_PATH"
+rm -rf "$APP_PATH"
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers"
+
+install -m 755 "$APP_BIN_DIR/ShiibarCCApp" "$APP_PATH/Contents/MacOS/ShiibarCCApp"
+install -m 755 "$ROOT/target/release/shiibar-ccd" "$APP_PATH/Contents/Helpers/shiibar-ccd"
+install -m 755 "$ROOT/target/release/shiibar-cc" "$APP_PATH/Contents/Helpers/shiibar-cc"
+
+cat > "$APP_PATH/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>ShiibarCCApp</string>
+	<key>CFBundleIdentifier</key>
+	<string>$BUNDLE_ID</string>
+	<key>CFBundleName</key>
+	<string>shiibar-cc</string>
+	<key>CFBundleDisplayName</key>
+	<string>shiibar-cc</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Personal tool, not distributed.</string>
+</dict>
+</plist>
+PLIST
+
+echo "==> Code signing (stable local identity, so rebuilds don't reset notification permission — DESIGN.md §4.5)"
+find_identity() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | grep "$SIGNING_IDENTITY_CN" \
+    | head -1 \
+    | sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+([0-9A-Fa-f]+)[[:space:]].*$/\1/'
+}
+SIGN_ID="$(find_identity || true)"
+if [ -z "$SIGN_ID" ]; then
+  echo "    no existing '$SIGNING_IDENTITY_CN' codesigning identity — creating one (one-time; see scripts/lib/make-local-signing-identity.sh)."
+  if "$ROOT/scripts/lib/make-local-signing-identity.sh" "$SIGNING_IDENTITY_CN"; then
+    SIGN_ID="$(find_identity || true)"
+  fi
+fi
+
+# Sign the helper binaries individually, then the app bundle itself with
+# the notification entitlements (app/ShiibarCCApp.entitlements: requests
+# time-sensitive notifications, DESIGN.md §4.5). Entitlements go on the
+# main app only — helpers are plain CLIs and don't need them.
+ENTITLEMENTS="$ROOT/app/ShiibarCCApp.entitlements"
+sign_all() {
+  local identity="$1"
+  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
+  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
+  codesign --force --sign "$identity" --identifier "$BUNDLE_ID" \
+    --entitlements "$ENTITLEMENTS" "$APP_PATH"
+}
+if [ -n "$SIGN_ID" ]; then
+  sign_all "$SIGN_ID"
+  echo "    signed with local identity $SIGN_ID"
+else
+  echo "    warning: no stable signing identity available; falling back to ad-hoc (-)." >&2
+  echo "    notification permission may reset on the next rebuild — see DESIGN.md §4.5." >&2
+  sign_all "-"
+fi
+
+echo "==> Pointing $BIN_DIR/shiibar-cc / shiibar-ccd at the bundled binaries"
 mkdir -p "$BIN_DIR"
-install -m 755 "$ROOT/target/release/shiibar-ccd" "$BIN_DIR/shiibar-ccd"
-install -m 755 "$ROOT/target/release/shiibar-cc" "$BIN_DIR/shiibar-cc"
+rm -f "$BIN_DIR/shiibar-cc" "$BIN_DIR/shiibar-ccd"
+ln -s "$APP_PATH/Contents/Helpers/shiibar-cc" "$BIN_DIR/shiibar-cc"
+ln -s "$APP_PATH/Contents/Helpers/shiibar-ccd" "$BIN_DIR/shiibar-ccd"
 install -m 755 "$ROOT/hooks/report.sh" "$BIN_DIR/report.sh"
 
 echo
 echo "Installed:"
-echo "  $BIN_DIR/shiibar-ccd"
-echo "  $BIN_DIR/shiibar-cc"
+echo "  $APP_PATH"
+echo "  $BIN_DIR/shiibar-cc -> $APP_PATH/Contents/Helpers/shiibar-cc"
+echo "  $BIN_DIR/shiibar-ccd -> $APP_PATH/Contents/Helpers/shiibar-ccd"
 echo "  $BIN_DIR/report.sh"
 
 case ":$PATH:" in
@@ -68,10 +151,15 @@ else
 fi
 
 echo
-echo "==> daemon"
-echo "shiibar-cc has no launchd/background service yet (M2): start it manually"
-echo "in a terminal you keep around, e.g. in an iTerm2 tab:"
-echo "  $BIN_DIR/shiibar-ccd --foreground"
+echo "==> app / daemon"
+echo "Launching $APP_PATH once (registers it as a Login Item and starts the"
+echo "daemon, DESIGN.md §4.5/§8.8 — no more manual 'shiibar-ccd --foreground')."
+open "$APP_PATH"
 echo
 echo "Then check everything end to end with:"
 echo "  $BIN_DIR/shiibar-cc doctor"
+echo
+echo "First launch: macOS will prompt for a notification permission and,"
+echo "the first time focus/reconcile runs osascript against iTerm2, an"
+echo "Automation permission prompt. Grant both — see menubar-design.html"
+echo "for what a denied/disconnected state looks like in the dropdown."

@@ -234,6 +234,34 @@ pub struct InfoResponse {
     pub last_report_at: Option<i64>,
 }
 
+/// Why an entry was deleted (§3.6, §4.2): which of the four deletion paths
+/// produced this `agent_removed`. The menu bar app uses this to decide
+/// whether to sweep delivered notifications for the target (§4.5) — it
+/// must NOT do so for `SessionEnd` (closing the pane shouldn't wipe an
+/// unread completion toast), but may for the others.
+///
+/// `Unknown` is both the `#[serde(other)]` fallback for a reason string a
+/// future daemon version might add, and the `Default` used by
+/// `#[serde(default)]` when reading a pre-M4 `agent_removed` line that has
+/// no `reason` field at all. Per DESIGN.md §4.2, an unrecognized reason is
+/// treated the same as `Remove` by consumers, so `Unknown` behaves like
+/// `Remove` everywhere except in this enum's own wire representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovalReason {
+    /// SessionEnd hook (pane closed).
+    SessionEnd,
+    /// `last_seen` older than the stale threshold (§9).
+    Stale,
+    /// Manual `shiibar-cc remove` / `{"cmd":"remove"}`.
+    Remove,
+    /// reconcile prune: target absent from a complete `claude agents` scan.
+    Prune,
+    #[serde(other)]
+    #[default]
+    Unknown,
+}
+
 /// Events pushed on a `subscribe` connection (§4.2). `Unknown` is the
 /// forward-compat fallback for a future daemon version's client.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -241,7 +269,11 @@ pub struct InfoResponse {
 pub enum SubscribeEvent {
     Snapshot { agents: Vec<Agent> },
     StatusChanged { agent: Agent },
-    AgentRemoved { target: String },
+    AgentRemoved {
+        target: String,
+        #[serde(default)]
+        reason: RemovalReason,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -296,6 +328,63 @@ mod tests {
     fn unknown_subscribe_event_falls_back_to_unknown() {
         let v: SubscribeEvent = serde_json::from_str(r#"{"event":"future_event","foo":"bar"}"#).unwrap();
         assert_eq!(v, SubscribeEvent::Unknown);
+    }
+
+    #[test]
+    fn agent_removed_matches_wire_example_with_reason() {
+        let line = r#"{"event":"agent_removed","target":"…","reason":"session_end"}"#;
+        let v: SubscribeEvent = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            v,
+            SubscribeEvent::AgentRemoved {
+                target: "…".to_string(),
+                reason: RemovalReason::SessionEnd,
+            }
+        );
+    }
+
+    #[test]
+    fn agent_removed_reason_defaults_to_unknown_when_field_absent() {
+        // Forward/backward compat (§4.2): a pre-M4 agent_removed line has no
+        // `reason` field at all. `#[serde(default)]` must still parse it.
+        let line = r#"{"event":"agent_removed","target":"t"}"#;
+        let v: SubscribeEvent = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            v,
+            SubscribeEvent::AgentRemoved {
+                target: "t".to_string(),
+                reason: RemovalReason::Unknown,
+            }
+        );
+    }
+
+    #[test]
+    fn agent_removed_unrecognized_reason_falls_back_to_unknown() {
+        let line = r#"{"event":"agent_removed","target":"t","reason":"some_future_reason"}"#;
+        let v: SubscribeEvent = serde_json::from_str(line).unwrap();
+        match v {
+            SubscribeEvent::AgentRemoved { reason, .. } => assert_eq!(reason, RemovalReason::Unknown),
+            other => panic!("expected AgentRemoved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_four_removal_reasons_round_trip() {
+        for (reason, wire) in [
+            (RemovalReason::SessionEnd, "session_end"),
+            (RemovalReason::Stale, "stale"),
+            (RemovalReason::Remove, "remove"),
+            (RemovalReason::Prune, "prune"),
+        ] {
+            let event = SubscribeEvent::AgentRemoved {
+                target: "t".to_string(),
+                reason,
+            };
+            let s = serde_json::to_string(&event).unwrap();
+            assert!(s.contains(&format!(r#""reason":"{wire}""#)), "got {s}");
+            let back: SubscribeEvent = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, event);
+        }
     }
 
     #[test]

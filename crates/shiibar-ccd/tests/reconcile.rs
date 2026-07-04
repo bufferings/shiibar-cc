@@ -6,7 +6,7 @@
 mod support;
 
 use shiibar_cc_proto::{
-    AckResponse, HookEvent, ListResponse, ReconcileSession, Request, Status, SubscribeEvent,
+    AckResponse, HookEvent, ListResponse, ReconcileSession, RemovalReason, Request, Status, SubscribeEvent,
     extract::build_report,
 };
 use shiibar_ccd::clock::SystemClock;
@@ -157,8 +157,9 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     // A complete scan without the ghost in the live set prunes it.
     reconcile(&daemon, true, vec![session("t-other", Status::Working, None)]).await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target } => {
+        SubscribeEvent::AgentRemoved { target, reason } => {
             assert_eq!(target, "11111111-1111-1111-1111-111111111111");
+            assert_eq!(reason, RemovalReason::Prune, "reconcile prune must report reason=prune (§4.2)");
         }
         other => panic!("expected agent_removed, got {other:?}"),
     }
