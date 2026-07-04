@@ -83,13 +83,25 @@ if [ -z "$SIGN_ID" ]; then
   fi
 fi
 
+# Sign the helper binaries individually, then the app bundle itself with
+# the notification entitlements (app/ShiibarCCApp.entitlements: requests
+# time-sensitive notifications, DESIGN.md §4.5). Entitlements go on the
+# main app only — helpers are plain CLIs and don't need them.
+ENTITLEMENTS="$ROOT/app/ShiibarCCApp.entitlements"
+sign_all() {
+  local identity="$1"
+  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
+  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
+  codesign --force --sign "$identity" --identifier "$BUNDLE_ID" \
+    --entitlements "$ENTITLEMENTS" "$APP_PATH"
+}
 if [ -n "$SIGN_ID" ]; then
-  codesign --force --deep --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "$APP_PATH"
+  sign_all "$SIGN_ID"
   echo "    signed with local identity $SIGN_ID"
 else
   echo "    warning: no stable signing identity available; falling back to ad-hoc (-)." >&2
   echo "    notification permission may reset on the next rebuild — see DESIGN.md §4.5." >&2
-  codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_PATH"
+  sign_all "-"
 fi
 
 echo "==> Pointing $BIN_DIR/shiibar-cc / shiibar-ccd at the bundled binaries"

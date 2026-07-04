@@ -42,8 +42,17 @@ final class RollupTests: XCTestCase {
         XCTAssertFalse(Rollup.icon(statuses: [.waiting], hasUnreviewed: false, daemonConnected: true).hasUnreviewedDot)
     }
 
-    func testUnknownStatusDoesNotElevateAboveIdleTier() {
+    func testUnknownStatusIsIgnoredInTheRollup() {
+        // DESIGN.md §4.2/§4.5: clients ignore unknown statuses — they don't
+        // participate in the rollup at all.
         let state = Rollup.icon(statuses: [.unknown, .idle], hasUnreviewed: false, daemonConnected: true)
         XCTAssertEqual(state.glyph, .idle)
+        XCTAssertEqual(state.dim, Rollup.idleDim)
+    }
+
+    func testAllUnknownStatusesShowTheNoAgentsGlyph() {
+        let state = Rollup.icon(statuses: [.unknown, .unknown], hasUnreviewed: false, daemonConnected: true)
+        XCTAssertEqual(state.glyph, .none)
+        XCTAssertEqual(state.dim, Rollup.noAgentsDim)
     }
 }

@@ -1,4 +1,4 @@
-// Tray icon rollup (menubar-design.html "トレイ" section, DESIGN.md §4.5):
+// Tray icon rollup (the tray section of menubar-design.html, DESIGN.md §4.5):
 // one status glyph represents the whole agent table, plus an independent
 // red-dot flag for "any agent unreviewed".
 
@@ -48,25 +48,24 @@ public enum Rollup {
     ///     "no agents" dim level regardless of `statuses`, since a stale
     ///     rollup must not be shown as current.
     ///
-    /// Note: an `.unknown` status (forward-compat, §4.2) does not fit the
-    /// documented waiting/working/idle priority order. This implementation
-    /// treats it as the lowest tier (same as idle) rather than elevating
-    /// the rollup on an unrecognized status — DESIGN.md does not spell this
-    /// case out explicitly (flagged as a spec ambiguity in the M4 report).
+    /// An `.unknown` status (forward-compat fallback) is ignored entirely
+    /// (DESIGN.md §4.2/§4.5: clients ignore unknown statuses): it does not
+    /// participate in the rollup, same as the dropdown hides it. If every
+    /// agent's status is unknown, the tray shows the no-agents glyph.
     public static func icon(statuses: [AgentStatus], hasUnreviewed: Bool, daemonConnected: Bool) -> TrayIconState {
         guard daemonConnected else {
             return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
         }
-        guard !statuses.isEmpty else {
+        let known = statuses.filter { $0 != .unknown }
+        guard !known.isEmpty else {
             return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
         }
-        if statuses.contains(.waiting) {
+        if known.contains(.waiting) {
             return TrayIconState(glyph: .waiting, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
-        if statuses.contains(.working) {
+        if known.contains(.working) {
             return TrayIconState(glyph: .working, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
-        // Everything left is idle or unknown (lowest tier either way).
         return TrayIconState(glyph: .idle, dim: idleDim, hasUnreviewedDot: hasUnreviewed)
     }
 }

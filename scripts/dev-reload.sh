@@ -44,13 +44,21 @@ if [ -d "$APP_PATH" ]; then
 
   # Re-sign with whatever this bundle was already signed with, so its
   # notification-permission identity doesn't move (DESIGN.md §4.5); ad-hoc
-  # is the safe fallback if that lookup fails.
+  # is the safe fallback if that lookup fails. Same layering as install.sh:
+  # helpers plain, main app with the notification entitlements.
+  ENTITLEMENTS="$ROOT/app/ShiibarCCApp.entitlements"
+  sign_all() {
+    local identity="$1"
+    codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
+    codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
+    codesign --force --sign "$identity" --identifier "$BUNDLE_ID" \
+      --entitlements "$ENTITLEMENTS" "$APP_PATH"
+  }
   SIGN_ID="$(codesign -dvv "$APP_PATH" 2>&1 | awk -F'=' '/^Authority=/{print $2; exit}')"
   if [ -n "${SIGN_ID:-}" ] && [ "$SIGN_ID" != "adhoc" ]; then
-    codesign --force --deep --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "$APP_PATH" || \
-      codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_PATH"
+    sign_all "$SIGN_ID" || sign_all "-"
   else
-    codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_PATH"
+    sign_all "-"
   fi
 
   echo "==> Relaunching $APP_PATH"

@@ -1,14 +1,15 @@
-// Tray icon rendering (menubar-design.html "トレイ"): rounded window + ❯ +
-// status glyph, two-layer composited — the window/prompt/glyph render as
-// ordinary SwiftUI content inside the `MenuBarExtra` label (which NSStatusItem
-// automatically tints to match the menu bar's foreground color, the same
-// effect a template NSImage gets), with the red unreviewed dot drawn as a
-// literal (non-tinted) color on top. See the M4 completion report for why
-// this was chosen over manual NSImage template compositing.
+// Tray icon rendering (the tray section of menubar-design.html): the shared
+// window glyph (`WindowGlyphView`: rounded window + ❯ + status character),
+// two-layer composited — the glyph renders as ordinary SwiftUI content
+// inside the `MenuBarExtra` label (which NSStatusItem automatically tints
+// to match the menu bar's foreground color, the same effect a template
+// NSImage gets), with the red unreviewed dot drawn as a literal
+// (non-tinted) color overhanging the top-right corner, with a light halo
+// ring (menubar-design.html: halo always drawn; invisible on light bars by
+// design, since a template image can't know the bar color).
 //
-// `✳` here is the plain U+2733 EIGHT SPOKED ASTERISK character (task brief
-// M4 / menubar-design.html: must not be reshaped into the Anthropic
-// sunburst logo).
+// The dim level applies to the WHOLE composition, red dot included
+// (menubar-design.html: while disconnected the entire tray grays out).
 
 import ShiibarCCCore
 import SwiftUI
@@ -16,35 +17,10 @@ import SwiftUI
 struct TrayIconView: View {
     let state: TrayIconState
 
-    private var glyphText: String {
-        switch state.glyph {
-        case .waiting: return "!"
-        case .working: return "\u{2733}" // ✳ EIGHT SPOKED ASTERISK
-        case .idle: return "_"
-        case .none: return ""
-        }
-    }
-
-    private var glyphWeight: Font.Weight {
-        switch state.glyph {
-        case .waiting: return .bold
-        case .working: return .regular
-        case .idle: return .light
-        case .none: return .regular
-        }
-    }
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            HStack(spacing: 1) {
-                Text("\u{276F}") // ❯
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                if !glyphText.isEmpty {
-                    Text(glyphText)
-                        .font(.system(size: 11, weight: glyphWeight, design: .monospaced))
-                }
-            }
-            .opacity(state.dim)
+            WindowGlyphView(glyph: state.glyph, size: 16)
+                .padding(.top, 2)
 
             if state.hasUnreviewedDot {
                 Circle()
@@ -55,9 +31,10 @@ struct TrayIconView: View {
                             .fill(Color.red)
                             .frame(width: 6, height: 6)
                     )
-                    .offset(x: 4, y: -4)
+                    .offset(x: 3, y: -2)
             }
         }
-        .frame(width: 26, height: 16)
+        .opacity(state.dim)
+        .frame(width: 22, height: 18)
     }
 }

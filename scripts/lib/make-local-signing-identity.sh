@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create (once) a local, self-signed code-signing identity in the login
-# keychain, trusted for code signing (DESIGN.md §4.5: "install スクリプトが
-# 安定した署名 ID を使う"). Plain ad-hoc signing (`codesign --sign -`) gives
+# keychain, trusted for code signing (DESIGN.md §4.5: the install script
+# must use a stable signing identity). Plain ad-hoc signing (`codesign --sign -`) gives
 # the app a *new* identity derived from the binary's own hash on every
 # rebuild; several TCC-gated permissions (notifications among them) are
 # reset when that identity changes. A locally-trusted self-signed

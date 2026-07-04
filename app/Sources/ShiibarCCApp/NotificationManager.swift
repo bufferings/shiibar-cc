@@ -83,14 +83,28 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let target = edge.target
         DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
             guard let self else { return }
-            // Re-check at fire time (§4.5): the caller supplies the latest
-            // known state via `currentlyUnreviewedTargets`.
-            let stillUnreviewed = self.currentlyUnreviewedTargets().contains(target)
-            let foreground = CLIRunner.focusedTarget(helpersDirectory: self.helpersDirectoryProvider()) == target
-            guard DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: stillUnreviewed, targetIsForeground: foreground) else {
-                return
+            // Cheap early-out on the main actor: if the flag already
+            // dropped during the delay, skip the subprocess entirely.
+            guard self.currentlyUnreviewedTargets().contains(target) else { return }
+            let helpers = self.helpersDirectoryProvider()
+            // The foreground check runs `shiibar-cc focused` synchronously —
+            // that must happen off the main thread (it would otherwise
+            // block the run loop for the subprocess's duration), then hop
+            // back for the final decision + delivery.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let foreground = CLIRunner.focusedTarget(helpersDirectory: helpers) == target
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // Re-check at fire time (§4.5), with the state as of
+                    // *after* the subprocess finished.
+                    let stillUnreviewed = self.currentlyUnreviewedTargets().contains(target)
+                    guard DelayedNotificationDecision.shouldNotify(
+                        currentlyUnreviewed: stillUnreviewed,
+                        targetIsForeground: foreground
+                    ) else { return }
+                    self.deliver(edge: edge)
+                }
             }
-            self.deliver(edge: edge)
         }
     }
 

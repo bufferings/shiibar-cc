@@ -1,5 +1,5 @@
-// Dropdown grouping/sorting (DESIGN.md §4.5, menubar-design.html
-// "ドロップダウン"): group by status (Waiting / Working / Idle, empty
+// Dropdown grouping/sorting (DESIGN.md §4.5, the dropdown section of
+// menubar-design.html): group by status (Waiting / Working / Idle, empty
 // groups hidden), unreviewed rows first within each group, row content
 // derived from `message` (waiting) / `task` / label promotion.
 
@@ -72,7 +72,8 @@ public enum Grouping {
     /// Within a group, unreviewed rows sort first; ties keep relative order
     /// (`Array.sorted` is a stable sort in Swift, so re-opening the dropdown
     /// without any change keeps a stable layout, matching the spec's
-    /// "並び順が安定" requirement).
+    /// stable-ordering requirement — §4.5: the order must be stable every
+    /// time the dropdown opens).
     public static func groupedRows(agents: [Agent], now: Int64, home: String?) -> [AgentGroup] {
         var groups: [AgentGroup] = []
         for status in groupOrder {

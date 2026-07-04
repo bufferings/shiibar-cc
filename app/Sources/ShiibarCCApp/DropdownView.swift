@@ -1,5 +1,5 @@
-// Dropdown custom view (menubar-design.html "ドロップダウン", DESIGN.md
-// §4.5): ⌄ menu (Back / Rescan / Mute Sound / Quit), warning rows
+// Dropdown custom view (the dropdown section of menubar-design.html,
+// DESIGN.md §4.5): ⌄ menu (Back / Rescan / Mute Sound / Quit), warning rows
 // (disconnected / notification permission denied / focus TCC error),
 // grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
 // rows with unreviewed bolding + red dot, row click -> focus.
@@ -54,7 +54,12 @@ private struct TopBar: View {
             Menu {
                 Button("Back") { state.focusBack() }
                 Button("Rescan") { state.runReconcile() }
-                Button(state.muted ? "✓ Mute Sound" : "Mute Sound") { state.toggleMute() }
+                // A Toggle inside a Menu renders the native menu checkmark
+                // while muted (the spec's "checkmark while muted").
+                Toggle("Mute Sound", isOn: Binding(
+                    get: { state.muted },
+                    set: { _ in state.toggleMute() }
+                ))
                 Divider()
                 Button("Quit") { state.quit() }
             } label: {
@@ -97,11 +102,25 @@ private struct GroupSection: View {
         }
     }
 
+    /// The header shows the tray-shaped window glyph carrying this group's
+    /// own status character (menubar-design.html: group heading = window
+    /// icon of the same shape as the tray, ~24px, + bold label).
+    private var headerGlyph: TrayGlyph {
+        switch group.status {
+        case .waiting: return .waiting
+        case .working: return .working
+        case .idle: return .idle
+        case .unknown: return .idle // unreachable, as above
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: "macwindow")
-                    .font(.system(size: 12))
+            HStack(spacing: 8) {
+                WindowGlyphView(glyph: headerGlyph, size: 24)
+                    // Optical adjustment from the mock: the label sits on the
+                    // icon's vertical center, icon nudged up ~1.5pt.
+                    .offset(y: -1.5)
                 Text(heading)
                     .font(.system(size: 13, weight: .bold))
             }

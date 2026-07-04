@@ -1,4 +1,4 @@
-// Daemon lifecycle (DESIGN.md §4.5 "daemon のライフサイクル管理"): on launch,
+// Daemon lifecycle management (DESIGN.md §4.5): on launch,
 // try to attach to an already-running daemon; if that fails, spawn the
 // bundled `shiibar-ccd` and keep retrying with backoff. On quit, send
 // `{"cmd":"shutdown"}` so the daemon exits with the app (§8.8: daemon

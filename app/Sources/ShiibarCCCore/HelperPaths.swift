@@ -1,5 +1,5 @@
 // Which absolute path to invoke for the bundled `shiibar-cc` / `shiibar-ccd`
-// binaries (DESIGN.md §4.5 "同梱"): when running as a `.app`, always the
+// binaries (DESIGN.md §4.5 bundling rule): when running as a `.app`, always the
 // bundled `Contents/Helpers/<binary>` absolute path (PATH-independent); in
 // development (`swift run`, before `.app` bundling exists) fall back to the
 // bare binary name, resolved via PATH by the subprocess launcher. This is
