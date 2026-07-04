@@ -59,11 +59,13 @@ Claude Code hooks ──(Unix socket, NDJSON)──► shiibar-ccd
 
 ### 3.1 status(3 値)
 
-| status    | 意味                         | メニューバー |
-| --------- | ---------------------------- | ------------ |
-| `working` | 実行中(あなたの番ではない)   | 黄           |
-| `waiting` | 許可・入力待ち(あなたの番)   | 赤           |
-| `idle`    | 待機中                       | 灰           |
+| status    | 意味                         | 状態文字(表示) |
+| --------- | ---------------------------- | ---------------- |
+| `working` | 実行中(あなたの番ではない)   | `✳`(細)        |
+| `waiting` | 許可・入力待ち(あなたの番)   | `!`(太)        |
+| `idle`    | 待機中                       | `_`(薄)        |
+
+表示に status の色は使わない(**赤は unreviewed 専用**)。見た目の正は menubar-design.html。
 
 ### 3.2 unreviewed フラグ
 
@@ -337,19 +339,23 @@ shiibar-cc doctor             # 診断(下記)
 
 ### 4.5 メニューバーアプリ(`app/`)
 
-SwiftUI(macOS 13+、`MenuBarExtra` または `NSStatusItem`)。tray title でロールアップ常時表示、メニューが一覧、通知クリックで focus。
+SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダウンはカスタムビュー)。
+トレイはロールアップ 1 アイコン常時表示、ドロップダウンが一覧、通知クリックで focus。
 
-- **見た目の正は `docs/menubar-design.html`**。トレイは塗りなしの円形枠線 + 上下左右ランプの点灯/消灯式。
-  status(working / waiting / idle)3 色と unreviewed フラグ(§3)を**どう表現するかは menubar-design.html で検討中**
-  (完了直後の idle+unreviewed の見せ方を含む)。描画は NSImage 合成で状態変化ごとに描き直す。本節は挙動のみを規定する
+- **見た目の正は `docs/menubar-design.html`**(2026-07-05 確定・第 2 版)。トレイ = 角丸の窓 + `❯` + 状態文字の
+  **テンプレートアイコン**(waiting `!` > working `✳` > idle `_` のロールアップ。unreviewed が 1 台でもいれば右肩に赤ドット)。
+  描画は NSImage 合成(または attributed string)で状態変化ごとに描き直す。本節は挙動のみを規定する
 - **daemon 接続**: `NWConnection` で UDS に接続し、subscribe の行 JSON を `JSONDecoder` で読む。
   切断時(daemon 再起動・スリープ復帰)は 1 秒から倍々・上限 30 秒のバックオフで再接続(snapshot で状態回復)。
   未知の event / status は無視する(前方互換)
-- **ドロップダウン**: 行は 2 行 — 1 行目 = ラベル、2 行目 = 状態 + 経過時間 + 作業内容
-  (waiting は `message`(許可内容 / `waitingFor`)、それ以外は `task`(最後の依頼文)。§3.6)。
-  並び順は waiting → working → idle、unreviewed のものを各グループ内で上に(開くたびに並びが安定)。
-  クリックで `shiibar-cc focus <target>` を subprocess 実行。`agent_removed` で行を消す。
-  先頭に「← 戻る」(= `shiibar-cc focus -`)と「再スキャン」(= `shiibar-cc reconcile`。手動リロード)を置く
+- **ドロップダウン**: グループ見出し **Waiting / Working / Idle**(トレイと同形の窓アイコン付き。空グループは非表示)
+  の下に、グループごとのカードで行を並べる。行は 2 行 — **1 行目 = 作業内容**(waiting は `message`(許可内容 /
+  `waitingFor`)、それ以外は `task`(最後の依頼文)。どちらも無ければラベルを昇格。§3.6)、**2 行目 = ラベル + 経過時間**。
+  未読は 1 行目太字 + 赤ドット。並び順は waiting → working → idle、unreviewed のものを各グループ内で上に
+  (開くたびに並びが安定)。クリックで `shiibar-cc focus <target>` を subprocess 実行。`agent_removed` で行を消す。
+  「← 戻る」(Back = `shiibar-cc focus -`)・「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)・
+  音のミュート(Mute Sound)・**Quit** は最上部の **⌄ メニュー**に置く。UI 文言は英語。
+  Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **表示ラベル**: cwd をホーム配下なら `~` 起点にし、末尾 2 要素を表示(足りなければあるだけ)。
   ラベルの重複はそのまま表示する(並び順が安定していれば足りる。区別の工夫は §8.10)。
   git/worktree の概念は持たない(文字列整形のみ。`repo/branch` に見えるのは worktree のディレクトリ名の偶然)
@@ -366,14 +372,14 @@ SwiftUI(macOS 13+、`MenuBarExtra` または `NSStatusItem`)。tray title でロ
   - 通知の掃除: focus・unreviewed が下りたときに該当 target の配信済み通知を `removeDeliveredNotifications` で消す。
     **`agent_removed` が SessionEnd(ペイン閉じ)由来のときは消さない**(まだ見ていない完了通知を、タブを閉じただけで撤去しないため)
 - **異常の可視化**(黙って機能停止しない): 以下はドロップダウン先頭に警告行を常設表示する —
-  daemon と切断中(再接続バックオフ中。古いスナップショットを正常と誤認させない)/
-  通知権限が denied / focus が TCC エラー(exit 3)を返した
+  daemon と切断中(再接続バックオフ中。古いスナップショットを正常と誤認させない。
+  **切断中はトレイ全体もグレー化**する)/ 通知権限が denied / focus が TCC エラー(exit 3)を返した
 - **daemon のライフサイクル管理**: アプリ起動時に socket へ接続し、応答があれば**既存 daemon にアタッチ**する
   (アプリのクラッシュ等で残った orphan daemon もここで回収される。daemon 側の二重起動防止は §4.2 の
   起動シーケンスが担う)。応答がなければ同梱の `shiibar-ccd` を spawn し、バックオフ再接続で繋ぐ。
   アプリ終了(Quit)時は `shutdown` を送って daemon も止める。アプリ自体は Login Items に登録(install スクリプトが設定)
-- **reconcile の実行**: アプリは `shiibar-cc reconcile` を **(1) 起動時 / daemon 再接続時、(2) ドロップダウンの
-  「再スキャン」ボタン** で呼ぶ(§3.5)。これで daemon 不在中の取りこぼし(幽霊・見逃した waiting)を
+- **reconcile の実行**: アプリは `shiibar-cc reconcile` を **(1) 起動時 / daemon 再接続時、(2) ドロップダウン
+  ⌄ メニューの「再スキャン(Rescan)」** で呼ぶ(§3.5)。これで daemon 不在中の取りこぼし(幽霊・見逃した waiting)を
   status レベルで自己修復する。定期ポーリングは v1 では行わない(§8.10 — 主要な穴は起動時 reconcile で塞がり、
   osascript 走査を回し続けるコストを避ける)。hooks 主軸のリアルタイム性は保ったまま backstop になる
 - 配布はしない(当面自分専用)。通知には bundle identifier 付きの .app が必要なため、
