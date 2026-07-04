@@ -44,20 +44,30 @@ if [ -d "$APP_PATH" ]; then
 
   # Re-sign with whatever this bundle was already signed with, so its
   # notification-permission identity doesn't move (DESIGN.md §4.5); ad-hoc
-  # is the safe fallback if that lookup fails. Same layering as install.sh:
-  # helpers plain, main app with the notification entitlements.
-  ENTITLEMENTS="$ROOT/app/ShiibarCCApp.entitlements"
+  # is the fallback if that lookup fails (loud warning below — it resets
+  # the notification permission). Same layering as install.sh: helpers and
+  # app signed individually, and NO entitlements — the time-sensitive
+  # entitlement is restricted, and AMFI refuses to launch a locally-signed
+  # binary that carries it (RBSRequestErrorDomain Code=5 / POSIX 153; see
+  # install.sh).
   sign_all() {
     local identity="$1"
     codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
     codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
-    codesign --force --sign "$identity" --identifier "$BUNDLE_ID" \
-      --entitlements "$ENTITLEMENTS" "$APP_PATH"
+    codesign --force --sign "$identity" --identifier "$BUNDLE_ID" "$APP_PATH"
   }
   SIGN_ID="$(codesign -dvv "$APP_PATH" 2>&1 | awk -F'=' '/^Authority=/{print $2; exit}')"
   if [ -n "${SIGN_ID:-}" ] && [ "$SIGN_ID" != "adhoc" ]; then
-    sign_all "$SIGN_ID" || sign_all "-"
+    sign_all "$SIGN_ID" || {
+      echo "warning: re-signing with '$SIGN_ID' failed; falling back to ad-hoc." >&2
+      echo "Notification permission will reset — re-run scripts/install.sh to fix" >&2
+      echo "the stable identity (DESIGN.md §4.5)." >&2
+      sign_all "-"
+    }
   else
+    echo "warning: the installed bundle was ad-hoc signed; keeping ad-hoc." >&2
+    echo "Notification permission resets on every reload like this — run" >&2
+    echo "scripts/install.sh to set up the stable identity (DESIGN.md §4.5)." >&2
     sign_all "-"
   fi
 

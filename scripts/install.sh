@@ -78,30 +78,49 @@ find_identity() {
 SIGN_ID="$(find_identity || true)"
 if [ -z "$SIGN_ID" ]; then
   echo "    no existing '$SIGNING_IDENTITY_CN' codesigning identity — creating one (one-time; see scripts/lib/make-local-signing-identity.sh)."
-  if "$ROOT/scripts/lib/make-local-signing-identity.sh" "$SIGNING_IDENTITY_CN"; then
-    SIGN_ID="$(find_identity || true)"
-  fi
+  "$ROOT/scripts/lib/make-local-signing-identity.sh" "$SIGNING_IDENTITY_CN" || true
+  SIGN_ID="$(find_identity || true)"
 fi
 
-# Sign the helper binaries individually, then the app bundle itself with
-# the notification entitlements (app/ShiibarCCApp.entitlements: requests
-# time-sensitive notifications, DESIGN.md §4.5). Entitlements go on the
-# main app only — helpers are plain CLIs and don't need them.
-ENTITLEMENTS="$ROOT/app/ShiibarCCApp.entitlements"
+# NO entitlements are requested. com.apple.developer.usernotifications.
+# time-sensitive is a *restricted* entitlement: without an Apple-issued
+# provisioning profile, AMFI refuses to spawn a binary that carries it
+# (launch fails with RBSRequestErrorDomain Code=5 / POSIX 153 — confirmed
+# on a real install). Locally-signed builds therefore ship without it; the
+# app still sets the time-sensitive interruption level at runtime, which
+# the system silently downgrades to a normal alert when unentitled
+# (DESIGN.md §4.5's Focus/DND breakthrough just doesn't apply to this
+# local, non-distributed build).
 sign_all() {
   local identity="$1"
   codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
   codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
-  codesign --force --sign "$identity" --identifier "$BUNDLE_ID" \
-    --entitlements "$ENTITLEMENTS" "$APP_PATH"
+  codesign --force --sign "$identity" --identifier "$BUNDLE_ID" "$APP_PATH"
 }
+
+# A missing stable identity is a hard error by default: silently falling
+# back to ad-hoc would reset the notification permission on every rebuild,
+# defeating the whole point (DESIGN.md §4.5). Escape hatch for a conscious
+# choice: SHIIBAR_CC_ALLOW_ADHOC=1.
 if [ -n "$SIGN_ID" ]; then
   sign_all "$SIGN_ID"
   echo "    signed with local identity $SIGN_ID"
-else
-  echo "    warning: no stable signing identity available; falling back to ad-hoc (-)." >&2
-  echo "    notification permission may reset on the next rebuild — see DESIGN.md §4.5." >&2
+  echo "    note: the first launch may show a keychain prompt asking to let"
+  echo "    codesign/the app use the signing key — choose 'Always Allow'."
+elif [ "${SHIIBAR_CC_ALLOW_ADHOC:-0}" = "1" ]; then
+  echo "    warning: SHIIBAR_CC_ALLOW_ADHOC=1 — signing ad-hoc. Notification" >&2
+  echo "    permission will reset on the next rebuild (DESIGN.md §4.5)." >&2
   sign_all "-"
+else
+  echo "error: no stable '$SIGNING_IDENTITY_CN' codesigning identity is available," >&2
+  echo "and creating one failed (see the messages above from" >&2
+  echo "scripts/lib/make-local-signing-identity.sh for what to fix — typically the" >&2
+  echo "certificate trust step in Keychain Access)." >&2
+  echo >&2
+  echo "Re-run this script after fixing it, or, to consciously accept ad-hoc" >&2
+  echo "signing (notification permission resets on every rebuild):" >&2
+  echo "  SHIIBAR_CC_ALLOW_ADHOC=1 scripts/install.sh" >&2
+  exit 1
 fi
 
 echo "==> Pointing $BIN_DIR/shiibar-cc / shiibar-ccd at the bundled binaries"
