@@ -17,8 +17,19 @@
 #     instead of a bundled .p12 — `security import` matches them into one
 #     identity by public-key hash, and PEM import has no encryption-format
 #     compatibility problem in the first place.
+#   - The private key is CONVERTED to the traditional RSA PEM format
+#     ("BEGIN RSA PRIVATE KEY") before import. `openssl req -keyout` emits
+#     PKCS#8 ("BEGIN PRIVATE KEY"), and `security import` rejects that with
+#     "SecKeychainItemImport: Unknown format in import" for both
+#     `-t priv -f openssl` and `-t priv -f pkcs8` (verified empirically in
+#     a throwaway keychain); the traditional format imports cleanly with
+#     `-t priv -f openssl` and pairs with the certificate into one identity.
 #   - Certificate extensions come from a -config file, not -addext, so the
 #     script also works on older LibreSSL versions that lack -addext.
+#   - IDEMPOTENT: any pre-existing '$COMMON_NAME' identity/certificate is
+#     removed before importing fresh, so re-runs (including re-runs after a
+#     half-failed earlier attempt that left a certificate without its key)
+#     don't accumulate duplicates or pair against a stale orphan.
 #   - The script VERIFIES at the end that a *valid* codesigning identity
 #     actually exists, and fails loudly with instructions if not (an
 #     imported-but-untrusted certificate shows up as 0 valid identities).
@@ -46,7 +57,26 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 CERT_PEM="$WORKDIR/cert.pem"
-KEY_PEM="$WORKDIR/key.pem"
+KEY_PEM="$WORKDIR/key.pem"          # as emitted by `openssl req` (PKCS#8)
+KEY_RSA_PEM="$WORKDIR/key-rsa.pem"  # converted to traditional RSA PEM for import
+
+# Idempotency: remove any previous '$COMMON_NAME' items first. A re-run
+# must not accumulate duplicate certificates, and a half-failed earlier run
+# (certificate imported, key import failed) must not leave an orphan that a
+# later lookup could match instead of the fresh pair. `delete-identity`
+# removes cert+key together when a full identity exists; the fallback
+# `delete-certificate` handles the orphan-cert case. Stale orphan *keys*
+# (no matching cert) are inert — identities pair by public-key hash, so a
+# freshly generated pair can never match a stale key — and the CLI has no
+# delete-key subcommand, so they are deliberately left alone.
+while security find-certificate -c "$COMMON_NAME" "$KEYCHAIN" >/dev/null 2>&1; do
+  echo "Removing pre-existing '$COMMON_NAME' certificate/identity from $KEYCHAIN..."
+  security delete-identity -c "$COMMON_NAME" "$KEYCHAIN" >/dev/null 2>&1 \
+    || security delete-certificate -c "$COMMON_NAME" "$KEYCHAIN" >/dev/null 2>&1 \
+    || { echo "error: could not remove the existing '$COMMON_NAME' certificate;" >&2
+         echo "  delete it in Keychain Access and re-run." >&2
+         exit 1; }
+done
 
 cat > "$WORKDIR/openssl.cnf" <<EOF
 [req]
@@ -65,9 +95,14 @@ echo "Generating a self-signed code-signing certificate ($COMMON_NAME)..."
 "$OPENSSL" req -x509 -newkey rsa:2048 -keyout "$KEY_PEM" -out "$CERT_PEM" \
   -days 3650 -nodes -config "$WORKDIR/openssl.cnf"
 
+# `req -keyout` emits PKCS#8 ("BEGIN PRIVATE KEY"), which `security import`
+# rejects ("Unknown format in import"). Convert to the traditional RSA PEM
+# ("BEGIN RSA PRIVATE KEY"), which imports cleanly with -t priv -f openssl.
+"$OPENSSL" rsa -in "$KEY_PEM" -out "$KEY_RSA_PEM"
+
 echo "Importing certificate + key into $KEYCHAIN..."
 security import "$CERT_PEM" -k "$KEYCHAIN"
-security import "$KEY_PEM" -k "$KEYCHAIN" -t priv -f openssl \
+security import "$KEY_RSA_PEM" -k "$KEYCHAIN" -t priv -f openssl \
   -T /usr/bin/codesign -T /usr/bin/security
 
 echo "Trusting it for code signing (a system dialog will ask for your login password)..."
