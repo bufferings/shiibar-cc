@@ -350,6 +350,14 @@ private struct RowView: View {
         RowSymbol.kind(for: row.status) ?? .idle
     }
 
+    /// Hover highlight, gated on the dropdown actually being open: while
+    /// the panel fades out (row click / focus / outside click), the window
+    /// resigns key first, so this flips false and the closing animation
+    /// never shows a selection-blue row frozen mid-fade.
+    private var showsHighlight: Bool {
+        isHovering && state.isDropdownOpen
+    }
+
     var body: some View {
         Button {
             state.rowClicked(target: row.target)
@@ -371,10 +379,10 @@ private struct RowView: View {
                         .truncationMode(.tail)
                         // menubar-design.html: hovered row text switches to
                         // the selection foreground (white in the mock).
-                        .foregroundStyle(isHovering ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
+                        .foregroundStyle(showsHighlight ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
                     Text("\(row.label) · \(ElapsedTime.format(seconds: row.elapsedSeconds))")
                         .font(.system(size: 11))
-                        .foregroundStyle(isHovering ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(showsHighlight ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(.secondary))
                 }
                 Spacer(minLength: 4)
             }
@@ -385,7 +393,7 @@ private struct RowView: View {
             .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
-        .buttonStyle(HighlightButtonStyle(isHovering: isHovering))
+        .buttonStyle(HighlightButtonStyle(isHovering: showsHighlight))
         .onHover { isHovering = $0 }
     }
 }
