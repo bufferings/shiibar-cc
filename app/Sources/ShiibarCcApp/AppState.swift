@@ -17,6 +17,17 @@ final class AppState: ObservableObject {
     /// would silently lose the whole backstop).
     @Published var tccWarning = false
     @Published var muted: Bool
+    /// Transient topbar text for a manually-triggered Rescan (§4.5/§9:
+    /// "Rescanning…" while in flight, then "✓ Rescan done" / "Rescan failed"
+    /// for `RescanFeedback.displaySeconds` before it clears). `nil` = show
+    /// nothing. Only the manual ⌄-menu Rescan drives this — the automatic
+    /// reconcile calls at startup/reconnect stay silent (§4.5).
+    @Published private(set) var rescanFeedback: RescanFeedback?
+    /// Bumped every time `rescanFeedback` is set, so a stale clear-after-2s
+    /// timer from an earlier run can recognize it's no longer current (e.g.
+    /// the user re-ran Rescan while the previous "✓ Rescan done" was still
+    /// fading out) and skip clearing a newer state out from under it.
+    private var rescanFeedbackGeneration = 0
     /// Elapsed-time base for the dropdown (DESIGN.md §4.5): captured when
     /// the dropdown opens, fixed while it stays open, refreshed on reopen.
     /// See `observeDropdownOpen` for the open signal.
@@ -227,12 +238,51 @@ final class AppState: ObservableObject {
     /// paths — startup, daemon reconnect (`onConnectedChanged`), and the ⌄
     /// menu's Rescan — so a permission failure surfaces even before the
     /// user ever clicks anything.
-    func runReconcile() {
+    ///
+    /// `showFeedback`: only the manual ⌄-menu Rescan passes `true` — §4.5
+    /// scopes the transient feedback to the manual trigger, so the
+    /// automatic startup/reconnect calls stay silent.
+    ///
+    /// Overlapping-run guard: a second manual Rescan while one is already
+    /// running is ignored (simpler than cancelling the in-flight subprocess
+    /// or restarting its feedback timer) — reconcile is idempotent, so a
+    /// duplicate tap during an in-flight run loses nothing but an extra
+    /// subprocess launch; the in-flight run still resyncs state and reports
+    /// its own feedback when it finishes.
+    func runReconcile(showFeedback: Bool = false) {
+        if showFeedback {
+            guard rescanFeedback != .running else { return }
+            showRescanFeedback(.running)
+        }
         DispatchQueue.global(qos: .utility).async { [helpersDirectory] in
             let result = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
+                guard showFeedback else { return }
+                if let feedback = RescanFeedback.forFinishedExitCode(result.exitCode) {
+                    self?.showRescanFeedback(feedback)
+                } else {
+                    // Exit 3 (TCC): the warning row is already handling it
+                    // (via `noteExitCode` above) — clear "Rescanning…"
+                    // immediately rather than flashing transient text too.
+                    self?.rescanFeedback = nil
+                }
             }
+        }
+    }
+
+    /// Set `rescanFeedback` and, for a terminal state, schedule its
+    /// clear-after-`displaySeconds`. The generation check in the scheduled
+    /// closure keeps a stale timer from an earlier run from clearing a
+    /// feedback state that a newer run has since replaced.
+    private func showRescanFeedback(_ feedback: RescanFeedback) {
+        rescanFeedbackGeneration += 1
+        let generation = rescanFeedbackGeneration
+        rescanFeedback = feedback
+        guard feedback != .running else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + RescanFeedback.displaySeconds) { [weak self] in
+            guard let self, self.rescanFeedbackGeneration == generation else { return }
+            self.rescanFeedback = nil
         }
     }
 

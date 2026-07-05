@@ -2,7 +2,10 @@
 // DESIGN.md §4.5): ⌄ menu (Rescan / Mute Sound / Quit), warning rows
 // (disconnected / notification permission denied / focus TCC error),
 // grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
-// rows with unreviewed bolding + red dot, row click -> focus.
+// rows with unreviewed bolding + red dot, row click -> focus. Every
+// clickable element (rows, the ⌄ chip) gets a selection-color hover/press
+// highlight (menubar-design.html's hover/press section); non-interactive
+// elements (group headers, warning rows) get none.
 
 import ShiibarCcCore
 import SwiftUI
@@ -68,11 +71,17 @@ struct DropdownView: View {
 
 private struct TopBar: View {
     @ObservedObject var state: AppState
+    @State private var isHoveringVButton = false
+    @State private var isPressingVButton = false
 
     var body: some View {
         HStack {
             Menu {
-                Button("Rescan") { state.runReconcile() }
+                // The ⌄ POPUP's items (Rescan / Mute Sound / Quit) are a
+                // native SwiftUI Menu, so macOS draws its usual
+                // highlighted-row style on the open popup itself — no
+                // custom hover handling for the popup items here.
+                Button("Rescan") { state.runReconcile(showFeedback: true) }
                 // A Toggle inside a Menu renders the native menu checkmark
                 // while muted (the spec's "checkmark while muted").
                 Toggle("Mute Sound", isOn: Binding(
@@ -82,7 +91,9 @@ private struct TopBar: View {
                 Divider()
                 Button("Quit") { state.quit() }
             } label: {
-                Text("⌄").font(.system(size: 13, weight: .semibold))
+                Text("⌄")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isHoveringVButton ? Color.white : Color.primary)
             }
             // The macOS Menu draws its own pull-down disclosure indicator
             // next to the label, which stacked a second chevron under our ⌄
@@ -93,10 +104,52 @@ private struct TopBar: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            // The ⌄ CHIP (this trigger, as opposed to its popup items) gets
+            // the same selection-color hover/press highlight as a session
+            // row (menubar-design.html lists the session row, the ⌄ button,
+            // and the ⌄ menu items as all getting it). `.onHover` toggles
+            // the highlight; press is tracked with a
+            // `DragGesture(minimumDistance: 0)` rather than a `ButtonStyle`
+            // (which `Menu` doesn't expose a pressed state through) —
+            // `.simultaneousGesture` only OBSERVES the press, leaving
+            // Menu's own tap gesture (which opens the popup) intact.
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color(nsColor: .selectedContentBackgroundColor))
+                    .brightness(isPressingVButton ? -0.15 : 0)
+                    .opacity(isHoveringVButton ? 1 : 0)
+            )
+            .onHover { isHoveringVButton = $0 }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in isPressingVButton = true }
+                    .onEnded { _ in isPressingVButton = false }
+            )
+
+            // Manual-Rescan transient feedback (§4.5/§9), unclickable,
+            // secondary-color 12px text to the right of ⌄.
+            if let feedback = state.rescanFeedback {
+                Text(feedback.topbarText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .allowsHitTesting(false)
+            }
             Spacer()
         }
         .padding(.horizontal, 8)
         .padding(.top, 2)
+    }
+}
+
+private extension RescanFeedback {
+    /// UI text (English; menubar-design.html: "Rescanning…" / "✓ Rescan
+    /// done" / "Rescan failed", no counts).
+    var topbarText: String {
+        switch self {
+        case .running: return "Rescanning…"
+        case .success: return "✓ Rescan done"
+        case .failure: return "Rescan failed"
+        }
     }
 }
 
@@ -165,9 +218,31 @@ private struct GroupSection: View {
     }
 }
 
+/// Selection-color hover/press highlight shared by every Button-based
+/// clickable row in the dropdown (menubar-design.html's hover/press bullet:
+/// rounded 7px, system selection color so it tracks the user's accent color
+/// rather than the mock's literal #3478f6, one step darker while pressed).
+/// `isHovering` comes from the caller's own `.onHover` (SwiftUI's
+/// `ButtonStyle` has no hover state of its own); `configuration.isPressed`
+/// is what `ButtonStyle` DOES expose, so press-darkening lives here.
+private struct HighlightButtonStyle: ButtonStyle {
+    let isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color(nsColor: .selectedContentBackgroundColor))
+                    .brightness(configuration.isPressed ? -0.15 : 0)
+                    .opacity(isHovering ? 1 : 0)
+            )
+    }
+}
+
 private struct RowView: View {
     let row: AgentRow
     @ObservedObject var state: AppState
+    @State private var isHovering = false
 
     var body: some View {
         Button {
@@ -179,9 +254,12 @@ private struct RowView: View {
                         .font(.system(size: 12, weight: row.unreviewed ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        // menubar-design.html: hovered row text switches to
+                        // the selection foreground (white in the mock).
+                        .foregroundStyle(isHovering ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
                     Text("\(row.label) · \(ElapsedTime.format(seconds: row.elapsedSeconds))")
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isHovering ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(.secondary))
                 }
                 Spacer(minLength: 4)
                 if row.unreviewed {
@@ -195,6 +273,7 @@ private struct RowView: View {
             .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(HighlightButtonStyle(isHovering: isHovering))
+        .onHover { isHovering = $0 }
     }
 }
