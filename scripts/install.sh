@@ -67,6 +67,8 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 	<string>1</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
@@ -76,6 +78,14 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+echo "==> Generating app icon (DESIGN.md §4.5, docs/tasks/M5.md T10)"
+ICON_WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$ICON_WORKDIR"' EXIT
+swift "$ROOT/scripts/generate-app-icon.swift" "$ICON_WORKDIR"
+iconutil -c icns "$ICON_WORKDIR/AppIcon.iconset" -o "$ICON_WORKDIR/AppIcon.icns"
+mkdir -p "$APP_PATH/Contents/Resources"
+install -m 644 "$ICON_WORKDIR/AppIcon.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
 
 echo "==> Code signing (stable local identity, so rebuilds don't reset notification permission — DESIGN.md §4.5)"
 SIGN_ID="$(find_signing_identity || true)"
