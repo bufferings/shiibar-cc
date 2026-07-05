@@ -252,12 +252,30 @@ final class AppState: ObservableObject {
         notificationManager.isMuted = muted
     }
 
-    /// ⌄ menu "Quit": stop the daemon, then the app (§4.5/§8.8).
+    /// ⌄ menu "Quit": stop the daemon, then the app (§4.5/§8.8) — but Quit
+    /// must ALWAYS terminate the app, promptly, no matter what state the
+    /// daemon connection is in (a dead daemon made the old
+    /// wait-for-shutdown-ack path hang forever, leaving the app unquittable
+    /// — seen on-device).
+    ///
+    /// Disconnected: there is nothing to shut down (the daemon is already
+    /// gone or unreachable) — terminate immediately.
+    /// Connected: send `shutdown` best-effort. `sendOneShot` itself has a
+    /// 1.5s internal timeout, and a 2s main-queue hard deadline here
+    /// guarantees termination even if that path stalls entirely; whichever
+    /// fires first wins (the loser never runs — the process is gone).
     func quit() {
+        guard connected else {
+            NSApplication.shared.terminate(nil)
+            return
+        }
         lifecycle.shutdown {
             Task { @MainActor in
                 NSApplication.shared.terminate(nil)
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            NSApplication.shared.terminate(nil)
         }
     }
 

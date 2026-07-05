@@ -44,8 +44,18 @@ enum CLIRunner {
         HelperPathResolver.resolvedPath(for: .shiibarCc, helpersDirectory: helpersDirectory)
     }
 
+    /// `expectedExitCodes`: exit codes that are NORMAL outcomes for this
+    /// call site (per DESIGN.md §4.4 semantics), logged at debug instead of
+    /// error so routine probes don't pollute the error log (e.g. `focused`
+    /// exits 2 whenever iTerm2 simply isn't frontmost). Exit 3 (TCC) is
+    /// never expected anywhere — it always error-logs, and callers raise
+    /// the warning row from the returned exit code regardless of logging.
     @discardableResult
-    static func run(_ arguments: [String], helpersDirectory: URL?) -> CLIRunResult {
+    static func run(
+        _ arguments: [String],
+        helpersDirectory: URL?,
+        expectedExitCodes: Set<Int32> = [0]
+    ) -> CLIRunResult {
         let process = Process()
         let path = shiibarCcPath(helpersDirectory: helpersDirectory)
         if path.contains("/") {
@@ -76,37 +86,52 @@ enum CLIRunner {
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = String(data: stderrData.prefix(stderrLogLimitBytes), encoding: .utf8)
             ?? String(decoding: stderrData.prefix(stderrLogLimitBytes), as: UTF8.self)
-        if process.terminationStatus != 0 {
-            subprocessLog.error(
-                "\(commandLine, privacy: .public) exited \(process.terminationStatus): \(stderr, privacy: .public)"
-            )
+        let exitCode = process.terminationStatus
+        if exitCode != 0 {
+            if expectedExitCodes.contains(exitCode) {
+                subprocessLog.debug(
+                    "\(commandLine, privacy: .public) exited \(exitCode) (expected outcome): \(stderr, privacy: .public)"
+                )
+            } else {
+                subprocessLog.error(
+                    "\(commandLine, privacy: .public) exited \(exitCode): \(stderr, privacy: .public)"
+                )
+            }
         }
-        return CLIRunResult(exitCode: process.terminationStatus, stdout: stdout, stderr: stderr)
+        return CLIRunResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
-    /// `shiibar-cc focus <target>` (dropdown row click, §4.5).
+    /// `shiibar-cc focus <target>` (dropdown row click, §4.5). Exit 2
+    /// ("no match", §4.4) is expected: the target's tab can close in the
+    /// window between the row rendering and the click (the stale-row race
+    /// is designed in — `agent_removed` cleans the row up right after).
     static func focus(target: String, helpersDirectory: URL?) -> CLIRunResult {
-        run(["focus", target], helpersDirectory: helpersDirectory)
+        run(["focus", target], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
     }
 
-    /// `shiibar-cc focus -` (⌄ menu "Back", §4.5/§8.4).
+    /// `shiibar-cc focus -` (⌄ menu "Back", §4.5/§8.4). Exit 2 is expected:
+    /// no `last_focus` has been recorded yet (nothing was ever focused),
+    /// a normal early state rather than a malfunction.
     static func focusBack(helpersDirectory: URL?) -> CLIRunResult {
-        run(["focus", "-"], helpersDirectory: helpersDirectory)
+        run(["focus", "-"], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
     }
 
-    /// `shiibar-cc reconcile` (startup / reconnect / ⌄ menu "Rescan", §3.5/§4.5).
+    /// `shiibar-cc reconcile` (startup / reconnect / ⌄ menu "Rescan",
+    /// §3.5/§4.5). Only 0 is expected: any failure (1 = daemon/gather
+    /// error, 3 = TCC) silently loses the backstop and must error-log.
     static func reconcile(helpersDirectory: URL?) -> CLIRunResult {
         run(["reconcile"], helpersDirectory: helpersDirectory)
     }
 
     /// `shiibar-cc focused` — front-most iTerm2 session's target, used to
     /// suppress a delayed notification for a target the user already
-    /// jumped to (§4.5). Exit code 2 (no match) is a normal "not
-    /// foreground" outcome, not an error; exit 3 (TCC) must reach the
-    /// caller so the warning row can trigger (§4.5), hence the exit code
-    /// is returned alongside the target.
+    /// jumped to (§4.5). Exit 2 ("none", §4.4) is the routine outcome
+    /// whenever iTerm2 isn't frontmost — expected, so the probe doesn't
+    /// pollute the error log. Exit 3 (TCC) must reach the caller so the
+    /// warning row can trigger (§4.5), hence the exit code is returned
+    /// alongside the target.
     static func focusedTarget(helpersDirectory: URL?) -> (target: String?, exitCode: Int32) {
-        let result = run(["focused"], helpersDirectory: helpersDirectory)
+        let result = run(["focused"], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
         guard result.exitCode == 0 else { return (nil, result.exitCode) }
         let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return (trimmed.isEmpty ? nil : trimmed, 0)

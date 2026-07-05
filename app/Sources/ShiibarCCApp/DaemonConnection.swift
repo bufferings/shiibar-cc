@@ -64,16 +64,35 @@ final class DaemonConnection {
     }
 
     /// Send a one-shot request line and close (used for `shutdown`).
-    func sendOneShot(_ jsonLine: String, completion: @escaping () -> Void) {
+    ///
+    /// `completion` is guaranteed to run exactly once, within `timeout`:
+    /// with no daemon listening, the NWConnection never reaches `.ready`
+    /// (Network.framework sits in `.waiting` retrying after
+    /// connection-refused) and a send on a not-ready connection is queued
+    /// indefinitely — its `.contentProcessed` completion never fires. That
+    /// is exactly what made Quit hang on-device when the daemon had been
+    /// killed, so a deadline path cancels and completes instead.
+    func sendOneShot(_ jsonLine: String, timeout: TimeInterval = 1.5, completion: @escaping () -> Void) {
         connect()
         let conn = connection
-        // Give `.ready` a moment; sendSubscribe below is skipped since this
-        // path is only used right before tearing the connection down.
+        // Both the send completion and the deadline run on `queue`, so the
+        // once-flag needs no further synchronization.
+        var completed = false
+        let finish = {
+            guard !completed else { return }
+            completed = true
+            conn?.cancel()
+            completion()
+        }
+        // Give `.ready` a moment; sendSubscribe is skipped since this path
+        // is only used right before tearing the connection down.
         queue.asyncAfter(deadline: .now() + 0.05) {
             conn?.send(content: Data((jsonLine + "\n").utf8), completion: .contentProcessed { _ in
-                conn?.cancel()
-                completion()
+                finish()
             })
+        }
+        queue.asyncAfter(deadline: .now() + timeout) {
+            finish()
         }
     }
 
