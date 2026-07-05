@@ -62,14 +62,6 @@ fn doctor_exits_1_when_daemon_absent() {
 }
 
 #[test]
-fn resume_exits_1_when_daemon_absent() {
-    let dir = tempdir();
-    let out = shiibar_cc(dir.path(), &["resume"]);
-    assert_eq!(out.code, 1);
-    assert!(!out.stderr.is_empty());
-}
-
-#[test]
 fn doctor_exits_0_when_daemon_is_reachable() {
     let dir = tempdir();
     let daemon = TestDaemon::start(dir.path());
@@ -253,39 +245,4 @@ fn list_text_form_shows_status_and_target() {
     assert_eq!(out.code, 0);
     assert!(out.stdout.contains("idle"));
     assert!(out.stdout.contains("t-text"));
-}
-
-// ---- resume: exit 2 (no candidates), against the real daemon ----
-//
-// `resume`'s success path (a candidate actually selected and `open_tab`
-// invoked) needs a fake `AppleScriptRunner` + `SelectionRunner`, which only
-// the library-level tests in `src/resume_cmd.rs` can inject (this binary
-// always uses real `fzf`/`osascript`). What's testable black-box here is
-// the "zero candidates" short-circuit, which returns before either is ever
-// touched.
-
-#[test]
-fn resume_exits_2_when_there_is_no_session_history() {
-    let dir = tempdir();
-    let daemon = TestDaemon::start(dir.path());
-    let out = shiibar_cc(&daemon.state_dir, &["resume"]);
-    assert_eq!(out.code, 2, "stderr={}", out.stderr);
-}
-
-#[test]
-fn resume_exits_2_when_every_known_session_is_currently_running() {
-    let dir = tempdir();
-    let daemon = TestDaemon::start(dir.path());
-    let mut payload = report_payload(HookEvent::SessionStart, "t-running", "/proj/f", 1);
-    payload.source = Some(SessionStartSource::Startup);
-    daemon.report(payload);
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // SessionStart already wrote a `sessions.jsonl` line (§4.2 Operations),
-    // so the still-running session is also a history entry — the case this
-    // test exercises: a history entry whose session_id is currently running
-    // must be excluded from `resume`'s candidates.
-
-    let out = shiibar_cc(&daemon.state_dir, &["resume"]);
-    assert_eq!(out.code, 2, "stderr={}", out.stderr);
 }

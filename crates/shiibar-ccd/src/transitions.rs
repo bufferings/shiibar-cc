@@ -15,7 +15,7 @@ pub enum Outcome {
     Ignored,
     /// A registered entry was deleted (`SessionEnd`). `previous` is the
     /// entry's final snapshot (fields refreshed from this report) — used to
-    /// build the `sessions.jsonl` line and the `agent_removed` broadcast.
+    /// build the `agent_removed` broadcast.
     Removed { previous: AgentEntry },
     /// An entry was created or updated. `previous` is `None` for a brand
     /// new registration. Callers should compare `entry` against `previous`

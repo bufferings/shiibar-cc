@@ -32,7 +32,6 @@ fn main() {
         Some("focused") => cmd_focused(&rest),
         Some("reconcile") => cmd_reconcile(&rest),
         Some("remove") => cmd_remove(&rest),
-        Some("resume") => cmd_resume(&rest),
         Some("doctor") => cmd_doctor(&rest),
         _ => {
             print_usage();
@@ -44,7 +43,7 @@ fn main() {
 
 fn print_usage() {
     eprintln!(
-        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|resume|doctor> ..."
+        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|doctor> ..."
     );
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
@@ -171,32 +170,6 @@ fn cmd_remove(args: &[String]) -> i32 {
         &shiibar_cc_client::resolve_socket_path(),
         selector,
         current_dir_or_dot(),
-    );
-    if let Some(e) = err {
-        eprintln!("{e}");
-    }
-    code
-}
-
-fn cmd_resume(_args: &[String]) -> i32 {
-    let script_runner = Osascript;
-    let home_dir = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let path_env = std::env::var_os("PATH");
-    let selection_runner: Box<dyn shiibar_cc::resume_cmd::SelectionRunner> =
-        if shiibar_cc::resume_cmd::fzf_on_path(path_env.as_deref()) {
-            Box::new(shiibar_cc::resume_cmd::FzfRunner)
-        } else {
-            Box::new(shiibar_cc::resume_cmd::NumberedPromptRunner)
-        };
-    let projects_root = shiibar_cc::conversations::default_projects_root(&home_dir);
-    let (code, err) = shiibar_cc::resume_cmd::run_resume(
-        &shiibar_cc_client::resolve_socket_path(),
-        &home_dir,
-        &projects_root,
-        selection_runner.as_ref(),
-        &script_runner,
     );
     if let Some(e) = err {
         eprintln!("{e}");

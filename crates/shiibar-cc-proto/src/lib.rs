@@ -120,15 +120,6 @@ pub struct ReportPayload {
     pub background_tasks: Option<Vec<serde_json::Value>>,
 }
 
-/// A `sessions.jsonl` line / `sessions` response entry (§4.2, §4.2 Operations).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SessionRecord {
-    pub session_id: String,
-    pub cwd: String,
-    pub last_status: Status,
-    pub last_seen: i64,
-}
-
 /// One live session as gathered by the client from `claude agents --json` +
 /// `iterm_targets` (§3.5), sent as part of a `reconcile` request. `status`
 /// is already translated to shiibar's 3-value vocabulary by the client
@@ -155,7 +146,6 @@ pub enum Request {
     Subscribe,
     Remove { target: String },
     Seen { target: String },
-    Sessions,
     Info,
     Shutdown,
     /// `claude agents` reconciliation (§3.5). `complete` is whether the
@@ -208,19 +198,6 @@ pub struct ListResponse {
 impl ListResponse {
     pub fn new(agents: Vec<Agent>) -> Self {
         Self { ok: true, agents }
-    }
-}
-
-/// Response to `{"cmd":"sessions"}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SessionsResponse {
-    pub ok: bool,
-    pub sessions: Vec<SessionRecord>,
-}
-
-impl SessionsResponse {
-    pub fn new(sessions: Vec<SessionRecord>) -> Self {
-        Self { ok: true, sessions }
     }
 }
 

@@ -5,14 +5,12 @@
 
 use crate::clock::Clock;
 use crate::state::{self, AgentEntry};
-use crate::sessions::SessionStore;
 use crate::transitions::{self, Outcome};
 use crate::{log_debug, log_info};
 use crate::logging::Logger;
 use crate::paths::StateDir;
 use shiibar_cc_proto::{
-    Agent, HookEvent, InfoResponse, ListResponse, ReconcileSession, RemovalReason, ReportPayload,
-    SessionsResponse, Status,
+    Agent, InfoResponse, ListResponse, ReconcileSession, RemovalReason, ReportPayload,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -39,7 +37,6 @@ pub enum BroadcastEvent {
 
 pub struct Core {
     pub agents: Vec<AgentEntry>,
-    pub sessions: SessionStore,
     clock: Arc<dyn Clock>,
     state_path: PathBuf,
     logger: Logger,
@@ -56,11 +53,9 @@ impl Core {
         events_tx: broadcast::Sender<BroadcastEvent>,
     ) -> anyhow::Result<Self> {
         let agents = state::load(&state_dir.state_json())?;
-        let sessions = SessionStore::load(&state_dir.sessions_jsonl())?;
         let started_at = clock.now();
         Ok(Self {
             agents,
-            sessions,
             clock,
             state_path: state_dir.state_json(),
             logger,
@@ -84,19 +79,6 @@ impl Core {
     fn persist_state(&self) {
         if let Err(e) = state::save(&self.state_path, &self.agents) {
             self.logger.error(format_args!("failed to persist state.json: {e}"));
-        }
-    }
-
-    fn append_session_record(&mut self, entry: &AgentEntry, last_status: Status) {
-        let record = shiibar_cc_proto::SessionRecord {
-            session_id: entry.session_id.clone(),
-            cwd: entry.cwd.clone(),
-            last_status,
-            last_seen: entry.last_seen,
-        };
-        if let Err(e) = self.sessions.append(record) {
-            self.logger
-                .error(format_args!("failed to append sessions.jsonl: {e}"));
         }
     }
 
@@ -126,8 +108,6 @@ impl Core {
                 );
                 self.agents.remove(idx.expect("Removed implies an existing entry"));
                 self.persist_state();
-                let last_status = previous.status;
-                self.append_session_record(&previous, last_status);
                 let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                     target: previous.target,
                     reason: RemovalReason::SessionEnd,
@@ -160,13 +140,6 @@ impl Core {
                     None => self.agents.push(entry.clone()),
                 }
                 self.persist_state();
-                // Only genuine session-lifecycle events get a sessions.jsonl
-                // line (§4.2): SessionStart / Stop (SessionEnd is handled in
-                // the Removed branch above).
-                if matches!(payload.event, HookEvent::SessionStart | HookEvent::Stop) {
-                    let status = entry.status;
-                    self.append_session_record(&entry, status);
-                }
                 if should_broadcast {
                     let _ = self
                         .events_tx
@@ -325,10 +298,6 @@ impl Core {
 
     pub fn handle_list(&self) -> ListResponse {
         ListResponse::new(self.agents.iter().map(AgentEntry::to_wire).collect())
-    }
-
-    pub fn handle_sessions(&self) -> SessionsResponse {
-        SessionsResponse::new(self.sessions.list())
     }
 
     pub fn handle_info(&self) -> InfoResponse {

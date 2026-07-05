@@ -211,49 +211,6 @@ end if
     .to_string()
 }
 
-/// AppleScript that opens a new iTerm2 tab (or window, if iTerm2 currently
-/// has none) in `cwd` and runs `cmd` there (DESIGN.md §4.3 `open_tab`, used
-/// by `resume`, §4.4). Unlike `focus`/`focused`/`iterm_targets`, this is
-/// deliberately allowed to launch iTerm2: there is no `application "iTerm2"
-/// is running` guard, so a bare `tell application "iTerm2"` (which
-/// auto-launches the app) is exactly what's wanted here.
-///
-/// `cwd` and `cmd` are both embedded as AppleScript string literals via
-/// `escape_as_string_literal` (same escaping `build_focus_script` uses for
-/// the target uuid). `cwd` additionally goes through AppleScript's `quoted
-/// form of` at script-run-time, which is expected to shell-quote it
-/// correctly for the `cd` the new session's shell executes.
-///
-/// **Unverified on a real machine**: unlike the AppleScript findings in §7-1
-/// (focus/iterm_targets), this script's actual behavior — `create window` /
-/// `create tab` semantics, whether `quoted form of` works inside a `tell
-/// application "iTerm2"` block, whether `write text` reaches the shell
-/// before it's ready right after `create window` — has not been
-/// real-machine smoke-tested yet. Treat this as a best-effort first draft
-/// pending the M3 manual smoke test (DESIGN.md §6).
-///
-/// Prints `OK` as the last line of stdout on success.
-pub fn build_open_tab_script(cwd: &str, cmd: &str) -> String {
-    let cwd = escape_as_string_literal(cwd);
-    let cmd = escape_as_string_literal(cmd);
-    format!(
-        r#"tell application "iTerm2"
-    activate
-    if (count of windows) is 0 then
-        create window with default profile
-    else
-        tell current window to create tab with default profile
-    end if
-    tell current session of current window
-        write text "cd " & quoted form of "{cwd}"
-        write text "{cmd}"
-    end tell
-end tell
-return "OK"
-"#
-    )
-}
-
 /// Harmless AppleScript used by `shiibar-cc doctor` to check osascript's
 /// TCC Automation permission for iTerm2, without side effects (no
 /// `activate`, and no `tell application "iTerm2"` unless it's already
@@ -344,19 +301,6 @@ pub fn parse_probe_output(output: &AppleScriptOutput) -> ItermResult<ProbeOutcom
     }
 }
 
-pub fn parse_open_tab_output(output: &AppleScriptOutput) -> ItermResult<()> {
-    if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
-    }
-    if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
-    }
-    match output.stdout.trim() {
-        "OK" => Ok(()),
-        other => Err(bad_output(other)),
-    }
-}
-
 // ---------------------------------------------------------------------
 // Impure: wire pure generation/parsing to a runner
 // ---------------------------------------------------------------------
@@ -390,17 +334,6 @@ pub fn probe(runner: &dyn AppleScriptRunner) -> ItermResult<ProbeOutcome> {
         .run(&build_probe_script())
         .map_err(|e| ItermError::Other(e.to_string()))?;
     parse_probe_output(&output)
-}
-
-/// `open_tab(cwd, cmd)` (DESIGN.md §4.3): open a new iTerm2 tab (or window)
-/// in `cwd` and run `cmd` there. Used by `resume` (§4.4). Unlike `focus`,
-/// this is allowed to launch iTerm2 if it isn't already running.
-pub fn open_tab(cwd: &str, cmd: &str, runner: &dyn AppleScriptRunner) -> ItermResult<()> {
-    let script = build_open_tab_script(cwd, cmd);
-    let output = runner
-        .run(&script)
-        .map_err(|e| ItermError::Other(e.to_string()))?;
-    parse_open_tab_output(&output)
 }
 
 // ---------------------------------------------------------------------
@@ -694,65 +627,6 @@ mod tests {
         assert!(script.contains("NOT_RUNNING"));
     }
 
-    #[test]
-    fn open_tab_script_activates_without_guarding_on_running() {
-        // Unlike focus/probe, open_tab is allowed to launch iTerm2 (§4.3),
-        // so there must be no `is running` guard before `activate`.
-        let script = build_open_tab_script("/some/cwd", "claude --resume UUID");
-        assert!(script.contains("activate"));
-        assert!(!script.contains(r#"application "iTerm2" is running"#));
-    }
-
-    #[test]
-    fn open_tab_script_creates_a_window_or_tab_and_writes_cd_then_cmd() {
-        let script = build_open_tab_script("/some/cwd", "claude --resume UUID");
-        assert!(script.contains("create window with default profile"));
-        assert!(script.contains("create tab with default profile"));
-        let cd_pos = script.find("write text \"cd \"").unwrap();
-        let cmd_pos = script.find("claude --resume UUID").unwrap();
-        assert!(cd_pos < cmd_pos, "cd must be written before the resume command");
-        assert!(script.contains("quoted form of"));
-        assert!(script.contains("/some/cwd"));
-        assert!(script.contains("OK"));
-    }
-
-    #[test]
-    fn open_tab_script_escapes_quotes_and_backslashes_in_cwd_and_cmd() {
-        let script = build_open_tab_script(r#"/weird"path\"#, r#"cmd with "quotes" and \ backslash"#);
-        assert!(script.contains(r#"/weird\"path\\"#));
-        assert!(script.contains(r#"cmd with \"quotes\" and \\ backslash"#));
-    }
-
-    #[test]
-    fn parse_open_tab_output_ok() {
-        assert_eq!(parse_open_tab_output(&out(true, "OK\n", "")), Ok(()));
-    }
-
-    #[test]
-    fn parse_open_tab_output_permission_denied() {
-        let stderr = "Not authorized to send Apple events to iTerm2. (-1743)";
-        assert_eq!(
-            parse_open_tab_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
-        );
-    }
-
-    #[test]
-    fn parse_open_tab_output_other_failure() {
-        assert_eq!(
-            parse_open_tab_output(&out(false, "", "some other osascript error")),
-            Err(ItermError::Other("some other osascript error".to_string()))
-        );
-    }
-
-    #[test]
-    fn parse_open_tab_output_unexpected_stdout_is_an_error() {
-        assert!(matches!(
-            parse_open_tab_output(&out(true, "garbage", "")),
-            Err(ItermError::Other(_))
-        ));
-    }
-
     // ---- osascript output parsing ----
 
     fn out(success: bool, stdout: &str, stderr: &str) -> AppleScriptOutput {
@@ -909,29 +783,6 @@ mod tests {
             output: out(true, "NOT_RUNNING\n", ""),
         };
         assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
-    }
-
-    #[test]
-    fn open_tab_success_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(true, "OK\n", ""),
-        };
-        assert_eq!(open_tab("/proj/a", "claude --resume UUID", &runner), Ok(()));
-    }
-
-    #[test]
-    fn open_tab_permission_denied_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(
-                false,
-                "",
-                "Not authorized to send Apple events to iTerm2. (-1743)",
-            ),
-        };
-        assert_eq!(
-            open_tab("/proj/a", "claude --resume UUID", &runner),
-            Err(ItermError::PermissionDenied)
-        );
     }
 
     // ---- iterm_targets: build_iterm_targets_script / parsing ----

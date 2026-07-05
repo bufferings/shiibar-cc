@@ -6,7 +6,6 @@
 //! exit 2/3 without a real TCC-gated `osascript` (DESIGN.md / M2 task
 //! brief).
 
-pub mod conversations;
 pub mod doctor_cmd;
 pub mod exitcode;
 pub mod focus_cmd;
@@ -14,6 +13,5 @@ pub mod list_cmd;
 pub mod reconcile_cmd;
 pub mod remove_cmd;
 pub mod report_cmd;
-pub mod resume_cmd;
 pub mod wait_cmd;
 pub mod watch_cmd;

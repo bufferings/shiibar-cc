@@ -48,7 +48,7 @@ fi
 
 echo
 echo "Note: this does not touch ~/.local/state/shiibar-cc/ (state.json,"
-echo "sessions.jsonl, logs), nor the local code-signing identity created by"
+echo "logs), nor the local code-signing identity created by"
 echo "scripts/lib/make-local-signing-identity.sh (it's harmless to keep, and"
 echo "reused if you reinstall). Remove them yourself if you want a full clean:"
 echo "  rm -rf ~/.local/state/shiibar-cc"

@@ -20,7 +20,6 @@
 
 - **Rust**: `rust-toolchain.toml` でバージョン固定(rustup が自動でダウンロードする)。mise は使わない
 - **Swift**: Command Line Tools のみでビルド可。Xcode 本体は不要
-- **fzf**(任意): `shiibar-cc resume`(M3 で実装)の選択 UI が快適になる。なければ番号選択
 
 ## よく使うコマンド
 
@@ -88,7 +87,6 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 - daemon は launchd に入れない(DESIGN.md §8.8)。iTerm2 の 1 タブで `shiibar-ccd --foreground` を
   動かしておく(ログが見えるので開発中はむしろ都合が良い)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
-  (`sessions.jsonl` だけは resume 履歴なので、消すと履歴も消える)
 - アプリ(M4 以降)は起動時に既存 daemon にアタッチするので、手動 daemon と併用しても壊れない。
   ただしアプリを Quit すると daemon も止まる(仕様)
 
@@ -100,7 +98,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)。
   `.app` 化・Login Items・CLI シンボリックリンクの `.app` 由来化は M4
 - `scripts/uninstall.sh`: `~/.local/bin/` に置いたものを削除し、settings.json から hooks を外す案内を表示する
-  (`~/.local/state/shiibar-cc/` は消さない。resume 履歴・ログが要らないなら手動で消す)
+  (`~/.local/state/shiibar-cc/` は消さない。ログが要らないなら手動で消す)
 - `scripts/dev-reload.sh`: `cargo build`(デバッグビルド)を再実行するだけの薄いラッパー。
   daemon は手動運用(§8.8)なので、動かしている `shiibar-ccd --foreground` は自分で Ctrl-C → 再実行する
 - 動作確認は `shiibar-cc doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)

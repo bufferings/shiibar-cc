@@ -132,10 +132,6 @@ async fn handle_connection(stream: UnixStream, core: Arc<Mutex<Core>>, shutdown:
             let resp = core.lock().expect("core mutex poisoned").handle_list();
             respond(&mut write_half, &resp).await;
         }
-        Request::Sessions => {
-            let resp = core.lock().expect("core mutex poisoned").handle_sessions();
-            respond(&mut write_half, &resp).await;
-        }
         Request::Info => {
             let resp = core.lock().expect("core mutex poisoned").handle_info();
             respond(&mut write_half, &resp).await;

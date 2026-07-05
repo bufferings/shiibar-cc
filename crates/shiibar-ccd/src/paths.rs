@@ -35,10 +35,6 @@ impl StateDir {
         self.root.join("state.json")
     }
 
-    pub fn sessions_jsonl(&self) -> PathBuf {
-        self.root.join("sessions.jsonl")
-    }
-
     pub fn log_file(&self) -> PathBuf {
         self.root.join("shiibar-ccd.log")
     }

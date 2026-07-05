@@ -61,8 +61,8 @@ impl TestDaemon {
         let _ = tokio::time::timeout(Duration::from_secs(5), self.serve_task).await;
     }
 
-    /// One-shot request/response over a fresh connection (list / sessions /
-    /// info / remove / seen).
+    /// One-shot request/response over a fresh connection (list / info /
+    /// remove / seen).
     pub async fn request<T: serde::de::DeserializeOwned>(&self, req: &Request) -> anyhow::Result<T> {
         let mut stream = UnixStream::connect(&self.sock_path).await?;
         let line = codec::encode_line(req)?;
