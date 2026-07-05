@@ -1,6 +1,6 @@
 # Shiibar CC
 
-<img src="docs/assets/app-icon.png" width="120" alt="Shiibar CC app icon" align="right">
+<img src="docs/assets/app-icon.png" width="120" alt="Shiibar CC app icon" align="left" hspace="16">
 
 A macOS menu bar app + CLI that watches your Claude Code agent sessions
 running in iTerm2 and lets you jump straight to the right one.
