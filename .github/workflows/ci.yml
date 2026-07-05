@@ -21,7 +21,7 @@ jobs:
   test:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Rust tests
         run: cargo test --workspace --locked
@@ -40,7 +40,7 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: cargo-deny (advisories / licenses / bans)
         uses: EmbarkStudios/cargo-deny-action@v2
