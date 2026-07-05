@@ -11,7 +11,7 @@ final class HelperPathsTests: XCTestCase {
         // A synthetic path under a temp dir — never a machine-specific real
         // install path, per CLAUDE.md's portability rule.
         let helpers = URL(fileURLWithPath: FileManager.default.temporaryDirectory.path)
-            .appendingPathComponent("ShiibarCC.app/Contents/Helpers")
+            .appendingPathComponent("Shiibar CC.app/Contents/Helpers")
         XCTAssertEqual(
             HelperPathResolver.resolvedPath(for: .shiibarCc, helpersDirectory: helpers),
             helpers.appendingPathComponent("shiibar-cc").path

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Removes what scripts/install.sh placed, plus a full teardown: the
-# ShiibarCC.app bundle, its Login Item registration, the ~/.local/bin
+# "Shiibar CC.app" bundle, its Login Item registration, the ~/.local/bin
 # symlinks, the state dir, the Login Item UserDefaults flag, the local
 # code-signing identity, and the iTerm2 Automation TCC grant. This used to
 # be a separate `--purge` stage, but install.sh can already recreate
@@ -28,7 +28,7 @@ source "$ROOT/scripts/lib/signing.sh"
 
 BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="ShiibarCC.app"
+APP_NAME="Shiibar CC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 BUNDLE_ID="cc.shiibar.menubar"
 STATE_DIR="${SHIIBAR_CC_STATE_DIR:-$HOME/.local/state/shiibar-cc}"

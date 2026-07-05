@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Dogfooding helper (DESIGN.md §5): rebuild debug binaries + the menu bar
 # app. Two modes:
-#   - No installed ShiibarCC.app (scripts/install.sh not run yet, or
+#   - No installed "Shiibar CC.app" (scripts/install.sh not run yet, or
 #     removed): just rebuilds, and daemon lifecycle stays manual per §4.2 —
 #     run `shiibar-ccd --foreground` yourself, then `swift run` the app
 #     against it (it attaches instead of spawning, task brief M4 §1).
-#   - An installed ShiibarCC.app exists: quits it, makes sure its daemon is
+#   - An installed "Shiibar CC.app" exists: quits it, makes sure its daemon is
 #     really gone (see the comment at the quit block for why this script owns
 #     that), swaps in the freshly built binaries in place, re-signs with the
 #     stable local identity from the keychain (or falls back to ad-hoc),
@@ -16,7 +16,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="ShiibarCC.app"
+APP_NAME="Shiibar CC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 BUNDLE_ID="cc.shiibar.menubar"
 

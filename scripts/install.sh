@@ -2,7 +2,7 @@
 # shiibar-cc install (M2 binaries+hooks, extended in M4 with .app bundling,
 # M6 hooks distribution moved to a Claude Code plugin):
 # build the menu bar app + shiibar-ccd/shiibar-cc in release mode, bundle
-# them into ShiibarCC.app (Contents/Helpers/), ad-hoc sign with a stable
+# them into "Shiibar CC.app" (Contents/Helpers/), ad-hoc sign with a stable
 # local identity, symlink ~/.local/bin/shiibar-cc to the bundled binary,
 # register the app as a Login Item (by launching it once — the app
 # auto-registers via SMAppService on first launch only and never
@@ -20,9 +20,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="ShiibarCC.app"
+APP_NAME="Shiibar CC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
-OLD_APP_PATH="$APP_DIR/shiibar-cc.app"
 BUNDLE_ID="cc.shiibar.menubar"
 # Fresh CFBundleVersion per install: icon/metadata caches (LaunchServices,
 # iconservices) key on bundle id + version, so a constant version can pin
@@ -38,11 +37,6 @@ echo "==> Building shiibar-ccd / shiibar-cc (release)..."
 echo "==> Building the menu bar app (release)..."
 (cd "$ROOT/app" && swift build -c release)
 APP_BIN_DIR="$(cd "$ROOT/app" && swift build -c release --show-bin-path)"
-
-if [ -d "$OLD_APP_PATH" ]; then
-  echo "==> Removing stale $OLD_APP_PATH (pre-rename bundle, T1)"
-  rm -rf "$OLD_APP_PATH"
-fi
 
 echo "==> Assembling $APP_PATH"
 rm -rf "$APP_PATH"

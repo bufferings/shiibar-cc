@@ -70,7 +70,7 @@ cd shiibar-cc
 ```
 
 This builds the daemon and CLI, builds and bundles the menu bar app as
-`ShiibarCC.app` (installed to `~/Applications` by default), code-signs it,
+`Shiibar CC.app` (installed to `~/Applications` by default), code-signs it,
 symlinks `shiibar-cc` / `shiibar-ccd` onto `~/.local/bin`, and launches the
 app once (which registers it as a Login Item and starts the daemon). It
 then prints the two commands to install the hooks plugin, and points you

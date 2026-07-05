@@ -88,7 +88,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 ## ドッグフーディング運用
 
 - 日常のドッグフーディングはインストール済みの `.app` で行う(`scripts/install.sh` で
-  `~/Applications/ShiibarCC.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
+  `~/Applications/Shiibar CC.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
   停止はアプリが管理する。DESIGN.md §4.5 / §8.8。launchd には入れない、§8.8)
 - コード変更の反映は `scripts/dev-reload.sh`(下記「リリース・インストール」参照)
 - daemon 単体をログを見ながら動かしたいとき(daemon とアプリの連携をいじるときなど)は
@@ -123,7 +123,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 ## リリース・インストール
 
-- `scripts/install.sh`: リリースビルドして `~/Applications/ShiibarCC.app`
+- `scripts/install.sh`: リリースビルドして `~/Applications/Shiibar CC.app`
   (`SHIIBAR_CC_APP_DIR` で上書き可)を組み立て、安定したローカル署名 ID で署名する
   (再ビルドで通知権限がリセットされないようにするため。DESIGN.md §4.5。ID が無ければ
   `scripts/lib/make-local-signing-identity.sh` で作成する)。`~/.local/bin/`
