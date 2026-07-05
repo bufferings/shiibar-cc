@@ -79,8 +79,8 @@ enum TrayIconMetrics {
     // On-device round 2026-07-05: r 2.2 was too small to register as a
     // badge next to real menu bar neighbors; grown and pulled slightly
     // inward so dot + halo still fit the 18pt canvas.
-    static let dotCenter = NSPoint(x: 16.0, y: 14.5)
-    static let dotRadius: CGFloat = 3.0
+    static let dotCenter = NSPoint(x: 15.6, y: 13.9)
+    static let dotRadius: CGFloat = 3.6
     static let haloLineWidth: CGFloat = 0.9
     static let dotColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
     static let haloColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85)
