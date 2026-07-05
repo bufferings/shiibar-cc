@@ -361,6 +361,12 @@ private final class CheckMenuItemView: NSView {
         let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
         let width = Self.checkColumnWidth + ceil(titleWidth) + Self.horizontalTrailingInset
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
+        // The initial frame width is only this row's MINIMUM (it feeds the
+        // menu's width calculation); AppKit then stretches every item view
+        // to the final menu width when the mask allows it — which is what
+        // makes hover and the highlight reach the menu's right edge, like
+        // native items.
+        autoresizingMask = [.width]
 
         highlightView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(highlightView)
