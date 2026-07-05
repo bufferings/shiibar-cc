@@ -1,10 +1,10 @@
-//! `shiibar-cc focus <selector>` / `focus -` / `focused` (DESIGN.md §4.4).
+//! `shiibar-cc focus <selector>` / `focused` (DESIGN.md §4.4).
 //!
-//! `run_focus` and `run_focus_back` both funnel through `jump_to`, which is
-//! the part that actually talks to iTerm2 and the daemon; this is what
-//! `focus`'s exit 2 (no matching session) and exit 3 (TCC denied) tests
-//! exercise by injecting a fake `AppleScriptRunner` — no real `osascript`
-//! is ever invoked in this crate's automated tests either.
+//! `run_focus` funnels through `jump_to`, which is the part that actually
+//! talks to iTerm2 and the daemon; this is what `focus`'s exit 2 (no
+//! matching session) and exit 3 (TCC denied) tests exercise by injecting a
+//! fake `AppleScriptRunner` — no real `osascript` is ever invoked in this
+//! crate's automated tests either.
 
 use crate::exitcode;
 use shiibar_cc_client::iterm::{AppleScriptRunner, ItermError, focus, focused};
@@ -41,7 +41,6 @@ fn err(code: i32, msg: impl Into<String>) -> FocusReport {
 /// mine" isn't answerable from the selector alone.
 pub fn run_focus(
     socket_path: &Path,
-    last_focus_path: &Path,
     selector_arg: &str,
     cwd: PathBuf,
     runner: &dyn AppleScriptRunner,
@@ -79,26 +78,7 @@ pub fn run_focus(
         }
     };
 
-    jump_to(socket_path, last_focus_path, &dest_target, runner)
-}
-
-/// `focus -` (§4.4): jump back to whatever was frontmost the last time
-/// `focus` (or `focus -`) succeeded. The saved target is an opaque iTerm2
-/// session identity captured via `focused()`, not necessarily a
-/// shiibar-ccd-tracked agent, so this bypasses selector/list resolution
-/// entirely and jumps to it directly.
-pub fn run_focus_back(
-    socket_path: &Path,
-    last_focus_path: &Path,
-    runner: &dyn AppleScriptRunner,
-) -> FocusReport {
-    let Some(dest_target) = read_last_focus(last_focus_path) else {
-        return err(
-            exitcode::NOT_FOUND,
-            "shiibar-cc focus -: no previous focus recorded",
-        );
-    };
-    jump_to(socket_path, last_focus_path, &dest_target, runner)
+    jump_to(socket_path, &dest_target, runner)
 }
 
 /// `focused` (§4.4): the frontmost iTerm2 session's target, or "none".
@@ -136,28 +116,10 @@ pub fn run_focused(runner: &dyn AppleScriptRunner) -> FocusedReport {
     }
 }
 
-/// Shared jump logic (§4.4): capture what's frontmost *before* the jump
-/// (best-effort — a failure here means osascript can't drive iTerm2 at
-/// all, so bail out with the same error the jump itself would hit), do the
-/// jump, and only on success record the pre-jump target into `last_focus`
-/// and notify the daemon via `seen`.
-fn jump_to(
-    socket_path: &Path,
-    last_focus_path: &Path,
-    dest_target: &str,
-    runner: &dyn AppleScriptRunner,
-) -> FocusReport {
-    let before = match focused(runner) {
-        Ok(b) => b,
-        Err(ItermError::PermissionDenied) => {
-            return err(
-                exitcode::TCC_DENIED,
-                "shiibar-cc focus: osascript automation permission for iTerm2 is denied",
-            );
-        }
-        Err(e) => return err(exitcode::ERROR, format!("shiibar-cc focus: {e}")),
-    };
-
+/// Shared jump logic (§4.4): do the jump, and on success notify the daemon
+/// via `seen` (best-effort — a successful jump is the primary outcome, and
+/// a daemon that's down must not turn it into a reported failure).
+fn jump_to(socket_path: &Path, dest_target: &str, runner: &dyn AppleScriptRunner) -> FocusReport {
     if let Err(e) = focus(dest_target, runner) {
         return match e {
             ItermError::NoMatch => err(
@@ -172,18 +134,6 @@ fn jump_to(
         };
     }
 
-    // Only save the "where we came from" pointer if there *was* a
-    // frontmost iTerm2 session to come from (§4.4 decision, see the M2
-    // completion report).
-    if let Some(before_target) = before
-        && let Err(e) = std::fs::write(last_focus_path, before_target)
-    {
-        eprintln!("shiibar-cc focus: warning: failed to save last_focus: {e}");
-    }
-
-    // Best-effort: a successful jump is the primary outcome; a failure to
-    // notify the daemon (e.g. it's not running) shouldn't turn a
-    // successful jump into a reported failure.
     if let Err(e) = shiibar_cc_client::connection::request::<AckResponse>(
         socket_path,
         &Request::Seen {
@@ -196,13 +146,6 @@ fn jump_to(
     ok()
 }
 
-fn read_last_focus(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,9 +153,7 @@ mod tests {
     use std::sync::Mutex;
 
     /// A fake `AppleScriptRunner` that returns pre-scripted outputs in
-    /// order (one per call: first call is `focused()`'s script, second is
-    /// `focus()`'s), so both the "before" query and the jump can be
-    /// controlled independently.
+    /// order (one per call).
     struct ScriptedRunner {
         outputs: Mutex<Vec<AppleScriptOutput>>,
     }
@@ -254,112 +195,31 @@ mod tests {
     #[test]
     fn focus_no_matching_session_is_exit_2() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![
-            out(true, "NONE\n", ""),     // focused() before the jump
-            out(true, "NOTFOUND\n", ""), // focus() itself
-        ]);
-        let report = jump_to(
-            &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
-            "w0t0p0:UUID",
-            &runner,
-        );
+        let runner = ScriptedRunner::new(vec![out(true, "NOTFOUND\n", "")]);
+        let report = jump_to(&dead_socket(dir.path()), "w0t0p0:UUID", &runner);
         assert_eq!(report.exit_code, exitcode::NOT_FOUND);
-        assert!(
-            !dir.path().join("last_focus").exists(),
-            "no before-target to save"
-        );
     }
 
     #[test]
-    fn focus_tcc_denied_on_the_jump_itself_is_exit_3() {
-        let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![
-            out(true, "NONE\n", ""),
-            out(
-                false,
-                "",
-                "Not authorized to send Apple events to iTerm2. (-1743)",
-            ),
-        ]);
-        let report = jump_to(
-            &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
-            "w0t0p0:UUID",
-            &runner,
-        );
-        assert_eq!(report.exit_code, exitcode::TCC_DENIED);
-    }
-
-    #[test]
-    fn focus_tcc_denied_on_the_before_query_is_exit_3() {
+    fn focus_tcc_denied_is_exit_3() {
         let dir = tempfile::tempdir().unwrap();
         let runner = ScriptedRunner::new(vec![out(
             false,
             "",
-            "Not authorized to send Apple events to System Events. (-1743)",
+            "Not authorized to send Apple events to iTerm2. (-1743)",
         )]);
-        let report = jump_to(
-            &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
-            "w0t0p0:UUID",
-            &runner,
-        );
+        let report = jump_to(&dead_socket(dir.path()), "w0t0p0:UUID", &runner);
         assert_eq!(report.exit_code, exitcode::TCC_DENIED);
     }
 
     #[test]
-    fn successful_focus_saves_last_focus_and_ignores_seen_failure() {
+    fn successful_focus_ignores_seen_failure() {
+        // The daemon is dead, so the post-jump `seen` fails — the jump
+        // still reports success (§4.4: seen is best-effort).
         let dir = tempfile::tempdir().unwrap();
-        let last_focus_path = dir.path().join("last_focus");
-        let runner = ScriptedRunner::new(vec![
-            out(true, "FOCUSED:BEFORE-UUID\n", ""), // focused() before
-            out(true, "FOUND\n", ""),               // focus() succeeds
-        ]);
-        let report = jump_to(
-            &dead_socket(dir.path()),
-            &last_focus_path,
-            "w0t0p0:DEST-UUID",
-            &runner,
-        );
+        let runner = ScriptedRunner::new(vec![out(true, "FOUND\n", "")]);
+        let report = jump_to(&dead_socket(dir.path()), "w0t0p0:DEST-UUID", &runner);
         assert_eq!(report.exit_code, exitcode::OK);
-        let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "BEFORE-UUID");
-    }
-
-    #[test]
-    fn focus_back_with_no_last_focus_is_exit_2() {
-        let dir = tempfile::tempdir().unwrap();
-        struct PanicRunner;
-        impl AppleScriptRunner for PanicRunner {
-            fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
-                panic!("must not touch osascript when there's nothing to jump back to");
-            }
-        }
-        let report = run_focus_back(
-            &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
-            &PanicRunner,
-        );
-        assert_eq!(report.exit_code, exitcode::NOT_FOUND);
-    }
-
-    #[test]
-    fn focus_back_jumps_to_the_saved_target_and_toggles_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let last_focus_path = dir.path().join("last_focus");
-        std::fs::write(&last_focus_path, "w0t0p0:OLD-UUID").unwrap();
-
-        let runner = ScriptedRunner::new(vec![
-            out(true, "FOCUSED:CURRENT-UUID\n", ""), // focused() before jumping back
-            out(true, "FOUND\n", ""),                // focus() to OLD-UUID succeeds
-        ]);
-        let report = run_focus_back(&dead_socket(dir.path()), &last_focus_path, &runner);
-        assert_eq!(report.exit_code, exitcode::OK);
-        // cd -/toggle semantics: last_focus now points at where we jumped
-        // *from* this time, ready for a subsequent `focus -` to swap back.
-        let saved = std::fs::read_to_string(&last_focus_path).unwrap();
-        assert_eq!(saved, "CURRENT-UUID");
     }
 
     // ---- run_focus: exact-match target bypasses the daemon entirely
@@ -371,13 +231,9 @@ mod tests {
         // exact-match target is the destination itself, so `run_focus`
         // must never try to reach the daemon's `list` before jumping.
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![
-            out(true, "NONE\n", ""),  // focused() before the jump
-            out(true, "FOUND\n", ""), // focus() itself
-        ]);
+        let runner = ScriptedRunner::new(vec![out(true, "FOUND\n", "")]);
         let report = run_focus(
             &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
             "w0t0p0:UUID",
             dir.path().to_path_buf(),
             &runner,
@@ -390,13 +246,9 @@ mod tests {
         // Still no daemon involved: "no match" here is iTerm2's scan
         // coming up empty, not a selector-resolution failure.
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![
-            out(true, "NONE\n", ""),
-            out(true, "NOTFOUND\n", ""),
-        ]);
+        let runner = ScriptedRunner::new(vec![out(true, "NOTFOUND\n", "")]);
         let report = run_focus(
             &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
             "w0t0p0:UUID",
             dir.path().to_path_buf(),
             &runner,
@@ -418,7 +270,6 @@ mod tests {
         }
         let report = run_focus(
             &dead_socket(dir.path()),
-            &dir.path().join("last_focus"),
             ".",
             dir.path().to_path_buf(),
             &PanicRunner,

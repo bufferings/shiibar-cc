@@ -62,10 +62,6 @@ pub fn resolve_socket_path() -> PathBuf {
     resolve_state_dir().join("shiibar-ccd.sock")
 }
 
-pub fn resolve_last_focus_path() -> PathBuf {
-    resolve_state_dir().join("last_focus")
-}
-
 /// Connect to shiibar-ccd's socket at `socket_path`.
 pub fn connect(socket_path: &Path) -> Result<UnixStream, ClientError> {
     UnixStream::connect(socket_path).map_err(ClientError::Connect)

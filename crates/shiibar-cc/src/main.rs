@@ -118,23 +118,16 @@ fn cmd_watch(_args: &[String]) -> i32 {
 
 fn cmd_focus(args: &[String]) -> i32 {
     let Some(selector) = args.first() else {
-        eprintln!("usage: shiibar-cc focus <selector>|-");
+        eprintln!("usage: shiibar-cc focus <selector>");
         return 1;
     };
     let runner = Osascript;
-    let socket_path = shiibar_cc_client::resolve_socket_path();
-    let last_focus_path = shiibar_cc_client::resolve_last_focus_path();
-    let report = if selector == "-" {
-        shiibar_cc::focus_cmd::run_focus_back(&socket_path, &last_focus_path, &runner)
-    } else {
-        shiibar_cc::focus_cmd::run_focus(
-            &socket_path,
-            &last_focus_path,
-            selector,
-            current_dir_or_dot(),
-            &runner,
-        )
-    };
+    let report = shiibar_cc::focus_cmd::run_focus(
+        &shiibar_cc_client::resolve_socket_path(),
+        selector,
+        current_dir_or_dot(),
+        &runner,
+    );
     if let Some(m) = report.message {
         eprintln!("{m}");
     }

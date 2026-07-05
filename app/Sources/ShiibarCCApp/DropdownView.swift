@@ -1,5 +1,5 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5): ⌄ menu (Back / Rescan / Mute Sound / Quit), warning rows
+// DESIGN.md §4.5): ⌄ menu (Rescan / Mute Sound / Quit), warning rows
 // (disconnected / notification permission denied / focus TCC error),
 // grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
 // rows with unreviewed bolding + red dot, row click -> focus.
@@ -72,7 +72,6 @@ private struct TopBar: View {
     var body: some View {
         HStack {
             Menu {
-                Button("Back") { state.focusBack() }
                 Button("Rescan") { state.runReconcile() }
                 // A Toggle inside a Menu renders the native menu checkmark
                 // while muted (the spec's "checkmark while muted").

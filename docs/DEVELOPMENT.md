@@ -73,7 +73,6 @@ shiibar-cc list                              # このセッションが idle で
 shiibar-cc wait . --status idle && say done  # このタブで Claude のターンを回して完了を待つ
 shiibar-cc focus <list で見えた target>      # 別タブから該当タブが前面に来るか
 shiibar-cc focused                           # 前面タブの target が出るか
-shiibar-cc focus -                           # 直前の前面タブに戻るか
 shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 ```
 

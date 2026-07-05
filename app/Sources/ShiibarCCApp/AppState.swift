@@ -223,16 +223,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// ⌄ menu "Back" (`focus -`, §4.5/§8.4).
-    func focusBack() {
-        DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
-            let result = CLIRunner.focusBack(helpersDirectory: helpersDirectory)
-            Task { @MainActor [weak self] in
-                self?.noteExitCode(result.exitCode)
-            }
-        }
-    }
-
     /// Reconcile via the CLI (§3.5/§4.5). Reached from all three trigger
     /// paths — startup, daemon reconnect (`onConnectedChanged`), and the ⌄
     /// menu's Rescan — so a permission failure surfaces even before the

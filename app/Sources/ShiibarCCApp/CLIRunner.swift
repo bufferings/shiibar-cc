@@ -144,13 +144,6 @@ enum CLIRunner {
         run(["focus", target], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
     }
 
-    /// `shiibar-cc focus -` (⌄ menu "Back", §4.5/§8.4). Exit 2 is expected:
-    /// no `last_focus` has been recorded yet (nothing was ever focused),
-    /// a normal early state rather than a malfunction.
-    static func focusBack(helpersDirectory: URL?) -> CLIRunResult {
-        run(["focus", "-"], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
-    }
-
     /// `shiibar-cc reconcile` (startup / reconnect / ⌄ menu "Rescan",
     /// §3.5/§4.5). Only 0 is expected: any failure (1 = daemon/gather
     /// error, 3 = TCC) silently loses the backstop and must error-log.
