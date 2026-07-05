@@ -52,6 +52,20 @@ pub struct Agent {
     /// client, and vice versa.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_assistant_message: Option<String>,
+    /// Epoch seconds this entry was first registered (§3.6). Immutable
+    /// after creation; the sort key for the dropdown's "Newest session"
+    /// mode (§4.5). Forward-compatible addition (M5 T9, §4.2):
+    /// `#[serde(default)]` so an older daemon build omitting this field on
+    /// the wire still deserializes on a future client, and vice versa.
+    #[serde(default)]
+    pub created_at: i64,
+    /// Epoch seconds of the last hook report received for this target
+    /// (§3.6). NOT updated by reconcile or the stale sweep — only an actual
+    /// hook report bumps it. The sort key for the dropdown's "Recent
+    /// activity" mode (§4.5). Forward-compatible addition (M5 T9), same
+    /// `#[serde(default)]` rationale as `created_at` above.
+    #[serde(default)]
+    pub last_report_at: i64,
     pub since: i64,
     pub last_seen: i64,
 }
@@ -404,6 +418,8 @@ mod tests {
             task: None,
             message: None,
             last_assistant_message: None,
+            created_at: 0,
+            last_report_at: 0,
             since: 1,
             last_seen: 2,
         };
@@ -426,6 +442,8 @@ mod tests {
             task: Some("implement the docs build".into()),
             message: None,
             last_assistant_message: Some("Done. All 54 tests pass.".into()),
+            created_at: 100,
+            last_report_at: 200,
             since: 1,
             last_seen: 2,
         };
@@ -442,6 +460,42 @@ mod tests {
         let line = r#"{"target":"t","status":"idle","unreviewed":false,"session_id":"s","cwd":"/c","since":1,"last_seen":2}"#;
         let agent: Agent = serde_json::from_str(line).unwrap();
         assert_eq!(agent.last_assistant_message, None);
+    }
+
+    #[test]
+    fn agent_wire_carries_created_at_and_last_report_at_when_present() {
+        // §4.2/§3.6: `created_at` / `last_report_at` are the sort keys for
+        // the dropdown's "Newest session" / "Recent activity" modes (M5 T9).
+        let agent = Agent {
+            target: "t".into(),
+            status: Status::Idle,
+            unreviewed: false,
+            session_id: "s".into(),
+            cwd: "/c".into(),
+            task: None,
+            message: None,
+            last_assistant_message: None,
+            created_at: 100,
+            last_report_at: 200,
+            since: 1,
+            last_seen: 2,
+        };
+        let s = serde_json::to_string(&agent).unwrap();
+        assert!(s.contains(r#""created_at":100"#));
+        assert!(s.contains(r#""last_report_at":200"#));
+        let back: Agent = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, agent);
+    }
+
+    #[test]
+    fn agent_wire_without_created_at_or_last_report_at_field_still_deserializes() {
+        // Forward/backward compat (M5 T9, §4.2): a pre-M5 daemon's `Agent`
+        // line has neither key at all; both must default to 0 rather than
+        // failing the line.
+        let line = r#"{"target":"t","status":"idle","unreviewed":false,"session_id":"s","cwd":"/c","since":1,"last_seen":2}"#;
+        let agent: Agent = serde_json::from_str(line).unwrap();
+        assert_eq!(agent.created_at, 0);
+        assert_eq!(agent.last_report_at, 0);
     }
 
     #[test]

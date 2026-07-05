@@ -136,6 +136,8 @@ mod tests {
             task: None,
             message: None,
             last_assistant_message: None,
+            created_at: since,
+            last_report_at: since,
             since,
             last_seen: since,
         }

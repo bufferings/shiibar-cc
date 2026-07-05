@@ -67,6 +67,17 @@ public struct Agent: Equatable, Decodable, Sendable {
     /// truncated to 200 chars (§9). `nil` while `working`, or before any
     /// completion has happened yet.
     public let lastAssistantMessage: String?
+    /// Epoch seconds this entry was first registered (§3.6). Immutable
+    /// after creation — the sort key for the dropdown's "Newest session"
+    /// mode (§4.5). Forward-compatible addition (M5 T9): missing on the
+    /// wire (older daemon) decodes to 0, same as the daemon's own
+    /// `#[serde(default)]`.
+    public let createdAt: Int64
+    /// Epoch seconds of the last hook report for this target (§3.6). NOT
+    /// bumped by reconcile or the stale sweep. The sort key for the
+    /// dropdown's "Recent activity" mode (§4.5). Same forward-compat
+    /// default-to-0 rule as `createdAt`.
+    public let lastReportAt: Int64
     public let since: Int64
     public let lastSeen: Int64
 
@@ -75,6 +86,8 @@ public struct Agent: Equatable, Decodable, Sendable {
         case sessionId = "session_id"
         case cwd, task, message
         case lastAssistantMessage = "last_assistant_message"
+        case createdAt = "created_at"
+        case lastReportAt = "last_report_at"
         case since
         case lastSeen = "last_seen"
     }
@@ -88,6 +101,8 @@ public struct Agent: Equatable, Decodable, Sendable {
         task: String?,
         message: String?,
         lastAssistantMessage: String? = nil,
+        createdAt: Int64 = 0,
+        lastReportAt: Int64 = 0,
         since: Int64,
         lastSeen: Int64
     ) {
@@ -99,6 +114,8 @@ public struct Agent: Equatable, Decodable, Sendable {
         self.task = task
         self.message = message
         self.lastAssistantMessage = lastAssistantMessage
+        self.createdAt = createdAt
+        self.lastReportAt = lastReportAt
         self.since = since
         self.lastSeen = lastSeen
     }
@@ -113,6 +130,8 @@ public struct Agent: Equatable, Decodable, Sendable {
         task = try container.decodeIfPresent(String.self, forKey: .task)
         message = try container.decodeIfPresent(String.self, forKey: .message)
         lastAssistantMessage = try container.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
+        createdAt = try container.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        lastReportAt = try container.decodeIfPresent(Int64.self, forKey: .lastReportAt) ?? 0
         since = try container.decode(Int64.self, forKey: .since)
         lastSeen = try container.decode(Int64.self, forKey: .lastSeen)
     }

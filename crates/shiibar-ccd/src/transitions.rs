@@ -293,15 +293,25 @@ fn create_entry(report: &ReportPayload, now: i64, status: Status) -> AgentEntry 
         task: report.prompt.clone(),
         message: None,
         last_assistant_message: None,
+        // Registration via a hook report (§3.6): both timestamps start at
+        // `now` — `created_at` never moves again, `last_report_at` moves on
+        // every subsequent hook report (M5 T9).
+        created_at: now,
+        last_report_at: now,
     }
 }
 
-/// session_id / cwd / last_seen always overwrite; task overwrites only when
-/// this report carries a prompt (UserPromptSubmit) — §3.6.
+/// session_id / cwd / last_seen / last_report_at always overwrite; task
+/// overwrites only when this report carries a prompt (UserPromptSubmit) —
+/// §3.6. `last_report_at` is bumped here (not just for a real status
+/// transition) because every hook report reaching a registered entry counts,
+/// same as `last_seen` (M5 T9) — `created_at` is deliberately untouched:
+/// it's set once at registration and never revisited.
 fn apply_common_overwrites(entry: &mut AgentEntry, report: &ReportPayload, now: i64) {
     entry.session_id = report.session_id.clone();
     entry.cwd = report.cwd.clone();
     entry.last_seen = now;
+    entry.last_report_at = now;
     if let Some(prompt) = &report.prompt {
         entry.task = Some(prompt.clone());
     }
@@ -360,6 +370,13 @@ pub fn apply_reconcile_session(
                 // reconcile never knows a session's last assistant reply —
                 // only the Stop hook carries that (§3.6).
                 last_assistant_message: None,
+                // A reconcile discovery is still a registration (§3.6), so
+                // `created_at` starts at `now` like any other. But it isn't
+                // a hook report, so `last_report_at` stays at its default
+                // (0) until an actual hook report arrives (M5 T9) — 0 sinks
+                // this entry to the bottom of "Recent activity" until then.
+                created_at: now,
+                last_report_at: 0,
             })
         }
         Some(prev) => {
@@ -367,6 +384,10 @@ pub fn apply_reconcile_session(
             next.session_id = session.session_id.clone();
             next.cwd = session.cwd.clone();
             next.last_seen = now;
+            // `created_at` / `last_report_at` are deliberately absent from
+            // this list: reconcile is not a hook report and must never
+            // touch either (§3.6, M5 T9) — they stay at whatever `prev`
+            // already had.
 
             if session.status != prev.status {
                 next.status = session.status;
@@ -430,6 +451,8 @@ mod reconcile_tests {
             } else {
                 None
             },
+            created_at: 100,
+            last_report_at: 400,
         }
     }
 
@@ -591,5 +614,39 @@ mod reconcile_tests {
         };
         assert_eq!(entry.session_id, "s-new");
         assert_eq!(entry.cwd, "/new");
+    }
+
+    // --- created_at / last_report_at (§3.6, M5 T9) ---
+
+    #[test]
+    fn new_discovery_sets_created_at_but_leaves_last_report_at_at_zero() {
+        // A reconcile discovery is a registration (`created_at` starts at
+        // `now`), but it isn't a hook report, so `last_report_at` must stay
+        // at its zero default until an actual hook report arrives.
+        let outcome = apply_reconcile_session(None, &session(Status::Working, None), 1000);
+        let Outcome::Updated { entry, .. } = outcome else {
+            panic!("expected Updated");
+        };
+        assert_eq!(entry.created_at, 1000);
+        assert_eq!(
+            entry.last_report_at, 0,
+            "reconcile discovery must not fabricate a hook-report timestamp"
+        );
+    }
+
+    #[test]
+    fn reconcile_never_touches_created_at_or_last_report_at_on_a_known_entry() {
+        let prev = entry(Status::Working, false); // created_at=100, last_report_at=400
+        let outcome = apply_reconcile_session(Some(&prev), &session(Status::Waiting, Some("permission prompt")), 2000);
+        let Outcome::Updated { entry, .. } = outcome else {
+            panic!("expected Updated");
+        };
+        assert_eq!(entry.status, Status::Waiting, "sanity: the reconcile did apply");
+        assert_eq!(entry.last_seen, 2000, "sanity: last_seen IS bumped by reconcile");
+        assert_eq!(entry.created_at, 100, "created_at must never move");
+        assert_eq!(
+            entry.last_report_at, 400,
+            "reconcile must not bump last_report_at even though it bumps last_seen"
+        );
     }
 }

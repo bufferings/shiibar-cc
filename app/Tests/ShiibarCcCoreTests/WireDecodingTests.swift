@@ -55,6 +55,34 @@ final class WireDecodingTests: XCTestCase {
         XCTAssertEqual(agent.lastAssistantMessage, "Done. All 54 tests pass.")
     }
 
+    func testAgentDecodesCreatedAtAndLastReportAtWhenPresent() throws {
+        // §4.2/§3.6: `created_at` / `last_report_at` are the sort keys for
+        // the dropdown's "Newest session" / "Recent activity" modes (M5 T9).
+        let json = """
+        {"event":"status_changed","agent":{"target":"t","status":"idle","unreviewed":true,\
+        "session_id":"s","cwd":"/c","created_at":100,"last_report_at":200,"since":1,"last_seen":2}}
+        """
+        guard case .statusChanged(let agent) = try decode(json) else {
+            return XCTFail("expected status_changed")
+        }
+        XCTAssertEqual(agent.createdAt, 100)
+        XCTAssertEqual(agent.lastReportAt, 200)
+    }
+
+    func testAgentWithoutCreatedAtOrLastReportAtDefaultsToZero() throws {
+        // Backward compat: a pre-M5 daemon's `Agent` line has neither key
+        // at all (M5 T9) — both must default to 0 rather than failing.
+        let json = """
+        {"event":"status_changed","agent":{"target":"t","status":"idle","unreviewed":false,\
+        "session_id":"s","cwd":"/c","since":1,"last_seen":2}}
+        """
+        guard case .statusChanged(let agent) = try decode(json) else {
+            return XCTFail("expected status_changed")
+        }
+        XCTAssertEqual(agent.createdAt, 0)
+        XCTAssertEqual(agent.lastReportAt, 0)
+    }
+
     func testAgentRemovedDecodesTargetAndReason() throws {
         let json = #"{"event":"agent_removed","target":"t","reason":"session_end"}"#
         guard case .agentRemoved(let target, let reason) = try decode(json) else {

@@ -75,6 +75,8 @@ mod tests {
             task: None,
             message: None,
             last_assistant_message: None,
+            created_at: 1,
+            last_report_at: 1,
             since: 1,
             last_seen: 2,
         }

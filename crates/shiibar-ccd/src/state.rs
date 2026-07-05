@@ -38,6 +38,19 @@ pub struct AgentEntry {
     /// still loads (M5 T4 brief: "old state files load").
     #[serde(default)]
     pub last_assistant_message: Option<String>,
+    /// Epoch seconds this entry was first registered (§3.6). Set once,
+    /// immutable afterward — the sort key for the dropdown's "Newest
+    /// session" mode (§4.5). `#[serde(default)]` so a pre-M5 `state.json`
+    /// (no such field at all) still loads, defaulting to 0 (M5 T9 brief:
+    /// "sinks to the bottom of the sort, nothing more").
+    #[serde(default)]
+    pub created_at: i64,
+    /// Epoch seconds of the last hook report received for this target
+    /// (§3.6). Updated on every hook report; NOT updated by reconcile or
+    /// the stale sweep. The sort key for the dropdown's "Recent activity"
+    /// mode (§4.5). Same `#[serde(default)]` rationale as `created_at`.
+    #[serde(default)]
+    pub last_report_at: i64,
 }
 
 impl AgentEntry {
@@ -51,6 +64,8 @@ impl AgentEntry {
             task: self.task.clone(),
             message: self.message.clone(),
             last_assistant_message: self.last_assistant_message.clone(),
+            created_at: self.created_at,
+            last_report_at: self.last_report_at,
             since: self.since,
             last_seen: self.last_seen,
         }
@@ -58,7 +73,10 @@ impl AgentEntry {
 
     /// The subset of fields whose change triggers a `status_changed`
     /// broadcast (§4.2: "whenever any of status / unreviewed / session_id /
-    /// cwd / task / message / last_assistant_message changes").
+    /// cwd / task / message / last_assistant_message / last_report_at
+    /// changes"). `created_at` is deliberately excluded — it never changes
+    /// after registration (M5 T9), so including it would never affect this
+    /// comparison anyway.
     #[allow(clippy::type_complexity)]
     fn observable(
         &self,
@@ -70,6 +88,7 @@ impl AgentEntry {
         Option<&str>,
         Option<&str>,
         Option<&str>,
+        i64,
     ) {
         (
             self.status,
@@ -79,6 +98,7 @@ impl AgentEntry {
             self.task.as_deref(),
             self.message.as_deref(),
             self.last_assistant_message.as_deref(),
+            self.last_report_at,
         )
     }
 
@@ -139,6 +159,8 @@ mod tests {
             task: None,
             message: None,
             last_assistant_message: None,
+            created_at: 1,
+            last_report_at: 1,
         }
     }
 
@@ -191,6 +213,50 @@ mod tests {
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].last_assistant_message, None);
+    }
+
+    #[test]
+    fn loads_pre_m5_state_json_without_created_at_or_last_report_at_fields() {
+        // M5 T9 brief: a state.json written before these fields existed
+        // (no `created_at` / `last_report_at` keys at all) must still load,
+        // defaulting both to 0 rather than failing ("sinks to the bottom
+        // of the sort, nothing more").
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"agents":[{"target":"a","status":"idle","unreviewed":true,"session_id":"s","cwd":"/c","since":1,"last_seen":2,"task":null,"message":null}]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].created_at, 0);
+        assert_eq!(loaded[0].last_report_at, 0);
+    }
+
+    #[test]
+    fn observably_differs_on_last_report_at_alone() {
+        let a = entry("a", Status::Idle);
+        let mut b = a.clone();
+        b.last_report_at = a.last_report_at + 100;
+        assert!(
+            a.observably_differs_from(&b),
+            "last_report_at changing must trigger status_changed (M5 T9)"
+        );
+    }
+
+    #[test]
+    fn observably_differs_ignores_created_at_only_changes() {
+        // created_at never changes after registration (M5 T9), so it isn't
+        // even part of the observable comparison — but assert the intended
+        // behavior directly in case that ever changes.
+        let a = entry("a", Status::Idle);
+        let mut b = a.clone();
+        b.created_at = a.created_at + 100;
+        assert!(
+            !a.observably_differs_from(&b),
+            "created_at alone must never trigger status_changed"
+        );
     }
 
     #[test]

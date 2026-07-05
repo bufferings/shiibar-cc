@@ -10,8 +10,15 @@ final class RollupTests: XCTestCase {
 
     func testWorkingBeatsIdleWhenNoWaiting() {
         let state = Rollup.icon(statuses: [.idle, .working], hasUnreviewed: false, daemonConnected: true)
-        XCTAssertEqual(state.glyph, .working)
+        XCTAssertEqual(state.glyph, .working(frame: 0))
         XCTAssertEqual(state.dim, Rollup.normalDim)
+    }
+
+    func testWorkingFrameIsPassedThroughFromTheCaller() {
+        // M5 T8: the animation frame is driven by an app-layer timer, not
+        // computed here — `Rollup.icon` just carries whatever it's given.
+        let state = Rollup.icon(statuses: [.working], hasUnreviewed: false, daemonConnected: true, workingFrame: 2)
+        XCTAssertEqual(state.glyph, .working(frame: 2))
     }
 
     func testAllIdleIsDimmedIdleTier() {

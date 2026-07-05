@@ -12,8 +12,14 @@ import ShiibarCcCore
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published private(set) var agents: [Agent] = []
-    @Published private(set) var connected = false
+    /// The working animation timer (M5 T8) only cares whether the current
+    /// rollup shows `working`, so both mutation points refresh it.
+    @Published private(set) var agents: [Agent] = [] {
+        didSet { refreshWorkingAnimationTimer() }
+    }
+    @Published private(set) var connected = false {
+        didSet { refreshWorkingAnimationTimer() }
+    }
     /// Either focus or reconcile returned exit 3 (§4.5: not focus-only — a
     /// reconcile silenced by a missing Automation permission would silently
     /// lose the whole backstop).
@@ -34,11 +40,38 @@ final class AppState: ObservableObject {
     /// the dropdown opens, fixed while it stays open, refreshed on reopen.
     /// See `observeDropdownOpen` for the open signal.
     @Published private(set) var dropdownOpenedAt: Int64 = Int64(Date().timeIntervalSince1970)
+    /// Whether the dropdown panel is currently open (M5 T9: the row status
+    /// symbol's working spinner animates only while it is). Tracked via the
+    /// same `NSWindow` key notifications as `dropdownOpenedAt`.
+    @Published private(set) var isDropdownOpen = false
+    /// The dropdown's flat-mode row order, settled at the moment the
+    /// dropdown opens and held fixed until the next open (§4.5: "the order
+    /// doesn't move while it's open") — the same freeze-at-open idea as
+    /// `dropdownOpenedAt`, but for row order instead of elapsed time. Only
+    /// meaningful for the two flat `SortMode`s; `.grouped` uses
+    /// `Grouping.groupedRows` instead and ignores this. Holds target IDs
+    /// (rather than snapshotting whole `Agent` values) so row *content*
+    /// (status symbol, bold/badge, elapsed time) still reflects live
+    /// updates — only the ordering is frozen.
+    @Published private(set) var flatOrderSnapshot: [String] = []
+    /// ⌄ menu "Sort by" selection (§4.5, M5 T9): persisted in UserDefaults,
+    /// defaults to "Newest session". Changing it (a deliberate user action,
+    /// unlike the passive background updates the freeze-at-open rule guards
+    /// against) re-settles `flatOrderSnapshot` immediately — see
+    /// `setSortMode`.
+    @Published private(set) var sortMode: SortMode
+    private static let sortModeKey = "cc.shiibar.sortMode"
+    /// Current frame (0..<`Rollup.workingFrameCount`) of the tray's working
+    /// animation (M5 T8). Only meaningful while `workingAnimationTimer` is
+    /// running; `trayIcon` reads it on every render regardless.
+    @Published private(set) var workingAnimationFrame = 0
+    private var workingAnimationTimer: Timer?
 
     let notificationManager: NotificationManager
     private let lifecycle: DaemonLifecycleManager
     private let helpersDirectory: URL?
     private var dropdownOpenObserver: NSObjectProtocol?
+    private var dropdownCloseObserver: NSObjectProtocol?
 
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
 
@@ -47,6 +80,8 @@ final class AppState: ObservableObject {
         let notificationManager = NotificationManager()
         self.notificationManager = notificationManager
         self.muted = notificationManager.isMuted
+        let storedSortMode = UserDefaults.standard.string(forKey: Self.sortModeKey).flatMap(SortMode.init(rawValue:))
+        self.sortMode = storedSortMode ?? .newestSession
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
         self.lifecycle = DaemonLifecycleManager(
@@ -67,9 +102,14 @@ final class AppState: ObservableObject {
         if let observer = dropdownOpenObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = dropdownCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        workingAnimationTimer?.invalidate()
     }
 
-    /// Refresh `dropdownOpenedAt` every time the dropdown panel opens.
+    /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`/`flatOrderSnapshot`)
+    /// every time the dropdown panel opens; track its close the same way.
     ///
     /// The open signal is `NSWindow.didBecomeKeyNotification`: the
     /// MenuBarExtra window-style panel becomes the key window on every
@@ -82,7 +122,10 @@ final class AppState: ObservableObject {
     /// fire only once at launch. NSWindow notifications are per-process;
     /// the only other window this app owns is the status item's host
     /// (class `NSStatusBarWindow`), which is filtered out — the same
-    /// assumption `dismissDropdown` relies on.
+    /// assumption `dismissDropdown` relies on. The close signal
+    /// (`didResignKeyNotification`) is the same window's counterpart,
+    /// filtered identically — that's what stops the row spinner from
+    /// animating while the dropdown is closed (M5 T9).
     private func observeDropdownOpen() {
         dropdownOpenObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
@@ -96,6 +139,18 @@ final class AppState: ObservableObject {
                 self.captureDropdownOpenTime()
             }
         }
+        dropdownCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow,
+                  !window.className.contains("NSStatusBarWindow"),
+                  let self else { return }
+            Task { @MainActor in
+                self.isDropdownOpen = false
+            }
+        }
     }
 
     /// Also called from the dropdown's `onAppear` as a belt-and-braces
@@ -103,6 +158,8 @@ final class AppState: ObservableObject {
     /// macOS version whose panel mounts the view fresh per open).
     func captureDropdownOpenTime() {
         dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
+        isDropdownOpen = true
+        flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: sortMode).map(\.target)
     }
 
     func start() {
@@ -151,7 +208,8 @@ final class AppState: ObservableObject {
         Rollup.icon(
             statuses: agents.map(\.status),
             hasUnreviewed: agents.contains { $0.unreviewed },
-            daemonConnected: connected
+            daemonConnected: connected,
+            workingFrame: workingAnimationFrame
         )
     }
 
@@ -161,6 +219,80 @@ final class AppState: ObservableObject {
     /// `since` epoch on every tick, never stored as strings.
     func groups(now: Int64) -> [AgentGroup] {
         Grouping.groupedRows(agents: agents, now: now, home: home)
+    }
+
+    /// Flat dropdown rows (`.newestSession` / `.recentActivity`) as of `now`.
+    /// Row *order* comes from `flatOrderSnapshot` (settled at the last
+    /// dropdown open, §4.5) rather than being recomputed from the live
+    /// `agents` array here — that's what keeps rows from reshuffling while
+    /// the dropdown is open even as `last_report_at` keeps changing for a
+    /// still-active agent. Row *content* still reflects live `agents`:
+    /// only entries still present are shown, and any agent discovered after
+    /// the snapshot was taken (e.g. a brand new session) is appended at the
+    /// end rather than dropped.
+    func flatRows(now: Int64) -> [AgentRow] {
+        let byTarget = Dictionary(uniqueKeysWithValues: agents.map { ($0.target, $0) })
+        var ordered = flatOrderSnapshot.compactMap { byTarget[$0] }
+        let knownTargets = Set(flatOrderSnapshot)
+        let newcomers = Sorting.flatOrder(agents: agents.filter { !knownTargets.contains($0.target) }, mode: sortMode)
+        ordered.append(contentsOf: newcomers)
+        return ordered.map { Grouping.makeRow(agent: $0, now: now, home: home) }
+    }
+
+    /// ⌄ menu "Sort by" selection (§4.5, M5 T9). Unlike the passive
+    /// background updates the freeze-at-open rule guards against, picking a
+    /// new mode is a deliberate user action — re-settle the flat order
+    /// immediately (for `.grouped`, `flatOrderSnapshot` is simply unused
+    /// until the mode is switched back).
+    func setSortMode(_ mode: SortMode) {
+        sortMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.sortModeKey)
+        flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: mode).map(\.target)
+    }
+
+    // MARK: - Tray working animation (M5 T8)
+
+    /// Start/stop the 500ms-tick animation timer (§9) to match whether the
+    /// rollup currently shows `working` — called whenever `agents` or
+    /// `connected` changes (their `didSet`s above), since either can flip
+    /// the rollup in or out of `working`. `hasUnreviewed` doesn't affect
+    /// this decision (the red-dot overlay doesn't change which glyph is
+    /// shown), so `false` is passed as a cheap placeholder.
+    private func refreshWorkingAnimationTimer() {
+        let rollupGlyph = Rollup.icon(
+            statuses: agents.map(\.status),
+            hasUnreviewed: false,
+            daemonConnected: connected
+        ).glyph
+        let isWorking: Bool
+        if case .working = rollupGlyph {
+            isWorking = true
+        } else {
+            isWorking = false
+        }
+
+        switch (isWorking, workingAnimationTimer) {
+        case (true, .none):
+            workingAnimationFrame = 0
+            workingAnimationTimer = Timer.scheduledTimer(
+                withTimeInterval: Rollup.workingFrameIntervalSeconds,
+                repeats: true
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.advanceWorkingAnimationFrame()
+                }
+            }
+        case (false, .some(let timer)):
+            timer.invalidate()
+            workingAnimationTimer = nil
+            workingAnimationFrame = 0
+        default:
+            break // already in the right state (running / not running)
+        }
+    }
+
+    private func advanceWorkingAnimationFrame() {
+        workingAnimationFrame = (workingAnimationFrame + 1) % Rollup.workingFrameCount
     }
 
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)

@@ -1,19 +1,19 @@
 // AppKit renderer for the tray icon (the tray section of menubar-design.html,
-// DESIGN.md §4.5): draws the rounded window + ❯ + rolled-up status character
-// (+ red unreviewed dot) into an NSImage, redrawn on every state change.
+// DESIGN.md §4.5 / M5.md T8's final geometry): draws the rounded window
+// frame + ✳ emblem + rolled-up status indicator (+ red unreviewed dot) into
+// an NSImage, redrawn on every state change (and, only while the rollup
+// shows `working`, on every animation tick — see `TrayIconAnimator`).
 //
 // Why an NSImage and not composed SwiftUI views: the MenuBarExtra label is
 // not a normal rendering context. On-device it dropped Shape strokes and
-// flattened the custom text layout to a bare menu-bar-styled "❯" (while the
-// identical view rendered fine inside the dropdown window). DESIGN.md §4.5
-// prescribes exactly this approach for the tray ("render by NSImage
+// flattened the custom text layout to a bare menu-bar-styled glyph (while
+// the identical view rendered fine inside the dropdown window). DESIGN.md
+// §4.5 prescribes exactly this approach for the tray ("render by NSImage
 // compositing, redrawn per state change"); a plain `Image` is the reliably
 // supported label content.
 //
-// Two-layer rule (menubar-design.html implementation notes): a single
-// template image would erase the red dot (template rendering keeps only the
-// alpha channel), and a SwiftUI overlay is the kind of shape the label just
-// demonstrated it drops. So:
+// Two-layer rule (menubar-design.html implementation notes) — unchanged by
+// the M5 T8 redesign:
 //   - no dot   -> ONE template image (glyph only). Auto-tints to the menu
 //                 bar's foreground color; the dim level is baked into the
 //                 alpha channel, which template rendering preserves.
@@ -22,53 +22,57 @@
 //                 halo. This is the spec's sanctioned fallback
 //                 (appearance-observed non-template compositing).
 //
-// `✳` is the plain U+2733 EIGHT SPOKED ASTERISK character (must not be
-// reshaped toward the Anthropic sunburst logo). All geometry lives in
-// `TrayIconMetrics` below — single place to tweak after looking at the real
-// menu bar (menubar-design.html: stroke weights/spacing are finalized
-// on-device).
+// `✳` is the plain U+2733 EIGHT SPOKED ASTERISK character, forced to text
+// presentation (trailing U+FE0E) so it never renders as a colored emoji
+// glyph — it must not be reshaped toward the Anthropic sunburst logo
+// either. All geometry lives in `TrayIconMetrics` below — single place to
+// tweak after looking at the real menu bar (M5.md T8: stroke weights,
+// animation cadence (400-800ms) and faint-dot opacity (25-40%) are subject
+// to on-device tuning; the values here are M5.md's specified starting
+// point, not yet on-device-confirmed).
+//
+// Coordinates are y-up (CoreGraphics/AppKit convention, `flipped: false`
+// below) — menubar-design.html's SVG mock shows the same shape y-flipped
+// (M5.md T8).
 
 import AppKit
 import ShiibarCcCore
 
 /// Every tunable constant for the tray drawing, in points, on a y-up canvas.
-/// Derived from the mock's 16x16 viewBox (window rect (1.2,1.8) 13.6x12.4
-/// r3, prompt polyline (3.1,5.5)-(5.7,8)-(3.1,10.5) width 2, dot at
-/// (14.2,2.3) r2) scaled ~1.1x, y-flipped, with head-room for the dot
-/// overhang.
+/// Values are M5.md T8's exact starting geometry for the final (✳ emblem +
+/// frame) design.
 enum TrayIconMetrics {
     static let canvasWidth: CGFloat = 20
     static let canvasHeight: CGFloat = 18
 
-    // Rounded window frame.
-    static let frameRect = NSRect(x: 1.0, y: 1.0, width: 15.0, height: 13.5)
-    static let frameCornerRadius: CGFloat = 3.2
-    static let frameLineWidth: CGFloat = 1.3
+    // Full-height rounded window frame.
+    static let frameRect = NSRect(x: 0.8, y: 0.8, width: 16, height: 16.2)
+    static let frameCornerRadius: CGFloat = 3.5
+    static let frameLineWidth: CGFloat = 1.4
 
-    // Prompt ❯ (drawn as a path, not text — the mock's two-segment chevron).
-    static let promptPoints: [NSPoint] = [
-        NSPoint(x: 3.4, y: 11.0),
-        NSPoint(x: 6.2, y: 7.75),
-        NSPoint(x: 3.4, y: 4.5),
-    ]
-    static let promptLineWidth: CGFloat = 2.0
+    // ✳ emblem, top-left (plain U+2733, forced text presentation).
+    static let emblemText = "\u{2733}\u{FE0E}"
+    static let emblemCenter = NSPoint(x: 5.4, y: 11.4)
+    static let emblemFontSize: CGFloat = 9.5
 
-    // Status character (text glyphs, centered right of the prompt).
-    static let statusCenter = NSPoint(x: 11.4, y: 7.75)
-    /// Optical vertical correction for text glyphs; tune on-device.
-    static let statusYOffset: CGFloat = 0
-    static let waitingFontSize: CGFloat = 9
-    static let workingFontSize: CGFloat = 8.5
+    // Status indicator, bottom-right. `waiting` and the working dots share
+    // the same horizontal center as the mock.
+    static let statusCenterX: CGFloat = 12
 
-    // Idle `_` (drawn as a low horizontal line, like the mock, rather than
-    // a text underscore whose vertical position is font-dependent).
-    static let idleLineFrom = NSPoint(x: 9.2, y: 4.6)
-    static let idleLineTo = NSPoint(x: 13.2, y: 4.6)
-    static let idleLineWidth: CGFloat = 1.3
+    static let waitingCenter = NSPoint(x: 12, y: 8.6)
+    static let waitingFontSize: CGFloat = 10.5
+
+    // Working: 3 dots on one row, lighting up left-to-right across the
+    // 4-frame cycle (frame 0 = all faint, frame N = the first N lit; §9:
+    // 500ms/frame).
+    static let workingDotY: CGFloat = 5.0
+    static let workingDotDx: CGFloat = 2.4
+    static let workingDotRadius: CGFloat = 1.05
+    static let workingDotFaintAlpha: CGFloat = 0.3
 
     // Red unreviewed dot, overhanging the frame's top-right corner, with a
     // light halo ring always drawn (invisible on light bars by design).
-    static let dotCenter = NSPoint(x: 16.6, y: 15.2)
+    static let dotCenter = NSPoint(x: 16.2, y: 15.2)
     static let dotRadius: CGFloat = 2.2
     static let haloLineWidth: CGFloat = 0.8
     static let dotColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
@@ -114,31 +118,19 @@ enum TrayIconRenderer {
         frame.lineWidth = m.frameLineWidth
         frame.stroke()
 
-        // 2. Prompt ❯.
-        let prompt = NSBezierPath()
-        prompt.lineWidth = m.promptLineWidth
-        prompt.lineCapStyle = .round
-        prompt.lineJoinStyle = .round
-        prompt.move(to: m.promptPoints[0])
-        for point in m.promptPoints.dropFirst() {
-            prompt.line(to: point)
-        }
-        prompt.stroke()
+        // 2. ✳ emblem — always drawn (dimmed with everything else); M5 T8
+        // dropped the old ❯ prompt entirely.
+        drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
 
-        // 3. Rolled-up status character.
+        // 3. Rolled-up status indicator, bottom-right. `idle`/`none` carry
+        // no extra glyph at all now (M5 T8 dropped the idle `_` underscore
+        // too) — they differ from each other only in `state.dim`.
         switch state.glyph {
         case .waiting:
-            drawStatusText("!", size: m.waitingFontSize, weight: .bold, color: glyphColor)
-        case .working:
-            drawStatusText("\u{2733}", size: m.workingFontSize, weight: .regular, color: glyphColor)
-        case .idle:
-            let line = NSBezierPath()
-            line.lineWidth = m.idleLineWidth
-            line.lineCapStyle = .round
-            line.move(to: m.idleLineFrom)
-            line.line(to: m.idleLineTo)
-            line.stroke()
-        case .none:
+            drawGlyphText("!", center: m.waitingCenter, size: m.waitingFontSize, weight: .bold, color: glyphColor)
+        case .working(let frame):
+            drawWorkingDots(litCount: frame, color: glyphColor)
+        case .idle, .none:
             break
         }
 
@@ -161,8 +153,31 @@ enum TrayIconRenderer {
         }
     }
 
-    private static func drawStatusText(_ text: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) {
+    /// Draw the 3-dot working indicator: the leftmost `litCount` dots at
+    /// full (already-dimmed) opacity, the rest at `workingDotFaintAlpha` of
+    /// that (M5 T8: "all-faint -> 1 lit -> 2 lit -> 3 lit").
+    private static func drawWorkingDots(litCount: Int, color: NSColor) {
         let m = TrayIconMetrics.self
+        let xPositions = [
+            m.statusCenterX - m.workingDotDx,
+            m.statusCenterX,
+            m.statusCenterX + m.workingDotDx,
+        ]
+        for (index, x) in xPositions.enumerated() {
+            let lit = index < litCount
+            let dotColor = lit ? color : color.withAlphaComponent(color.alphaComponent * m.workingDotFaintAlpha)
+            let rect = NSRect(
+                x: x - m.workingDotRadius,
+                y: m.workingDotY - m.workingDotRadius,
+                width: m.workingDotRadius * 2,
+                height: m.workingDotRadius * 2
+            )
+            dotColor.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+        }
+    }
+
+    private static func drawGlyphText(_ text: String, center: NSPoint, size: CGFloat, weight: NSFont.Weight, color: NSColor) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: size, weight: weight),
             .foregroundColor: color,
@@ -170,8 +185,8 @@ enum TrayIconRenderer {
         let string = NSAttributedString(string: text, attributes: attributes)
         let bounds = string.size()
         string.draw(at: NSPoint(
-            x: m.statusCenter.x - bounds.width / 2,
-            y: m.statusCenter.y - bounds.height / 2 + m.statusYOffset
+            x: center.x - bounds.width / 2,
+            y: center.y - bounds.height / 2
         ))
     }
 }

@@ -1,11 +1,14 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5): ⌄ menu (Rescan / Start at Login / Mute Sound / Quit), warning rows
-// (disconnected / notification permission denied / focus TCC error),
-// grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
-// rows with unreviewed bolding + red dot, row click -> focus. Every
-// clickable element (rows, the ⌄ chip) gets a selection-color hover/press
-// highlight (menubar-design.html's hover/press section); non-interactive
-// elements (group headers, warning rows) get none.
+// DESIGN.md §4.5): ⌄ menu (Rescan / Start at Login / Sort by / Mute Sound /
+// Quit), warning rows (disconnected / notification permission denied /
+// focus TCC error), a flat list with a leading status symbol (default) or
+// grouped cards (Waiting / Working / Idle, empty groups hidden) depending
+// on the "Sort by" selection, two-line rows with unreviewed bolding + a
+// symbol-shoulder badge, row click -> focus. Every clickable element (rows,
+// the ⌄ chip) gets a hover/press highlight (menubar-design.html's
+// hover/press section — session rows use the selection color, the ⌄ chip
+// uses a persistent gray, M5 T2 follow-up); non-interactive elements (group
+// headers, warning rows) get none.
 
 import ShiibarCcCore
 import SwiftUI
@@ -24,23 +27,38 @@ struct DropdownView: View {
             // re-renders these rows; agent changes while open still render
             // immediately via `agents`, only the elapsed base stays put
             // (Grouping's max(0, now - since) clamps rows whose transition
-            // happens after the capture).
-            let groups = state.groups(now: state.dropdownOpenedAt)
-            if groups.isEmpty {
-                Text("No agents")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(groups) { group in
-                            GroupSection(group: group, state: state)
+            // happens after the capture). Row *order* in the two flat modes
+            // instead comes from `flatOrderSnapshot` (also settled at open,
+            // §4.5) — see `AppState.flatRows`.
+            if state.sortMode == .grouped {
+                let groups = state.groups(now: state.dropdownOpenedAt)
+                if groups.isEmpty {
+                    NoAgentsRow()
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(groups) { group in
+                                GroupSection(group: group, state: state)
+                            }
                         }
                     }
+                    .frame(maxHeight: 360)
                 }
-                .frame(maxHeight: 360)
+            } else {
+                let rows = state.flatRows(now: state.dropdownOpenedAt)
+                if rows.isEmpty {
+                    NoAgentsRow()
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(rows) { row in
+                                RowView(row: row, state: state)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    .frame(maxHeight: 360)
+                }
             }
 
             // Warning rows live at the BOTTOM of the dropdown (DESIGN.md
@@ -74,6 +92,14 @@ private struct TopBar: View {
     @State private var isHoveringVButton = false
     @State private var isPressingVButton = false
 
+    /// The ⌄ chip's gray background opacity (T2 follow-up, M5;
+    /// menubar-design.html: base ~.14, hover ~.22, press ~.30).
+    private var chipBackgroundOpacity: Double {
+        if isPressingVButton { return 0.30 }
+        if isHoveringVButton { return 0.22 }
+        return 0.14
+    }
+
     var body: some View {
         HStack {
             Menu {
@@ -97,6 +123,22 @@ private struct TopBar: View {
                     get: { state.loginItemEnabled },
                     set: { _ in state.toggleLoginItem() }
                 ))
+                // "Sort by" (§4.5, M5 T9): three radio-style items between
+                // Start at Login and Mute Sound (menubar-design.html's
+                // v-menu bullet ordering). A `Picker` with `.inline` style
+                // inside a `Menu` is what SwiftUI/AppKit render as a
+                // checkmark-on-the-active-item radio group.
+                Menu("Sort by") {
+                    Picker("Sort by", selection: Binding(
+                        get: { state.sortMode },
+                        set: { state.setSortMode($0) }
+                    )) {
+                        ForEach(SortMode.allCases, id: \.self) { mode in
+                            Text(mode.menuTitle).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
                 // A Toggle inside a Menu renders the native menu checkmark
                 // while muted (the spec's "checkmark while muted").
                 Toggle("Mute Sound", isOn: Binding(
@@ -106,9 +148,11 @@ private struct TopBar: View {
                 Divider()
                 Button("Quit") { state.quit() }
             } label: {
+                // T2 follow-up (M5): the chip's text color never changes on
+                // hover/press — only the background does, below.
                 Text("⌄")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isHoveringVButton ? Color.white : Color.primary)
+                    .foregroundStyle(Color.primary)
             }
             // The macOS Menu draws its own pull-down disclosure indicator
             // next to the label, which stacked a second chevron under our ⌄
@@ -119,20 +163,19 @@ private struct TopBar: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            // The ⌄ CHIP (this trigger, as opposed to its popup items) gets
-            // the same selection-color hover/press highlight as a session
-            // row (menubar-design.html lists the session row, the ⌄ button,
-            // and the ⌄ menu items as all getting it). `.onHover` toggles
-            // the highlight; press is tracked with a
-            // `DragGesture(minimumDistance: 0)` rather than a `ButtonStyle`
-            // (which `Menu` doesn't expose a pressed state through) —
-            // `.simultaneousGesture` only OBSERVES the press, leaving
-            // Menu's own tap gesture (which opens the popup) intact.
+            // The ⌄ CHIP (as opposed to its popup items, or a session row)
+            // gets its OWN treatment (T2 follow-up, M5): a persistent gray
+            // chip background — never the selection color — that darkens on
+            // hover and darkens further while pressed (menubar-design.html:
+            // ~.14 / .22 / .30 opacity steps). `.onHover` toggles the hover
+            // state; press is tracked with a `DragGesture(minimumDistance:
+            // 0)` rather than a `ButtonStyle` (which `Menu` doesn't expose a
+            // pressed state through) — `.simultaneousGesture` only OBSERVES
+            // the press, leaving Menu's own tap gesture (which opens the
+            // popup) intact.
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(Color(nsColor: .selectedContentBackgroundColor))
-                    .brightness(isPressingVButton ? -0.15 : 0)
-                    .opacity(isHoveringVButton ? 1 : 0)
+                    .fill(Color.gray.opacity(chipBackgroundOpacity))
             )
             .onHover { isHoveringVButton = $0 }
             .simultaneousGesture(
@@ -165,6 +208,16 @@ private extension RescanFeedback {
         case .success: return "✓ Rescan done"
         case .failure: return "Rescan failed"
         }
+    }
+}
+
+private struct NoAgentsRow: View {
+    var body: some View {
+        Text("No agents")
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
     }
 }
 
@@ -202,7 +255,10 @@ private struct GroupSection: View {
     private var headerGlyph: TrayGlyph {
         switch group.status {
         case .waiting: return .waiting
-        case .working: return .working
+        // The header glyph is static (menubar-design.html: no animation on
+        // the group heading), so frame 0 always — only the tray's own
+        // rendering animates (`TrayIconRenderer`).
+        case .working: return .working(frame: 0)
         case .idle: return .idle
         case .unknown: return .idle // unreachable, as above
         }
@@ -259,11 +315,29 @@ private struct RowView: View {
     @ObservedObject var state: AppState
     @State private var isHovering = false
 
+    /// `nil` only for a status this build doesn't lay out (`.unknown`) —
+    /// `RowSymbol.kind` already excludes it elsewhere (`Sorting.flatOrder`,
+    /// `Grouping.groupOrder`), so a row with `nil` here shouldn't occur in
+    /// practice; falling back to `.idle`'s empty circle is a harmless,
+    /// non-crashing default rather than an unreachable-code assumption.
+    private var symbolKind: RowSymbolKind {
+        RowSymbol.kind(for: row.status) ?? .idle
+    }
+
     var body: some View {
         Button {
             state.rowClicked(target: row.target)
         } label: {
             HStack(alignment: .top, spacing: 8) {
+                // §4.5/M5 T9: the leading status symbol replaces the old
+                // row-right red dot — unreviewed now badges the symbol's
+                // top-right shoulder instead.
+                RowSymbolView(
+                    kind: symbolKind,
+                    unreviewed: row.unreviewed,
+                    spinning: state.isDropdownOpen && symbolKind == .working
+                )
+                .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.primaryLine)
                         .font(.system(size: 12, weight: row.unreviewed ? .semibold : .regular))
@@ -277,12 +351,6 @@ private struct RowView: View {
                         .foregroundStyle(isHovering ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(.secondary))
                 }
                 Spacer(minLength: 4)
-                if row.unreviewed {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 3)
-                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)

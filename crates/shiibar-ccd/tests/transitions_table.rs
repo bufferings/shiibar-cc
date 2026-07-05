@@ -48,6 +48,8 @@ fn existing(status: Status, unreviewed: bool) -> AgentEntry {
         } else {
             None
         },
+        created_at: 100,
+        last_report_at: 400,
     }
 }
 
@@ -104,6 +106,10 @@ fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 4])
                 );
                 assert_eq!(entry.since, NOW, "{case}: since on fresh registration");
                 assert_eq!(entry.last_seen, NOW, "{case}: last_seen on fresh registration");
+                // §3.6/M5 T9: a hook-report registration sets both new
+                // timestamps to `now`.
+                assert_eq!(entry.created_at, NOW, "{case}: created_at on fresh registration");
+                assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at on fresh registration");
             }
             Cell::ToStatus(expected) => {
                 let Outcome::Updated { entry, previous } = outcome else {
@@ -115,6 +121,11 @@ fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 4])
                 assert_eq!(entry.session_id, "s-new", "{case}: session_id must overwrite");
                 assert_eq!(entry.cwd, "/new", "{case}: cwd must overwrite");
                 assert_eq!(entry.last_seen, NOW, "{case}: last_seen always bumped by report");
+                // M5 T9: every hook report reaching a registered entry bumps
+                // `last_report_at`, same as `last_seen` — even a same-value
+                // ("—") cell. `created_at` never moves once set.
+                assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at always bumped by report");
+                assert_eq!(entry.created_at, previous.created_at, "{case}: created_at must never move");
                 // §3.4: since only moves on an actual value change.
                 if previous.status == expected {
                     assert_eq!(
@@ -694,4 +705,53 @@ fn stop_without_background_tasks_registers_an_unregistered_target_with_last_assi
     assert!(previous.is_none());
     assert_eq!(entry.status, Status::Idle);
     assert_eq!(entry.last_assistant_message.as_deref(), Some("Here is the file list."));
+}
+
+// --- created_at / last_report_at (§3.6, M5 T9) ---
+
+#[test]
+fn registration_sets_created_at_and_it_survives_every_later_report_unchanged() {
+    let mut p = base_payload(HookEvent::UserPromptSubmit);
+    p.prompt = Some("first prompt".into());
+    let Outcome::Updated { entry: registered, .. } = apply_report(None, &p, 1_000) else {
+        panic!("expected Updated (register)");
+    };
+    assert_eq!(registered.created_at, 1_000, "created_at is set at registration");
+
+    // A later report, of a different event kind, at a much later time.
+    let mut p2 = base_payload(HookEvent::PostToolUse);
+    let Outcome::Updated { entry: after_second_report, .. } = apply_report(Some(&registered), &p2, 5_000) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(
+        after_second_report.created_at, 1_000,
+        "created_at must never change once an entry is registered"
+    );
+
+    // And yet another, to be sure it's not a one-time survival.
+    p2.event = HookEvent::Stop;
+    p2.background_tasks = None;
+    let Outcome::Updated { entry: after_third_report, .. } =
+        apply_report(Some(&after_second_report), &p2, 9_000)
+    else {
+        panic!("expected Updated");
+    };
+    assert_eq!(after_third_report.created_at, 1_000, "created_at still unchanged");
+}
+
+#[test]
+fn last_report_at_bumps_on_every_hook_report_regardless_of_status_change() {
+    let existing = existing(Status::Idle, false); // created_at=100, last_report_at=400
+    assert_eq!(existing.last_report_at, 400);
+
+    // SessionStart(startup) from idle is a same-value ("—") cell for
+    // status, but must still bump last_report_at like any other report.
+    let mut p = base_payload(HookEvent::SessionStart);
+    p.source = Some(SessionStartSource::Startup);
+    let Outcome::Updated { entry, .. } = apply_report(Some(&existing), &p, 7_000) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(entry.status, Status::Idle, "sanity: same-value transition");
+    assert_eq!(entry.last_report_at, 7_000, "last_report_at bumps even on a same-value cell");
+    assert_eq!(entry.created_at, existing.created_at, "created_at untouched");
 }

@@ -8,9 +8,16 @@ import Foundation
 /// waiting > working > idle (menubar-design.html). `.none` means "no
 /// agents" (or, per DESIGN.md §4.5, "daemon disconnected" — the tray must
 /// not show a stale rollup while disconnected).
+///
+/// `.working` carries the current animation frame (0...3, M5 T8: an
+/// all-faint frame followed by 1/2/3 lit dots, §9's 500ms cadence) — the
+/// glyph alone doesn't say whether/how it's mid-animation, so the frame
+/// index travels with it. `.idle` and `.none` carry no glyph at all now
+/// (M5 T8 dropped the old prompt-chevron/underscore glyphs); they differ
+/// only in `TrayIconState.dim`.
 public enum TrayGlyph: Equatable, Sendable {
     case waiting
-    case working
+    case working(frame: Int)
     case idle
     case none
 }
@@ -38,6 +45,14 @@ public enum Rollup {
     public static let noAgentsDim: Double = 0.45
     /// Normal (non-dimmed) opacity.
     public static let normalDim: Double = 1.0
+    /// Number of frames in the working animation cycle (M5 T8/§9: all-faint
+    /// -> one lit -> two lit -> three lit, at 500ms each).
+    public static let workingFrameCount = 4
+    /// Time between animation frames while the tray shows working (§9:
+    /// 500ms starting value — M5.md T8 flags 400-800ms and 25-40% faint
+    /// opacity as still subject to on-device tuning; this is the
+    /// not-yet-on-device-confirmed starting point, not a final value).
+    public static let workingFrameIntervalSeconds: Double = 0.5
 
     /// Compute the tray icon state from the current agent statuses.
     ///
@@ -47,12 +62,20 @@ public enum Rollup {
     ///   - daemonConnected: `false` while reconnecting (§4.5); forces the
     ///     "no agents" dim level regardless of `statuses`, since a stale
     ///     rollup must not be shown as current.
+    ///   - workingFrame: the current animation frame (0..<`workingFrameCount`)
+    ///     to stamp onto a `.working` result; irrelevant otherwise. Defaults
+    ///     to 0 for callers that don't animate (e.g. tests).
     ///
     /// An `.unknown` status (forward-compat fallback) is ignored entirely
     /// (DESIGN.md §4.2/§4.5: clients ignore unknown statuses): it does not
     /// participate in the rollup, same as the dropdown hides it. If every
     /// agent's status is unknown, the tray shows the no-agents glyph.
-    public static func icon(statuses: [AgentStatus], hasUnreviewed: Bool, daemonConnected: Bool) -> TrayIconState {
+    public static func icon(
+        statuses: [AgentStatus],
+        hasUnreviewed: Bool,
+        daemonConnected: Bool,
+        workingFrame: Int = 0
+    ) -> TrayIconState {
         guard daemonConnected else {
             return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
         }
@@ -64,7 +87,7 @@ public enum Rollup {
             return TrayIconState(glyph: .waiting, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
         if known.contains(.working) {
-            return TrayIconState(glyph: .working, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
+            return TrayIconState(glyph: .working(frame: workingFrame), dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
         return TrayIconState(glyph: .idle, dim: idleDim, hasUnreviewedDot: hasUnreviewed)
     }
