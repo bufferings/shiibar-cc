@@ -6,6 +6,8 @@
 import AppKit
 import Combine
 import Foundation
+import os
+import ServiceManagement
 import ShiibarCcCore
 
 @MainActor
@@ -292,6 +294,37 @@ final class AppState: ObservableObject {
         notificationManager.isMuted = muted
     }
 
+    /// ⌄ menu "Start at Login" checkmark (§4.5, M5 T3): read live, never
+    /// cached — `SMAppService.mainApp.status` is the sole source of truth
+    /// so the checkmark can't drift from System Settings' own Login Items
+    /// UI. `DropdownView` re-reads this every render; the dropdown reopen
+    /// refresh (`dropdownOpenedAt`, above) is what makes that render happen
+    /// on each open, the same mechanism the rest of the dropdown's per-open
+    /// values rely on.
+    var loginItemEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    /// ⌄ menu "Start at Login" toggle (§4.5, M5 T3): register/unregister
+    /// directly via `SMAppService` — no local flag is written here (that's
+    /// only for the one-time launch auto-registration, §4.5/T3-A). Failures
+    /// are logged, not surfaced as an alert (§4.5's "don't swallow
+    /// failures" rule, same pattern as `CLIRunner`'s subprocess logging) —
+    /// this is a settings toggle, not a user-blocking action.
+    func toggleLoginItem() {
+        do {
+            if loginItemEnabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            loginItemLog.error(
+                "Start at Login toggle failed: \(String(describing: error), privacy: .public)"
+            )
+        }
+    }
+
     /// ⌄ menu "Quit": stop the daemon, then the app (§4.5/§8.8) — but Quit
     /// must ALWAYS terminate the app, promptly, no matter what state the
     /// daemon connection is in (a dead daemon made the old
@@ -327,3 +360,12 @@ final class AppState: ObservableObject {
         lifecycle.shutdown {}
     }
 }
+
+/// os_log sink for Login Item toggle diagnostics. Same subsystem/category
+/// convention as `ShiibarCcMenuBarApp`'s auto-registration logger and
+/// `CLIRunner`'s subprocess logger.
+///   log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "login-item"'
+private let loginItemLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "cc.shiibar.menubar",
+    category: "login-item"
+)

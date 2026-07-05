@@ -1,5 +1,5 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5): ⌄ menu (Rescan / Mute Sound / Quit), warning rows
+// DESIGN.md §4.5): ⌄ menu (Rescan / Start at Login / Mute Sound / Quit), warning rows
 // (disconnected / notification permission denied / focus TCC error),
 // grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
 // rows with unreviewed bolding + red dot, row click -> focus. Every
@@ -82,6 +82,21 @@ private struct TopBar: View {
                 // highlighted-row style on the open popup itself — no
                 // custom hover handling for the popup items here.
                 Button("Rescan") { state.runReconcile(showFeedback: true) }
+                // "Start at Login" reads `SMAppService.mainApp.status`
+                // fresh on every render (DESIGN.md §4.5, M5 T3: no cached
+                // source of truth, so it can't drift from System Settings'
+                // own Login Items UI). Toggling calls register()/
+                // unregister() directly. The refresh trigger for "fresh on
+                // every render" is the same one that already drives every
+                // other per-open dropdown value: `state.dropdownOpenedAt`
+                // changing is a `@Published` write on this `@ObservedObject`,
+                // which re-invokes this whole body (including this Menu's
+                // content closure) on each dropdown open — see
+                // `AppState.observeDropdownOpen`.
+                Toggle("Start at Login", isOn: Binding(
+                    get: { state.loginItemEnabled },
+                    set: { _ in state.toggleLoginItem() }
+                ))
                 // A Toggle inside a Menu renders the native menu checkmark
                 // while muted (the spec's "checkmark while muted").
                 Toggle("Mute Sound", isOn: Binding(

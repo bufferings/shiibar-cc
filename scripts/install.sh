@@ -3,9 +3,10 @@
 # build the menu bar app + shiibar-ccd/shiibar-cc in release mode, bundle
 # them into ShiibarCC.app (Contents/Helpers/), ad-hoc sign with a stable
 # local identity, symlink ~/.local/bin/shiibar-cc to the bundled binary,
-# register the app as a Login Item (by launching it once — it
-# self-registers via SMAppService, DESIGN.md §4.5), and print hooks
-# configuration guidance.
+# register the app as a Login Item (by launching it once — the app
+# auto-registers via SMAppService on first launch only and never
+# re-registers after a user turns it off, DESIGN.md §4.5), and print
+# hooks configuration guidance.
 #
 # Deliberately does NOT touch ~/.claude/settings.json: merging hooks into
 # a user's existing settings safely (preserving unrelated hooks/config,

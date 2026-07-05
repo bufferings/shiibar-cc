@@ -2,11 +2,13 @@
 // (custom dropdown, not a standard NSMenu), an accessory-policy app (no
 // Dock icon, no regular app menu — DESIGN.md §8.4 keeps the menu bar's verb
 // set to focus/back/rescan/mute/quit only). Daemon lifecycle, reconcile,
-// and Login Items self-registration are kicked off from
-// `applicationDidFinishLaunching`.
+// and the first-launch-only Login Item auto-registration are kicked off
+// from `applicationDidFinishLaunching`.
 
 import AppKit
+import os
 import ServiceManagement
+import ShiibarCcCore
 import SwiftUI
 
 @main
@@ -58,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu-bar-only: no Dock icon, no app menu (§4.5/§8.4).
         NSApp.setActivationPolicy(.accessory)
-        registerLoginItemIfPossible()
+        performFirstLaunchLoginItemAutoRegistrationIfNeeded()
         state.start()
     }
 
@@ -72,14 +74,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
+    /// UserDefaults key recording that the first-launch auto-registration
+    /// check has already run (DESIGN.md §4.5, M5 T3). Once set, it is never
+    /// cleared — that's what lets a user's later "Start at Login" OFF
+    /// choice survive restarts instead of being overwritten on next launch.
+    private static let didAutoRegisterLoginItemKey = "cc.shiibar.didAutoRegisterLoginItem"
+
     /// Register as a Login Item (macOS 13+ `SMAppService`) so the app (and
-    /// therefore the daemon, §8.8) starts automatically at login. Only
-    /// meaningful once bundled as a `.app` (`install.sh`'s job, §4.5); in a
-    /// `swift run` dev build this is a no-op.
-    private func registerLoginItemIfPossible() {
-        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
-        if SMAppService.mainApp.status != .enabled {
-            try? SMAppService.mainApp.register()
+    /// therefore the daemon, §8.8) starts automatically at login — but only
+    /// as a **first-launch-only** auto-registration: it records that the
+    /// check ran (regardless of outcome) and never repeats it, so a user who later
+    /// turns "Start at Login" off via the ⌄ menu keeps that choice across
+    /// restarts. Only meaningful once bundled as a `.app` (`install.sh`'s
+    /// job, §4.5); in a `swift run` dev build this is a no-op and the flag
+    /// is never recorded, so the check re-runs on the next bundled launch.
+    private func performFirstLaunchLoginItemAutoRegistrationIfNeeded() {
+        let defaults = UserDefaults.standard
+        let didAutoRegisterAlready = defaults.bool(forKey: Self.didAutoRegisterLoginItemKey)
+        let runningFromBundle = Bundle.main.bundleURL.pathExtension == "app"
+        guard runningFromBundle, !didAutoRegisterAlready else { return }
+
+        let currentlyEnabled = SMAppService.mainApp.status == .enabled
+        if LoginItemAutoRegistration.shouldAutoRegister(
+            didAutoRegisterAlready: didAutoRegisterAlready,
+            runningFromBundle: runningFromBundle,
+            currentlyEnabled: currentlyEnabled
+        ) {
+            do {
+                try SMAppService.mainApp.register()
+            } catch {
+                // §4.5's "don't swallow failures" rule: this is a
+                // best-effort convenience registration, not user-initiated,
+                // so no alert UI — just log it (same pattern as
+                // CLIRunner's subprocess failures).
+                loginItemLog.error(
+                    "first-launch auto-register failed: \(String(describing: error), privacy: .public)"
+                )
+            }
         }
+        // Recorded unconditionally once the bundled first-launch check has
+        // run, whether register() fired, threw, or was skipped because the
+        // Login Item was already enabled — the gate is "did we check", not
+        // "did register() succeed".
+        defaults.set(true, forKey: Self.didAutoRegisterLoginItemKey)
     }
 }
+
+/// os_log sink for Login Item auto-registration diagnostics. Same
+/// subsystem/category convention as `CLIRunner`'s `subprocessLog`.
+///   log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "login-item"'
+private let loginItemLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "cc.shiibar.menubar",
+    category: "login-item"
+)
