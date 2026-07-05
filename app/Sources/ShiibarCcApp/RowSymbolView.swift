@@ -1,6 +1,6 @@
 // Dropdown row leading status symbol (menubar-design.html's dropdown
 // section, DESIGN.md §4.5, M5 T9): empty circle (55% stroke) = idle / circle
-// + bold "!" = waiting / rotating spinner (arc + arrowhead, 1.7s/rev) =
+// + bold "!" = waiting / rotating spinner (open arc, 1.7s/rev) =
 // working. Unreviewed rows get a red badge (with a light halo, same
 // two-layer idea as the tray's unreviewed dot) on the symbol's top-right
 // shoulder, REPLACING the old row-right red dot entirely.
@@ -78,25 +78,19 @@ struct RowSymbolView: View {
     }
 }
 
-/// The working spinner glyph: an open arc + a small arrowhead at its
-/// leading end (menubar-design.html mock: `M8.5 2.4 a6.1 6.1 0 1 1 -6.1
-/// 6.1` + a triangle at the arc's start), both rotating together as one
-/// unit — same idea as the mock's `<g class="spin">` wrapping both paths.
+/// The working spinner glyph: an open arc rotating as one unit (the gap
+/// itself reads as motion; menubar-design.html).
 private struct SpinnerGlyph: View {
     var body: some View {
-        ZStack {
-            SpinnerArc()
-                .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-            SpinnerArrowhead()
-                .fill()
-        }
-        .foregroundStyle(.primary)
+        SpinnerArc()
+            .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .foregroundStyle(.primary)
     }
 }
 
-/// ~300° open arc (mock: large-arc sweep from the top, leaving a gap where
-/// the arrowhead sits), normalized to a 17x17 reference square like the
-/// mock's viewBox and scaled to the view's actual size.
+/// ~250° open arc (the gap marks the leading end), normalized to a 17x17
+/// reference square like the mock's viewBox and scaled to the view's
+/// actual size.
 private struct SpinnerArc: Shape {
     func path(in rect: CGRect) -> Path {
         let scale = min(rect.width, rect.height) / 17
@@ -108,19 +102,3 @@ private struct SpinnerArc: Shape {
     }
 }
 
-private struct SpinnerArrowhead: Shape {
-    func path(in rect: CGRect) -> Path {
-        let scale = min(rect.width, rect.height) / 17
-        let originX = rect.midX - 8.5 * scale
-        let originY = rect.midY - 8.5 * scale
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: originX + x * scale, y: originY + y * scale)
-        }
-        var path = Path()
-        path.move(to: point(8.5, 0.9))
-        path.addLine(to: point(11.1, 2.4))
-        path.addLine(to: point(8.5, 3.9))
-        path.closeSubpath()
-        return path
-    }
-}

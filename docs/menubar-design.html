@@ -135,7 +135,7 @@
       クリック動作なし(切り分けは <code>doctor</code>)</li>
     <li><strong>行頭の状態記号</strong>(20px 相当): <strong>空の ◯ = idle</strong>(線 55% 濃度)/
       <strong>◯ に太い ! = waiting</strong> / <strong>回転スピナー = working</strong>
-      (円弧 + 矢頭、1.7 秒/周。ドロップダウンが開いている間だけ回す)</li>
+      (開いた円弧、1.7 秒/周。ドロップダウンが開いている間だけ回す)</li>
     <li>行は 2 行: <strong>1 行目 = 作業内容</strong>(waiting は許可内容 = <code>message</code>、それ以外は最後のプロンプト先頭 = <code>task</code>。
       どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
     <li><strong>未読(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
@@ -167,7 +167,7 @@
     <div class="mock-label">既定(Newest session): フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例</div>
     <div class="menu">
       <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
-      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 0.9 L11.1 2.4 L8.5 3.9 Z" fill="currentColor"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
       <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
       <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
@@ -181,7 +181,7 @@
       </div>
       <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.2" x="1" y="1" width="14" height="14" rx="3"/><text x="4.6" y="7.4" font-size="7" text-anchor="middle" fill="currentColor">&#x2733;&#xFE0E;</text><circle cx="8.2" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="10.799999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="13.399999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="0.35"/></svg></span>Working</div>
       <div class="gcard">
-      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 0.9 L11.1 2.4 L8.5 3.9 Z" fill="currentColor"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       </div>
     </div>
     <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
