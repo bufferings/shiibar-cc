@@ -49,25 +49,25 @@ struct RowSymbolView: View {
                     .font(.system(size: size * 0.56, weight: .heavy, design: .rounded))
             }
         case .working:
-            SpinnerGlyph(lineWidth: size * 0.095)
-                .rotationEffect(.degrees(isRotating ? 360 : 0))
-                .animation(
-                    isRotating ? .linear(duration: 1.7).repeatForever(autoreverses: false) : .default,
-                    value: isRotating
-                )
-                // A freshly-created view (e.g. after a sort-mode switch
-                // rebuilds the list) starts with `isRotating == false`, so
-                // the rotation re-arms in onAppear instead of relying on a
-                // `spinning` CHANGE that never comes for the new identity.
-                .onAppear { isRotating = spinning }
-                .onChange(of: spinning) { isRotating = $0 }
+            // Clock-driven rotation (TimelineView) instead of a
+            // repeat-forever animation: SwiftUI cancels in-flight implicit
+            // animations when the row's frame changes (e.g. a sort-mode
+            // switch reorders the list), which froze the spinner. Deriving
+            // the angle from wall-clock time has no animation state to
+            // cancel — and all spinners stay in phase for free.
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !spinning)) { context in
+                SpinnerGlyph(lineWidth: size * 0.095)
+                    .rotationEffect(.degrees(Self.spinAngle(at: context.date)))
+            }
         }
     }
 
-    /// Animation driver; `true` while this concrete view instance should
-    /// rotate. Re-derived from `spinning` on appear so the repeat-forever
-    /// animation restarts for every new view identity.
-    @State private var isRotating = false
+    /// One revolution per `spinPeriod`, phase shared by every spinner.
+    private static let spinPeriod: TimeInterval = 1.7
+    static func spinAngle(at date: Date) -> Double {
+        let t = date.timeIntervalSinceReferenceDate
+        return (t.truncatingRemainder(dividingBy: spinPeriod)) / spinPeriod * 360
+    }
 
     private var badge: some View {
         ZStack {

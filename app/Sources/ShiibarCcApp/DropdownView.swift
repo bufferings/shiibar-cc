@@ -340,7 +340,10 @@ private struct RowView: View {
                 }
                 Spacer(minLength: 4)
             }
-            .padding(.horizontal, 8)
+            // Leading inset matches the 12pt symbol-to-text gap so the
+            // symbol sits centered in its slot instead of hugging the left.
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
