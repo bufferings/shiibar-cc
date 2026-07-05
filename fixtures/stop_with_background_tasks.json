@@ -1,9 +1,23 @@
 {
-  "session_id": "11111111-1111-1111-1111-111111111111",
-  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
-  "cwd": "/Users/example/projects/shiibar",
+  "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "3e38fa9f-ab89-48cd-993b-ea2c6a94340a",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
   "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Started `sleep 120` in the background (ID: bfhzcza0n). You'll get a notification when it completes. Ending this turn now.",
   "background_tasks": [
-    { "id": "bg-1", "status": "running" }
-  ]
+    {
+      "id": "bfhzcza0n",
+      "type": "shell",
+      "status": "running",
+      "description": "Sleep 120 seconds in background",
+      "command": "sleep 120"
+    }
+  ],
+  "session_crons": []
 }

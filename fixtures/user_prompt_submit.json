@@ -1,7 +1,9 @@
 {
-  "session_id": "11111111-1111-1111-1111-111111111111",
-  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
-  "cwd": "/Users/example/projects/shiibar",
+  "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "ee4066db-6413-4962-92f2-8fb5e384408e",
+  "permission_mode": "default",
   "hook_event_name": "UserPromptSubmit",
-  "prompt": "Implement the focus AppleScript"
+  "prompt": "Show me this project's file list with ls"
 }

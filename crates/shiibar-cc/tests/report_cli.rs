@@ -139,11 +139,12 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     // $ITERM_SESSION_ID string, so it matches what iterm_targets derives.
     assert_eq!(payload.target, "D2DA6A1F-TEST");
     assert_eq!(payload.event, shiibar_cc_proto::HookEvent::UserPromptSubmit);
+    // Values from the real captured fixture (fixtures/README.md).
     assert_eq!(
         payload.prompt.as_deref(),
-        Some("Implement the focus AppleScript")
+        Some("Show me this project's file list with ls")
     );
-    assert_eq!(payload.session_id, "11111111-1111-1111-1111-111111111111");
+    assert_eq!(payload.session_id, "f27c326c-213e-4728-a79c-f0f8f3afa0f2");
 }
 
 /// §8.11: outside iTerm2 (no `$ITERM_SESSION_ID`), there is no fallback

@@ -64,7 +64,8 @@ async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
         .unwrap_or_else(|| panic!("target not restored, agents = {:?}", resp.agents));
     assert_eq!(restored.status, Status::Waiting);
     assert!(restored.unreviewed, "unreviewed flag must survive a restart too");
-    assert_eq!(restored.message.as_deref(), Some("Bash: cargo test"));
+    // The real captured permission_prompt message (fixtures/README.md).
+    assert_eq!(restored.message.as_deref(), Some("Claude needs your permission"));
 
     daemon2.shutdown_and_join().await;
 }

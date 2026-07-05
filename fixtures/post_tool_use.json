@@ -1,9 +1,25 @@
 {
-  "session_id": "11111111-1111-1111-1111-111111111111",
-  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
-  "cwd": "/Users/example/projects/shiibar",
+  "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "ee4066db-6413-4962-92f2-8fb5e384408e",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
-  "tool_input": { "command": "cargo test" },
-  "tool_response": { "stdout": "test result: ok", "stderr": "" }
+  "tool_input": {
+    "command": "ls /Users/example/Documents/my/shiibar-cc",
+    "description": "List files in project root"
+  },
+  "tool_response": {
+    "stdout": "CLAUDE.md\nCargo.lock\nCargo.toml\napp\ncrates\ndocs\nfixtures\nhooks\nrust-toolchain.toml\nscripts\ntarget",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01ABYtSUzvwG5xbrGxc2onFG",
+  "duration_ms": 727
 }

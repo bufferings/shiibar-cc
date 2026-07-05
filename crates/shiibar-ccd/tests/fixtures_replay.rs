@@ -46,12 +46,16 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
         other => panic!("expected status_changed(idle), got {other:?}"),
     }
 
-    // 2. UserPromptSubmit -> idle -> working, task set.
+    // 2. UserPromptSubmit -> idle -> working, task set (the real captured
+    //    prompt, translated to English in the fixture — fixtures/README.md).
     send(&daemon, "user_prompt_submit.json", HookEvent::UserPromptSubmit).await;
     match sub.next_event().await {
         SubscribeEvent::StatusChanged { agent } => {
             assert_eq!(agent.status, Status::Working);
-            assert_eq!(agent.task.as_deref(), Some("Implement the focus AppleScript"));
+            assert_eq!(
+                agent.task.as_deref(),
+                Some("Show me this project's file list with ls")
+            );
         }
         other => panic!("expected status_changed(working), got {other:?}"),
     }
@@ -67,7 +71,7 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
     match sub.next_event().await {
         SubscribeEvent::StatusChanged { agent } => {
             assert_eq!(agent.status, Status::Waiting);
-            assert_eq!(agent.message.as_deref(), Some("Bash: cargo test"));
+            assert_eq!(agent.message.as_deref(), Some("Claude needs your permission"));
             assert!(agent.unreviewed);
         }
         other => panic!("expected status_changed(waiting), got {other:?}"),
@@ -96,8 +100,32 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
         other => panic!("expected status_changed(idle), got {other:?}"),
     }
 
-    // 6. SessionEnd -> removed, reason session_end (§4.2: the app must not
-    //    sweep a not-yet-reviewed completion toast for this reason).
+    // 6-7. The real `/clear` flow, as captured: a SessionEnd with reason
+    //    "clear" ends the old session (removal, reason session_end on the
+    //    wire — §4.2 doesn't distinguish why the hook fired), then a
+    //    SessionStart(clear) immediately re-registers the same pane as a
+    //    fresh idle entry with the flag down (§3.4).
+    send(&daemon, "session_end_clear.json", HookEvent::SessionEnd).await;
+    match sub.next_event().await {
+        SubscribeEvent::AgentRemoved { target, reason } => {
+            assert_eq!(target, TARGET);
+            assert_eq!(reason, RemovalReason::SessionEnd);
+        }
+        other => panic!("expected agent_removed, got {other:?}"),
+    }
+    send(&daemon, "session_start_clear.json", HookEvent::SessionStart).await;
+    match sub.next_event().await {
+        SubscribeEvent::StatusChanged { agent } => {
+            assert_eq!(agent.target, TARGET);
+            assert_eq!(agent.status, Status::Idle);
+            assert!(!agent.unreviewed);
+        }
+        other => panic!("expected status_changed(idle) after /clear restart, got {other:?}"),
+    }
+
+    // 8. SessionEnd (reason "other" — pane closed) -> removed, reason
+    //    session_end (§4.2: the app must not sweep a not-yet-reviewed
+    //    completion toast for this reason).
     send(&daemon, "session_end.json", HookEvent::SessionEnd).await;
     match sub.next_event().await {
         SubscribeEvent::AgentRemoved { target, reason } => {

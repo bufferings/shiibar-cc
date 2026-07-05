@@ -1,9 +1,19 @@
 {
-  "session_id": "11111111-1111-1111-1111-111111111111",
-  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
-  "cwd": "/Users/example/projects/shiibar",
+  "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "a56becfe-c533-431d-b07a-e23e45f16671",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
   "hook_event_name": "PostToolUseFailure",
-  "tool_name": "Bash",
-  "tool_input": { "command": "rm -rf /" },
-  "error": "permission denied by user"
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/no/such/path.txt"
+  },
+  "tool_use_id": "toolu_012knLUPdA3AUkyKNMRkDMBf",
+  "error": "File does not exist. Note: your current working directory is /Users/example/Documents/my/shiibar-cc.",
+  "is_interrupt": false,
+  "duration_ms": 31
 }

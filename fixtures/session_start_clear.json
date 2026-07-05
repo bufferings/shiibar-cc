@@ -2,7 +2,7 @@
   "session_id": "4aca25f3-dd52-4cf9-af50-6a5afe8da2f0",
   "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/4aca25f3-dd52-4cf9-af50-6a5afe8da2f0.jsonl",
   "cwd": "/Users/example/Documents/my/shiibar-cc",
-  "prompt_id": "439be764-16d6-42bd-857f-7648aff6d96c",
-  "hook_event_name": "SessionEnd",
-  "reason": "other"
+  "prompt_id": "50e69c4d-fbb5-44dd-8594-dd12c6ab14ce",
+  "hook_event_name": "SessionStart",
+  "source": "clear"
 }

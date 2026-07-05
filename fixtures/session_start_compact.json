@@ -1,7 +1,9 @@
 {
-  "session_id": "11111111-1111-1111-1111-111111111111",
-  "transcript_path": "/Users/example/.claude/projects/shiibar/11111111.jsonl",
-  "cwd": "/Users/example/projects/shiibar",
+  "session_id": "4aca25f3-dd52-4cf9-af50-6a5afe8da2f0",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/4aca25f3-dd52-4cf9-af50-6a5afe8da2f0.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "439be764-16d6-42bd-857f-7648aff6d96c",
   "hook_event_name": "SessionStart",
-  "source": "compact"
+  "source": "compact",
+  "model": "claude-fable-5"
 }
