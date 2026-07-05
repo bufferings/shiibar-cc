@@ -90,106 +90,35 @@ struct DropdownView: View {
 private struct TopBar: View {
     @ObservedObject var state: AppState
     @State private var isHoveringVButton = false
-    @State private var isPressingVButton = false
-
-    /// The ⌄ chip's gray background opacity (T2 follow-up, M5;
-    /// menubar-design.html: base ~.14, hover ~.22, press ~.30).
-    private var chipBackgroundOpacity: Double {
-        if isPressingVButton { return 0.30 }
-        if isHoveringVButton { return 0.22 }
-        return 0.14
-    }
+    /// Retains the NSMenu action target while the popup is up
+    /// (NSMenuItem.target is weak, so someone must own the handler).
+    @State private var menuHandler = VMenuHandler()
+    @State private var menuAnchor: NSView?
 
     var body: some View {
         HStack {
-            Menu {
-                // The ⌄ POPUP's items (Rescan / Mute Sound / Quit) are a
-                // native SwiftUI Menu, so macOS draws its usual
-                // highlighted-row style on the open popup itself — no
-                // custom hover handling for the popup items here.
-                Button("Rescan") { state.runReconcile(showFeedback: true) }
-                // "Sort by" (§4.5, M5 T9): a `Picker` with `.inline` style
-                // inside a `Menu` renders as a checkmark-on-the-active-item
-                // radio group.
-                Menu("Sort by") {
-                    Picker("Sort by", selection: Binding(
-                        get: { state.sortMode },
-                        set: { state.setSortMode($0) }
-                    )) {
-                        ForEach(SortMode.allCases, id: \.self) { mode in
-                            Text(mode.menuTitle).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                }
-                // Rarely-touched switches live one level down (§4.5:
-                // Settings submenu below Sort by).
-                Menu("Settings") {
-                    // "Start at Login" reads `SMAppService.mainApp.status`
-                    // fresh on every render (DESIGN.md §4.5, M5 T3: no
-                    // cached source of truth, so it can't drift from System
-                    // Settings' own Login Items UI). The refresh trigger is
-                    // `state.dropdownOpenedAt`'s @Published write re-invoking
-                    // this body on each dropdown open.
-                    Toggle("Start at Login", isOn: Binding(
-                        get: { state.loginItemEnabled },
-                        set: { _ in state.toggleLoginItem() }
-                    ))
-                    // A Toggle inside a Menu renders the native menu
-                    // checkmark while muted.
-                    Toggle("Mute Sound", isOn: Binding(
-                        get: { state.muted },
-                        set: { _ in state.toggleMute() }
-                    ))
-                }
-                Divider()
-                Button("Quit") { state.quit() }
+            // The v chip is a plain Button + a hand-rolled NSMenu popup.
+            // SwiftUI's `Menu` imposes its own label layout on macOS and
+            // kept rendering the glyph floating top-left regardless of
+            // padding/frame styling; plain Buttons demonstrably render
+            // correctly in this window (every session row is one), and
+            // AppKit's NSMenu needs no styling at all — checkmarks,
+            // submenus and hover come from the system.
+            Button {
+                presentMenu()
             } label: {
-                // The chip IS the label: a fixed 34x24 rounded rect with
-                // the glyph frame-centered inside it. Padding-based sizing
-                // on a borderlessButton Menu label proved unreliable
-                // on-device (the style imposes its own label layout and the
-                // glyph ended up floating top-left), so the label carries
-                // its own explicit size and background instead.
-                // T2 follow-up (M5): text color never changes on
-                // hover/press — only the background darkens.
                 Text("⌄")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     // U+2304 sits low in its em box; nudge it up so it
-                    // reads optically centered.
+                    // reads optically centered in the chip.
                     .offset(y: -1.5)
                     .frame(width: 34, height: 24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.gray.opacity(chipBackgroundOpacity))
-                    )
+                    .contentShape(Rectangle())
             }
-            // The macOS Menu draws its own pull-down disclosure indicator
-            // next to the label, which stacked a second chevron under our ⌄
-            // text (seen on-device). Hide it so exactly one ⌄ shows. If a
-            // macOS version ignores `menuIndicator(.hidden)` for this style,
-            // the fallback is the inverse: keep the system indicator and
-            // make the label empty.
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            // The ⌄ CHIP (as opposed to its popup items, or a session row)
-            // gets its OWN treatment (T2 follow-up, M5): a persistent gray
-            // chip background — never the selection color — that darkens on
-            // hover and darkens further while pressed (menubar-design.html:
-            // ~.14 / .22 / .30 opacity steps). `.onHover` toggles the hover
-            // state; press is tracked with a `DragGesture(minimumDistance:
-            // 0)` rather than a `ButtonStyle` (which `Menu` doesn't expose a
-            // pressed state through) — `.simultaneousGesture` only OBSERVES
-            // the press, leaving Menu's own tap gesture (which opens the
-            // popup) intact.
+            .buttonStyle(ChipButtonStyle(isHovering: isHoveringVButton))
             .onHover { isHoveringVButton = $0 }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in isPressingVButton = true }
-                    .onEnded { _ in isPressingVButton = false }
-            )
+            .background(MenuAnchorView { menuAnchor = $0 })
 
             // Manual-Rescan transient feedback (§4.5/§9), unclickable,
             // secondary-color 12px text to the right of ⌄.
@@ -204,6 +133,104 @@ private struct TopBar: View {
         .padding(.horizontal, 8)
         .padding(.top, 2)
     }
+
+    /// Builds the ⌄ menu (Rescan / Sort by / Settings / Quit, §4.5) fresh
+    /// on every click, so checkmarks always show the live state.
+    private func presentMenu() {
+        guard let anchor = menuAnchor else { return }
+        menuHandler.state = state
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(makeItem("Rescan", action: #selector(VMenuHandler.rescan)))
+
+        let sort = NSMenuItem(title: "Sort by", action: nil, keyEquivalent: "")
+        let sortMenu = NSMenu()
+        sortMenu.autoenablesItems = false
+        for mode in SortMode.allCases {
+            let item = makeItem(mode.menuTitle, action: #selector(VMenuHandler.selectSortMode(_:)))
+            item.representedObject = mode
+            item.state = state.sortMode == mode ? .on : .off
+            sortMenu.addItem(item)
+        }
+        sort.submenu = sortMenu
+        menu.addItem(sort)
+
+        // Rarely-touched switches live one level down (§4.5: Settings
+        // submenu below Sort by). "Start at Login" reads
+        // `SMAppService.mainApp.status` live via `state.loginItemEnabled`
+        // at menu-build time, so it can't drift from System Settings.
+        let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        let settingsMenu = NSMenu()
+        settingsMenu.autoenablesItems = false
+        let login = makeItem("Start at Login", action: #selector(VMenuHandler.toggleLogin))
+        login.state = state.loginItemEnabled ? .on : .off
+        settingsMenu.addItem(login)
+        let mute = makeItem("Mute Sound", action: #selector(VMenuHandler.toggleMute))
+        mute.state = state.muted ? .on : .off
+        settingsMenu.addItem(mute)
+        settings.submenu = settingsMenu
+        menu.addItem(settings)
+
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
+
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: anchor.bounds.height + 6),
+            in: anchor
+        )
+    }
+
+    private func makeItem(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = menuHandler
+        return item
+    }
+}
+
+/// NSMenu action target bridging back into `AppState`. NSMenu fires
+/// actions on the main thread; the @MainActor annotation makes that
+/// assumption explicit to the compiler.
+@MainActor
+private final class VMenuHandler: NSObject {
+    weak var state: AppState?
+
+    @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
+    @objc func selectSortMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? SortMode else { return }
+        state?.setSortMode(mode)
+    }
+    @objc func toggleLogin(_ sender: Any?) { state?.toggleLoginItem() }
+    @objc func toggleMute(_ sender: Any?) { state?.toggleMute() }
+    @objc func quit(_ sender: Any?) { state?.quit() }
+}
+
+/// The ⌄ chip's gray background (T2 follow-up, M5; menubar-design.html:
+/// base ~.14, hover ~.22, press ~.30 — never the selection color).
+private struct ChipButtonStyle: ButtonStyle {
+    let isHovering: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.gray.opacity(
+                        configuration.isPressed ? 0.30 : isHovering ? 0.22 : 0.14
+                    ))
+            )
+    }
+}
+
+/// Zero-sized AppKit view whose only job is handing an `NSView` reference
+/// to SwiftUI so `NSMenu.popUp(positioning:at:in:)` has a host view.
+private struct MenuAnchorView: NSViewRepresentable {
+    let onResolve: (NSView) -> Void
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { onResolve(view) }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 private extension RescanFeedback {
@@ -341,9 +368,9 @@ private struct RowView: View {
                 }
                 Spacer(minLength: 4)
             }
-            // Leading inset matches the 12pt symbol-to-text gap so the
-            // symbol sits centered in its slot instead of hugging the left.
-            .padding(.leading, 12)
+            // Leading inset tuned on-device (2026-07-05): slightly tighter
+            // than the 12pt symbol-to-text gap reads as centered.
+            .padding(.leading, 10)
             .padding(.trailing, 8)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
