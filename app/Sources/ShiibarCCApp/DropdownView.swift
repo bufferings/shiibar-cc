@@ -51,8 +51,8 @@ struct DropdownView: View {
             if state.notificationManager.permissionDenied {
                 WarningRow(text: "Notifications permission denied")
             }
-            if state.focusTCCWarning {
-                WarningRow(text: "Focus failed: automation permission needed (run \"shiibar-cc doctor\")")
+            if state.tccWarning {
+                WarningRow(text: "Automation permission needed (run \"shiibar-cc doctor\")")
             }
         }
         .padding(.vertical, 6)

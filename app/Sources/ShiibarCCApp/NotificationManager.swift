@@ -92,9 +92,17 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             // block the run loop for the subprocess's duration), then hop
             // back for the final decision + delivery.
             DispatchQueue.global(qos: .userInitiated).async {
-                let foreground = CLIRunner.focusedTarget(helpersDirectory: helpers) == target
+                let probe = CLIRunner.focusedTarget(helpersDirectory: helpers)
+                let foreground = probe.target == target
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // A TCC-blocked `focused` must surface like any other
+                    // TCC failure (§4.5: focus / reconcile / focused all
+                    // trigger the warning row). The probe result itself is
+                    // still usable: not-foreground is the safe default.
+                    if probe.exitCode == 3 {
+                        self.onTCCError?()
+                    }
                     // Re-check at fire time (§4.5), with the state as of
                     // *after* the subprocess finished.
                     let stillUnreviewed = self.currentlyUnreviewedTargets().contains(target)
@@ -111,6 +119,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Supplied by `AppState` so the delayed re-check sees live data rather
     /// than a stale capture from scheduling time.
     var currentlyUnreviewedTargets: () -> Set<String> = { [] }
+
+    /// Called (main actor) when the `focused` probe hits a TCC error
+    /// (exit 3) — wired by `AppState` to raise the warning row (§4.5).
+    var onTCCError: (() -> Void)?
 
     private func deliver(edge: UnreviewedEdge) {
         let content = UNMutableNotificationContent()

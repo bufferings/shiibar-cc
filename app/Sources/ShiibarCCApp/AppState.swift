@@ -12,7 +12,10 @@ import ShiibarCCCore
 final class AppState: ObservableObject {
     @Published private(set) var agents: [Agent] = []
     @Published private(set) var connected = false
-    @Published var focusTCCWarning = false
+    /// Any of focus / reconcile / focused returned exit 3 (§4.5: not
+    /// focus-only — a reconcile silenced by a missing Automation permission
+    /// would silently lose the whole backstop).
+    @Published var tccWarning = false
     @Published var muted: Bool
     /// Elapsed-time base for the dropdown (DESIGN.md §4.5): captured when
     /// the dropdown opens, fixed while it stays open, refreshed on reopen.
@@ -44,6 +47,9 @@ final class AppState: ObservableObject {
         }
         notificationManager.onFocusRequested = { [weak self] target in
             self?.focus(target: target)
+        }
+        notificationManager.onTCCError = { [weak self] in
+            self?.tccWarning = true
         }
         observeDropdownOpen()
     }
@@ -200,13 +206,19 @@ final class AppState: ObservableObject {
         return nil
     }
 
+    /// Raise the TCC warning row when a subprocess reported exit 3 (§4.5).
+    /// The nonzero-exit os_log line is emitted centrally by CLIRunner.
+    private func noteExitCode(_ exitCode: Int32) {
+        if exitCode == 3 {
+            tccWarning = true
+        }
+    }
+
     func focus(target: String) {
         DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
             let result = CLIRunner.focus(target: target, helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
-                if result.exitCode == 3 {
-                    self?.focusTCCWarning = true
-                }
+                self?.noteExitCode(result.exitCode)
             }
         }
     }
@@ -214,14 +226,23 @@ final class AppState: ObservableObject {
     /// ⌄ menu "Back" (`focus -`, §4.5/§8.4).
     func focusBack() {
         DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
-            _ = CLIRunner.focusBack(helpersDirectory: helpersDirectory)
+            let result = CLIRunner.focusBack(helpersDirectory: helpersDirectory)
+            Task { @MainActor [weak self] in
+                self?.noteExitCode(result.exitCode)
+            }
         }
     }
 
-    /// ⌄ menu "Rescan" (manual reconcile, §3.5/§4.5).
+    /// Reconcile via the CLI (§3.5/§4.5). Reached from all three trigger
+    /// paths — startup, daemon reconnect (`onConnectedChanged`), and the ⌄
+    /// menu's Rescan — so a permission failure surfaces even before the
+    /// user ever clicks anything.
     func runReconcile() {
         DispatchQueue.global(qos: .utility).async { [helpersDirectory] in
-            _ = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
+            let result = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
+            Task { @MainActor [weak self] in
+                self?.noteExitCode(result.exitCode)
+            }
         }
     }
 
