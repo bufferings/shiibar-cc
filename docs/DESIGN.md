@@ -465,10 +465,11 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 - 配布はしない(当面自分専用)。通知には bundle identifier 付きの .app が必要なため、
   Swift Package(executable)+ .app 化 & ad-hoc 署名のビルドスクリプトでローカルインストールする。
   ad-hoc 署名は再ビルドで通知権限がリセットされ得るため、install スクリプトで安定した署名 ID を使う
-- **命名**: .app のファイル名は `ShiibarCC.app`、表示名(CFBundleName / CFBundleDisplayName —
-  通知バナーやシステム設定の一覧に出る名前)は `Shiibar CC`。bundle identifier は `cc.shiibar.menubar`
-  (通知・Automation の許可はこの ID に紐づく)。Swift Package 内部の
-  モジュール・型のプレフィックスは `ShiibarCc`(CLI・バイナリ名は `shiibar-cc` 系)
+- **命名**: .app のファイル名は `Shiibar CC.app`、表示名(CFBundleName / CFBundleDisplayName —
+  通知バナーやシステム設定の一覧に出る名前)も `Shiibar CC`。**ファイル名と表示名は必ず一致させる**
+  (システム設定 > 通知 の一覧は、名前解決に失敗するとファイル名(拡張子抜き)にフォールバックする —
+  §8.21)。bundle identifier は `cc.shiibar.menubar`(通知・Automation の許可はこの ID に紐づく)。
+  Swift Package 内部のモジュール・型のプレフィックスは `ShiibarCc`(CLI・バイナリ名は `shiibar-cc` 系)
 - **アプリアイコン**(Finder・通知バナー・⌘Tab に出る角丸タイル): 黒塗りのタイル自体を「窓」と
   読ませ、左上に大きな ✳(タイルの 1/4 級)、右に状態記号 3 つ(◯+`!` に赤バッジ / 開いた円弧 / 空◯)を
   縦積み。32px 以下は ✳ のみの簡略版。install スクリプトが生成スクリプトから `.icns` を作って同梱する
@@ -762,6 +763,19 @@ resume は §8.15 のとおり実装後に削除した)。
   二段構えが守っていたのは「再インストール時の許可ダイアログ 2 回と Start at Login の再設定」だけで、
   install.sh がそれ以外を全自動で復元できる以上、「一時的に外す」段を分ける実需がない(2026-07-05)
 - hooks の撤去はプラグイン管轄(`/plugin uninstall`)になり(§8.19)、settings.json 編集ロジックは削除する
+
+### 8.21 バンドルのファイル名は表示名と一致させる(`Shiibar CC.app`)
+
+- システム設定 > 通知 の一覧が、旧ファイル名 `ShiibarCC.app` のとき「ShiibarCC」と表示された。
+  調査の結果、Info.plist・LaunchServices・ncprefs・通知 DB はすべて `Shiibar CC` で正しく、
+  「ShiibarCC」はどこにも永続化されていない — 一覧が表示のたびに導出しており、この導出が
+  ファイル名(拡張子抜き)にフォールバックしていた。プロセス再起動・LaunchServices 再登録・
+  Spotlight 再インデックスでは直らない(2026-07-05 実機調査)
+- フォールバックの発動条件(なぜ iTerm.app は `iTerm2` と出るのか)は特定できなかった。
+  確実な対処は「どの導出経路でもファイル名が正解になる」こと、すなわちファイル名 = 表示名。
+  macOS の一般的な慣習(`Google Chrome.app` 等)とも一致する
+- 既存インストール環境でのリネームは ncprefs の path 書き換えを伴う(古い path のままだと
+  通知バナーのアイコンが汎用になる。手順は DEVELOPMENT.md のアイコンの節)
 
 ## 9. 定数表
 
