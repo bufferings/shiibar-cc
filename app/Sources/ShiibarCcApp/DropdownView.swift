@@ -175,10 +175,17 @@ private struct TopBar: View {
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
 
+        // Position in SCREEN coordinates (in: nil) so the result doesn't
+        // depend on the anchor view's flippedness: screen y grows upward,
+        // the menu's top-left lands on the given point, so "just below the
+        // chip" is the chip's screen minY minus a small gap.
+        guard let window = anchor.window else { return }
+        let rectInWindow = anchor.convert(anchor.bounds, to: nil)
+        let screenRect = window.convertToScreen(rectInWindow)
         menu.popUp(
             positioning: nil,
-            at: NSPoint(x: 0, y: anchor.bounds.height + 6),
-            in: anchor
+            at: NSPoint(x: screenRect.minX, y: screenRect.minY - 4),
+            in: nil
         )
     }
 
@@ -206,16 +213,19 @@ private final class VMenuHandler: NSObject {
     @objc func quit(_ sender: Any?) { state?.quit() }
 }
 
-/// The ⌄ chip's gray background (T2 follow-up, M5; menubar-design.html:
-/// base ~.14, hover ~.22, press ~.30 — never the selection color).
+/// The ⌄ chip's persistent background (T2 follow-up, M5) — never the
+/// selection color. Primary-based rather than gray: the dropdown sits on
+/// a light-gray material, and gray at mock opacity vanished against it
+/// on-device; the foreground color at these opacities stays visible on
+/// both light and dark appearances.
 private struct ChipButtonStyle: ButtonStyle {
     let isHovering: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.gray.opacity(
-                        configuration.isPressed ? 0.30 : isHovering ? 0.22 : 0.14
+                    .fill(Color.primary.opacity(
+                        configuration.isPressed ? 0.24 : isHovering ? 0.16 : 0.10
                     ))
             )
     }
