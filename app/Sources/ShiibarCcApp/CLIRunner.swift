@@ -1,6 +1,5 @@
-// Subprocess calls into the `shiibar-cc` CLI (DESIGN.md §4.5): focus,
-// reconcile, and the front-most-check `focused` used for delayed-notification
-// suppression. Exit codes per DESIGN.md §4.4: 0 success, 2 not found, 3
+// Subprocess calls into the `shiibar-cc` CLI (DESIGN.md §4.5): focus and
+// reconcile. Exit codes per DESIGN.md §4.4: 0 success, 2 not found, 3
 // TCC (osascript permission) error.
 //
 // Every failure (nonzero exit, or failure to launch at all) is recorded to
@@ -149,19 +148,5 @@ enum CLIRunner {
     /// error, 3 = TCC) silently loses the backstop and must error-log.
     static func reconcile(helpersDirectory: URL?) -> CLIRunResult {
         run(["reconcile"], helpersDirectory: helpersDirectory)
-    }
-
-    /// `shiibar-cc focused` — front-most iTerm2 session's target, used to
-    /// suppress a delayed notification for a target the user already
-    /// jumped to (§4.5). Exit 2 ("none", §4.4) is the routine outcome
-    /// whenever iTerm2 isn't frontmost — expected, so the probe doesn't
-    /// pollute the error log. Exit 3 (TCC) must reach the caller so the
-    /// warning row can trigger (§4.5), hence the exit code is returned
-    /// alongside the target.
-    static func focusedTarget(helpersDirectory: URL?) -> (target: String?, exitCode: Int32) {
-        let result = run(["focused"], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
-        guard result.exitCode == 0 else { return (nil, result.exitCode) }
-        let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (trimmed.isEmpty ? nil : trimmed, 0)
     }
 }

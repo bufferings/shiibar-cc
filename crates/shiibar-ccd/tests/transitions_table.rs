@@ -24,6 +24,7 @@ fn base_payload(event: HookEvent) -> ReportPayload {
         message: None,
         prompt: None,
         background_tasks: None,
+        last_assistant_message: None,
     }
 }
 
@@ -39,6 +40,11 @@ fn existing(status: Status, unreviewed: bool) -> AgentEntry {
         task: Some("old task".into()),
         message: if status == Status::Waiting {
             Some("old reason".into())
+        } else {
+            None
+        },
+        last_assistant_message: if status == Status::Idle {
+            Some("old reply".into())
         } else {
             None
         },
@@ -593,4 +599,99 @@ fn task_persists_across_status_changes_and_only_user_prompt_submit_updates_it() 
         panic!("expected Updated");
     };
     assert_eq!(entry.task.as_deref(), Some("new task"));
+}
+
+// --- last_assistant_message set/clear (§3.6, M5 T4) ---
+
+#[test]
+fn stop_without_background_tasks_stores_last_assistant_message() {
+    let working = existing(Status::Working, false);
+    assert_eq!(working.last_assistant_message, None);
+
+    let mut p = base_payload(HookEvent::Stop);
+    p.background_tasks = None;
+    p.last_assistant_message = Some("Done. All 54 tests pass.".into());
+    let Outcome::Updated { entry, .. } = apply_report(Some(&working), &p, NOW) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(entry.status, Status::Idle);
+    assert_eq!(
+        entry.last_assistant_message.as_deref(),
+        Some("Done. All 54 tests pass.")
+    );
+}
+
+#[test]
+fn stop_with_background_tasks_never_stores_last_assistant_message_even_though_the_report_carries_one() {
+    // A Stop report always carries `last_assistant_message` when Claude
+    // Code sends one (real fixtures/stop_with_background_tasks.json has it
+    // too), but §3.6 only stores it on the empty-background_tasks (idle)
+    // branch — the has-background_tasks (working) branch must not store it,
+    // relying on the "clear on transition to working" rule instead.
+    let idle = existing(Status::Idle, false);
+    let mut p = base_payload(HookEvent::Stop);
+    p.background_tasks = Some(vec![serde_json::json!({"id": "1", "status": "running"})]);
+    p.last_assistant_message = Some("Started a background task.".into());
+    let Outcome::Updated { entry, .. } = apply_report(Some(&idle), &p, NOW) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(entry.status, Status::Working);
+    assert_eq!(entry.last_assistant_message, None);
+}
+
+#[test]
+fn transitioning_to_working_clears_last_assistant_message() {
+    let idle_with_reply = {
+        let mut e = existing(Status::Idle, false);
+        e.last_assistant_message = Some("Done. All 54 tests pass.".into());
+        e
+    };
+
+    let mut p = base_payload(HookEvent::UserPromptSubmit);
+    p.prompt = Some("do the next thing".into());
+    let Outcome::Updated { entry, .. } = apply_report(Some(&idle_with_reply), &p, NOW) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(entry.status, Status::Working);
+    assert_eq!(
+        entry.last_assistant_message, None,
+        "last_assistant_message must be cleared on transition to working"
+    );
+}
+
+#[test]
+fn last_assistant_message_survives_a_transition_that_is_not_to_working() {
+    // §3.6: the field is cleared only on a transition to `working` — a
+    // completed session receiving a new waiting-inducing Notification
+    // (idle -> waiting) must not lose it.
+    let idle_with_reply = {
+        let mut e = existing(Status::Idle, false);
+        e.last_assistant_message = Some("Done. All 54 tests pass.".into());
+        e
+    };
+
+    let mut p = base_payload(HookEvent::Notification);
+    p.notification_type = Some(NotificationType::PermissionPrompt);
+    p.message = Some("please confirm".into());
+    let Outcome::Updated { entry, .. } = apply_report(Some(&idle_with_reply), &p, NOW) else {
+        panic!("expected Updated");
+    };
+    assert_eq!(entry.status, Status::Waiting);
+    assert_eq!(
+        entry.last_assistant_message.as_deref(),
+        Some("Done. All 54 tests pass.")
+    );
+}
+
+#[test]
+fn stop_without_background_tasks_registers_an_unregistered_target_with_last_assistant_message() {
+    let mut p = base_payload(HookEvent::Stop);
+    p.background_tasks = None;
+    p.last_assistant_message = Some("Here is the file list.".into());
+    let Outcome::Updated { entry, previous } = apply_report(None, &p, NOW) else {
+        panic!("expected Updated (register)");
+    };
+    assert!(previous.is_none());
+    assert_eq!(entry.status, Status::Idle);
+    assert_eq!(entry.last_assistant_message.as_deref(), Some("Here is the file list."));
 }

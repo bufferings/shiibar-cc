@@ -134,5 +134,6 @@ pub fn report_payload(
         message: None,
         prompt: None,
         background_tasks: None,
+        last_assistant_message: None,
     }
 }

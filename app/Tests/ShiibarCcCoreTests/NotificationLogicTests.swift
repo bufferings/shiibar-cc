@@ -16,6 +16,69 @@ final class NotificationLogicTests: XCTestCase {
         )
     }
 
+    // ---- Notification content (§4.5) ----
+
+    func testWaitingContentUsesLabelInTitleAndMessageAsSubtitleAndTaskAsBody() {
+        let content = NotificationContentBuilder.build(
+            status: .waiting,
+            label: "shiibar-cc",
+            message: "Claude needs your permission",
+            task: "implement the docs build",
+            lastAssistantMessage: nil
+        )
+        XCTAssertEqual(content.title, "Waiting for you — shiibar-cc")
+        XCTAssertEqual(content.subtitle, "Claude needs your permission")
+        XCTAssertEqual(content.body, "implement the docs build")
+    }
+
+    func testWaitingContentOmitsSubtitleAndBodyEntirelyWhenAbsent() {
+        let content = NotificationContentBuilder.build(
+            status: .waiting,
+            label: "shiibar-cc",
+            message: nil,
+            task: nil,
+            lastAssistantMessage: nil
+        )
+        XCTAssertEqual(content.title, "Waiting for you — shiibar-cc")
+        XCTAssertNil(content.subtitle)
+        XCTAssertNil(content.body)
+    }
+
+    func testDoneContentUsesLabelInTitleAndLastAssistantMessageAsBodyAndNeverHasASubtitle() {
+        let content = NotificationContentBuilder.build(
+            status: .idle,
+            label: "shiibar-cc",
+            message: "should be ignored for done",
+            task: "implement the docs build",
+            lastAssistantMessage: "Done. All 54 tests pass."
+        )
+        XCTAssertEqual(content.title, "Done — shiibar-cc")
+        XCTAssertNil(content.subtitle, "done never has a subtitle (§4.5)")
+        XCTAssertEqual(content.body, "Done. All 54 tests pass.")
+    }
+
+    func testDoneContentFallsBackToTaskWhenLastAssistantMessageIsAbsent() {
+        let content = NotificationContentBuilder.build(
+            status: .idle,
+            label: "shiibar-cc",
+            message: nil,
+            task: "implement the docs build",
+            lastAssistantMessage: nil
+        )
+        XCTAssertEqual(content.body, "implement the docs build")
+    }
+
+    func testDoneContentOmitsBodyEntirelyWhenNeitherLastAssistantMessageNorTaskIsPresent() {
+        let content = NotificationContentBuilder.build(
+            status: .idle,
+            label: "shiibar-cc",
+            message: nil,
+            task: nil,
+            lastAssistantMessage: nil
+        )
+        XCTAssertNil(content.body)
+    }
+
     // ---- UnreviewedEdgeTracker: rising-edge detection + de-dup ----
 
     func testFirstObservationOfAnUnreviewedAgentIsARisingEdge() {
@@ -42,11 +105,6 @@ final class NotificationLogicTests: XCTestCase {
         XCTAssertEqual(edges, [UnreviewedEdge(target: "t", status: .idle)])
     }
 
-    func testWaitingEdgePlaysSoundAndIdleCompletionEdgeDoesNot() {
-        XCTAssertTrue(UnreviewedEdge(target: "t", status: .waiting).playsSound)
-        XCTAssertFalse(UnreviewedEdge(target: "t", status: .idle).playsSound)
-    }
-
     func testForgetAllowsTheSameTargetToRiseAgainAsANewEdge() {
         let tracker = UnreviewedEdgeTracker()
         _ = tracker.observe(agents: [agent(target: "t", status: .waiting, unreviewed: true)])
@@ -55,13 +113,11 @@ final class NotificationLogicTests: XCTestCase {
         XCTAssertEqual(edges, [UnreviewedEdge(target: "t", status: .waiting)])
     }
 
-    // ---- Delayed re-check ----
+    // ---- Delayed re-check (§4.5/§8.16: no foreground suppression) ----
 
-    func testDelayedNotificationFiresOnlyWhenStillUnreviewedAndNotForeground() {
-        XCTAssertTrue(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: true, targetIsForeground: false))
-        XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: true, targetIsForeground: true))
-        XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: false, targetIsForeground: false))
-        XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: false, targetIsForeground: true))
+    func testDelayedNotificationFiresOnlyWhenStillUnreviewed() {
+        XCTAssertTrue(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: true))
+        XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: false))
     }
 
     // ---- Cleanup rule ----

@@ -14,9 +14,9 @@ import ShiibarCcCore
 final class AppState: ObservableObject {
     @Published private(set) var agents: [Agent] = []
     @Published private(set) var connected = false
-    /// Any of focus / reconcile / focused returned exit 3 (§4.5: not
-    /// focus-only — a reconcile silenced by a missing Automation permission
-    /// would silently lose the whole backstop).
+    /// Either focus or reconcile returned exit 3 (§4.5: not focus-only — a
+    /// reconcile silenced by a missing Automation permission would silently
+    /// lose the whole backstop).
     @Published var tccWarning = false
     @Published var muted: Bool
     /// Transient topbar text for a manually-triggered Rescan (§4.5/§9:
@@ -44,7 +44,7 @@ final class AppState: ObservableObject {
 
     init(helpersDirectory: URL?) {
         self.helpersDirectory = helpersDirectory
-        let notificationManager = NotificationManager(helpersDirectoryProvider: { helpersDirectory })
+        let notificationManager = NotificationManager()
         self.notificationManager = notificationManager
         self.muted = notificationManager.isMuted
 
@@ -55,14 +55,10 @@ final class AppState: ObservableObject {
             helpersDirectory: helpersDirectory
         )
 
-        notificationManager.currentlyUnreviewedTargets = { [weak self] in
-            Set((self?.agents ?? []).filter(\.unreviewed).map(\.target))
-        }
+        notificationManager.currentAgentsProvider = { [weak self] in self?.agents ?? [] }
+        notificationManager.homeProvider = { [weak self] in self?.home }
         notificationManager.onFocusRequested = { [weak self] target in
             self?.focus(target: target)
-        }
-        notificationManager.onTCCError = { [weak self] in
-            self?.tccWarning = true
         }
         observeDropdownOpen()
     }

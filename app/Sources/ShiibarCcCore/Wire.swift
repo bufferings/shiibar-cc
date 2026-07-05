@@ -63,13 +63,19 @@ public struct Agent: Equatable, Decodable, Sendable {
     public let cwd: String
     public let task: String?
     public let message: String?
+    /// Last assistant reply as of the most recent completion (§3.6),
+    /// truncated to 200 chars (§9). `nil` while `working`, or before any
+    /// completion has happened yet.
+    public let lastAssistantMessage: String?
     public let since: Int64
     public let lastSeen: Int64
 
     private enum CodingKeys: String, CodingKey {
         case target, status, unreviewed
         case sessionId = "session_id"
-        case cwd, task, message, since
+        case cwd, task, message
+        case lastAssistantMessage = "last_assistant_message"
+        case since
         case lastSeen = "last_seen"
     }
 
@@ -81,6 +87,7 @@ public struct Agent: Equatable, Decodable, Sendable {
         cwd: String,
         task: String?,
         message: String?,
+        lastAssistantMessage: String? = nil,
         since: Int64,
         lastSeen: Int64
     ) {
@@ -91,6 +98,7 @@ public struct Agent: Equatable, Decodable, Sendable {
         self.cwd = cwd
         self.task = task
         self.message = message
+        self.lastAssistantMessage = lastAssistantMessage
         self.since = since
         self.lastSeen = lastSeen
     }
@@ -104,6 +112,7 @@ public struct Agent: Equatable, Decodable, Sendable {
         cwd = try container.decode(String.self, forKey: .cwd)
         task = try container.decodeIfPresent(String.self, forKey: .task)
         message = try container.decodeIfPresent(String.self, forKey: .message)
+        lastAssistantMessage = try container.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
         since = try container.decode(Int64.self, forKey: .since)
         lastSeen = try container.decode(Int64.self, forKey: .lastSeen)
     }

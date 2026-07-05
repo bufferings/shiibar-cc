@@ -74,6 +74,7 @@ mod tests {
             cwd: cwd.to_string(),
             task: None,
             message: None,
+            last_assistant_message: None,
             since: 1,
             last_seen: 2,
         }

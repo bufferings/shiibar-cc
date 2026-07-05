@@ -10,6 +10,10 @@ use serde_json::Value;
 /// prompt / task display truncation (§9): first 80 **characters**, not bytes.
 pub const TASK_TRUNCATE_CHARS: usize = 80;
 
+/// `last_assistant_message` display truncation (§9): first 200
+/// **characters**, not bytes — same char-boundary care as `TASK_TRUNCATE_CHARS`.
+pub const LAST_ASSISTANT_MESSAGE_TRUNCATE_CHARS: usize = 200;
+
 /// A UserPromptSubmit whose prompt starts with this prefix is Claude Code's
 /// automatic wake-up delivering a background-agent completion to the parent
 /// session, not a user request (observed live 2026-07-05). It must drive
@@ -76,6 +80,8 @@ pub fn build_report(
         .get("background_tasks")
         .and_then(|v| v.as_array())
         .cloned();
+    let last_assistant_message = str_field(raw, "last_assistant_message")
+        .map(|m| truncate_chars(&m, LAST_ASSISTANT_MESSAGE_TRUNCATE_CHARS));
 
     Ok(Some(ReportPayload {
         event,
@@ -89,6 +95,7 @@ pub fn build_report(
         message,
         prompt,
         background_tasks,
+        last_assistant_message,
     }))
 }
 
@@ -239,5 +246,48 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(r.background_tasks, None);
+    }
+
+    #[test]
+    fn last_assistant_message_is_extracted_and_truncated_to_200_chars_by_char_not_byte() {
+        // multi-byte chars: naive byte-slicing at 200 could split a codepoint
+        // (same care as the 80-char prompt truncation above).
+        let long_message: String = "€".repeat(300);
+        let raw = json!({"session_id": "s1", "cwd": "/c", "last_assistant_message": long_message});
+        let r = build_report(HookEvent::Stop, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.last_assistant_message.unwrap().chars().count(), 200);
+    }
+
+    #[test]
+    fn missing_last_assistant_message_is_none() {
+        let raw = json!({"session_id": "s1", "cwd": "/c"});
+        let r = build_report(HookEvent::Stop, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.last_assistant_message, None);
+    }
+
+    /// Real captured payload (fixtures/stop_no_background_tasks.json, §7-3):
+    /// the extraction must pull `last_assistant_message` out and pass it
+    /// through unchanged (it's well under the 200-char cap).
+    #[test]
+    fn extracts_last_assistant_message_from_the_real_stop_fixture() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/stop_no_background_tasks.json");
+        let contents = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
+        let raw: Value = serde_json::from_str(&contents).unwrap();
+        let r = build_report(HookEvent::Stop, &raw, Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            r.last_assistant_message.as_deref(),
+            Some(
+                "Here is the project root listing:\n\nCLAUDE.md\nCargo.lock\nCargo.toml\napp\ncrates\ndocs\nfixtures\nhooks\nrust-toolchain.toml\nscripts\ntarget\n\nLet me know if you want the contents of any subdirectory."
+            )
+        );
+        assert_eq!(r.background_tasks.as_ref().map(|v| v.is_empty()), Some(true));
     }
 }

@@ -29,6 +29,7 @@ fn session_start(target: &str, session_id: &str, ts: i64) -> ReportPayload {
         message: None,
         prompt: None,
         background_tasks: None,
+        last_assistant_message: None,
     }
 }
 

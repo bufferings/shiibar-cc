@@ -61,6 +61,7 @@ pub fn apply_report(existing: Option<&AgentEntry>, report: &ReportPayload, now: 
             |_current| Some(Status::Working),
             Some(false),
             false,
+            false,
         ),
         HookEvent::PostToolUse | HookEvent::PostToolUseFailure => apply_transition(
             existing,
@@ -69,6 +70,7 @@ pub fn apply_report(existing: Option<&AgentEntry>, report: &ReportPayload, now: 
             UnregisteredAction::Register(Status::Working),
             |current| (current == Status::Waiting).then_some(Status::Working),
             Some(false),
+            false,
             false,
         ),
         HookEvent::Notification => apply_notification(existing, report, now),
@@ -103,6 +105,7 @@ fn apply_session_start(existing: Option<&AgentEntry>, report: &ReportPayload, no
             |_current| None,
             None,
             false,
+            false,
         ),
         // startup / clear / resume / other-unknown-source / missing-source
         // all behave the same: always (re)enter idle, flag cleared (§3.4).
@@ -113,6 +116,7 @@ fn apply_session_start(existing: Option<&AgentEntry>, report: &ReportPayload, no
             UnregisteredAction::Register(Status::Idle),
             |_current| Some(Status::Idle),
             Some(false),
+            false,
             false,
         ),
     }
@@ -136,6 +140,7 @@ fn apply_notification(existing: Option<&AgentEntry>, report: &ReportPayload, now
                 |_current| Some(Status::Waiting),
                 Some(true),
                 true,
+                false,
             )
         }
         // idle_prompt is fully ignored in the respec'd model (§3.4): the
@@ -153,6 +158,7 @@ fn apply_notification(existing: Option<&AgentEntry>, report: &ReportPayload, now
             |_current| None,
             None,
             false,
+            false,
         ),
         Some(AuthSuccess) | Some(ElicitationComplete) | Some(ElicitationResponse) | Some(AgentCompleted) => {
             apply_transition(
@@ -162,6 +168,7 @@ fn apply_notification(existing: Option<&AgentEntry>, report: &ReportPayload, now
                 UnregisteredAction::Ignore,
                 |_current| None,
                 None,
+                false,
                 false,
             )
         }
@@ -190,6 +197,11 @@ fn apply_stop(existing: Option<&AgentEntry>, report: &ReportPayload, now: i64) -
         move |_current| Some(target_status),
         Some(flag),
         false,
+        // Only the empty-background_tasks (idle) branch stores
+        // `last_assistant_message` (§3.6); the working branch relies on
+        // `set_status`'s universal "clear on transition to working" rule
+        // instead of storing then immediately clearing.
+        !has_background_tasks,
     )
 }
 
@@ -216,6 +228,14 @@ fn apply_session_end(existing: Option<&AgentEntry>, report: &ReportPayload, now:
 /// included (§3.4's "raise/lower even on a same-value cell" rule) — the
 /// `unreviewed` flag is forced to this value. `None` means "never touch the
 /// flag" (rows that can leave status alone, like `PostToolUse` from `idle`).
+///
+/// `update_last_assistant_message_on_transition`: only `true` for Stop's
+/// empty-`background_tasks` branch (§3.6) — the one event that actually
+/// carries a `last_assistant_message` to store. Every other transition
+/// leaves the field alone here; the universal "clear on transition to
+/// working" rule lives in `set_status` instead, since that must apply
+/// regardless of which event drove the transition.
+#[allow(clippy::too_many_arguments)]
 fn apply_transition(
     existing: Option<&AgentEntry>,
     report: &ReportPayload,
@@ -224,6 +244,7 @@ fn apply_transition(
     registered_transition: impl Fn(Status) -> Option<Status>,
     flag_on_transition: Option<bool>,
     update_message_on_transition: bool,
+    update_last_assistant_message_on_transition: bool,
 ) -> Outcome {
     match existing {
         None => match unregistered_action {
@@ -233,6 +254,9 @@ fn apply_transition(
                 entry.unreviewed = flag_on_transition.unwrap_or(false);
                 if update_message_on_transition {
                     entry.message = report.message.clone();
+                }
+                if update_last_assistant_message_on_transition {
+                    entry.last_assistant_message = report.last_assistant_message.clone();
                 }
                 Outcome::updated_new(entry)
             }
@@ -247,6 +271,9 @@ fn apply_transition(
                 }
                 if update_message_on_transition {
                     next.message = report.message.clone();
+                }
+                if update_last_assistant_message_on_transition {
+                    next.last_assistant_message = report.last_assistant_message.clone();
                 }
             }
             Outcome::updated(next, prev.clone())
@@ -265,6 +292,7 @@ fn create_entry(report: &ReportPayload, now: i64, status: Status) -> AgentEntry 
         last_seen: now,
         task: report.prompt.clone(),
         message: None,
+        last_assistant_message: None,
     }
 }
 
@@ -280,8 +308,12 @@ fn apply_common_overwrites(entry: &mut AgentEntry, report: &ReportPayload, now: 
 }
 
 /// Assign `new_status`, bumping `since` only on an actual value change
-/// (§3.4 "same-value transitions preserve `since`"), and clearing `message`
-/// whenever the entry is not (or is no longer) `waiting` (§3.6).
+/// (§3.4 "same-value transitions preserve `since`"), clearing `message`
+/// whenever the entry is not (or is no longer) `waiting`, and clearing
+/// `last_assistant_message` whenever the entry transitions to `working`
+/// (§3.6 — both are "not a description of the current state anymore" rules,
+/// applied unconditionally so every event that lands on the target status,
+/// not just the one that originally set the field, clears it).
 fn set_status(entry: &mut AgentEntry, new_status: Status, now: i64) {
     if entry.status != new_status {
         entry.status = new_status;
@@ -289,6 +321,9 @@ fn set_status(entry: &mut AgentEntry, new_status: Status, now: i64) {
     }
     if new_status != Status::Waiting {
         entry.message = None;
+    }
+    if new_status == Status::Working {
+        entry.last_assistant_message = None;
     }
 }
 
@@ -322,6 +357,9 @@ pub fn apply_reconcile_session(
                 last_seen: now,
                 task: None,
                 message,
+                // reconcile never knows a session's last assistant reply —
+                // only the Stop hook carries that (§3.6).
+                last_assistant_message: None,
             })
         }
         Some(prev) => {
@@ -347,6 +385,12 @@ pub fn apply_reconcile_session(
                 } else {
                     None
                 };
+                if session.status == Status::Working {
+                    // Same "clear on transition to working" rule as the
+                    // hook-driven path (§3.6) — reconcile can also be what
+                    // drives a stale idle entry back to working.
+                    next.last_assistant_message = None;
+                }
             } else if session.status == Status::Waiting {
                 // Same status, but a reconcile that reconfirms `waiting`
                 // still refreshes the reason text (§3.6).
@@ -378,6 +422,11 @@ mod reconcile_tests {
             task: Some("old task".into()),
             message: if status == Status::Waiting {
                 Some("old reason".into())
+            } else {
+                None
+            },
+            last_assistant_message: if status == Status::Idle {
+                Some("old reply".into())
             } else {
                 None
             },
@@ -466,6 +515,42 @@ mod reconcile_tests {
         assert_eq!(entry.status, Status::Working);
         assert!(!entry.unreviewed);
         assert_eq!(entry.message, None, "leaving waiting clears message");
+    }
+
+    #[test]
+    fn known_entry_transitioning_to_working_clears_last_assistant_message() {
+        // §3.6: last_assistant_message is cleared on any transition to
+        // working, not just the hook-driven path — reconcile can also be
+        // what drives a stale idle entry back to working.
+        let prev = entry(Status::Idle, true);
+        assert_eq!(prev.last_assistant_message.as_deref(), Some("old reply"));
+        let outcome = apply_reconcile_session(Some(&prev), &session(Status::Working, None), 1000);
+        let Outcome::Updated { entry, .. } = outcome else {
+            panic!("expected Updated");
+        };
+        assert_eq!(entry.status, Status::Working);
+        assert_eq!(
+            entry.last_assistant_message, None,
+            "transitioning to working must clear last_assistant_message"
+        );
+    }
+
+    #[test]
+    fn known_entry_transitioning_from_idle_to_waiting_keeps_last_assistant_message() {
+        // §3.6: the field is only cleared on a transition to working — a
+        // new request arriving (idle -> waiting) must not touch it.
+        let prev = entry(Status::Idle, true);
+        assert_eq!(prev.last_assistant_message.as_deref(), Some("old reply"));
+        let outcome = apply_reconcile_session(
+            Some(&prev),
+            &session(Status::Waiting, Some("permission prompt")),
+            1000,
+        );
+        let Outcome::Updated { entry, .. } = outcome else {
+            panic!("expected Updated");
+        };
+        assert_eq!(entry.status, Status::Waiting);
+        assert_eq!(entry.last_assistant_message.as_deref(), Some("old reply"));
     }
 
     #[test]

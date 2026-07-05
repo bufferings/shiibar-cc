@@ -44,6 +44,14 @@ pub struct Agent {
     pub task: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub message: Option<String>,
+    /// Last assistant reply as of the most recent completion (Stop with
+    /// empty `background_tasks`), truncated to 200 chars (§9). Cleared when
+    /// the entry transitions to `working` (§3.6). Forward-compatible
+    /// addition (M5 T4, §4.2): `#[serde(default)]` so an older daemon build
+    /// omitting this field on the wire still deserializes on a future
+    /// client, and vice versa.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_assistant_message: Option<String>,
     pub since: i64,
     pub last_seen: i64,
 }
@@ -118,6 +126,10 @@ pub struct ReportPayload {
     /// emptiness is used by the state machine.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub background_tasks: Option<Vec<serde_json::Value>>,
+    /// Stop's `last_assistant_message` (§4.1/§9), already truncated to 200
+    /// chars by the extraction. Only ever populated on a `Stop` report.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_assistant_message: Option<String>,
 }
 
 /// One live session as gathered by the client from `claude agents --json` +
@@ -391,12 +403,63 @@ mod tests {
             cwd: "/c".into(),
             task: None,
             message: None,
+            last_assistant_message: None,
             since: 1,
             last_seen: 2,
         };
         let s = serde_json::to_string(&agent).unwrap();
         assert!(!s.contains("task"));
         assert!(!s.contains("message"));
+        assert!(!s.contains("last_assistant_message"));
+    }
+
+    #[test]
+    fn agent_wire_carries_last_assistant_message_when_present() {
+        // §4.2: `last_assistant_message` is a forward-compatible addition to
+        // the wire `Agent` (M5 T4).
+        let agent = Agent {
+            target: "t".into(),
+            status: Status::Idle,
+            unreviewed: true,
+            session_id: "s".into(),
+            cwd: "/c".into(),
+            task: Some("implement the docs build".into()),
+            message: None,
+            last_assistant_message: Some("Done. All 54 tests pass.".into()),
+            since: 1,
+            last_seen: 2,
+        };
+        let s = serde_json::to_string(&agent).unwrap();
+        assert!(s.contains(r#""last_assistant_message":"Done. All 54 tests pass.""#));
+        let back: Agent = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, agent);
+    }
+
+    #[test]
+    fn agent_wire_without_last_assistant_message_field_still_deserializes() {
+        // Backward compat: a pre-M5 daemon's `Agent` line has no
+        // `last_assistant_message` key at all.
+        let line = r#"{"target":"t","status":"idle","unreviewed":false,"session_id":"s","cwd":"/c","since":1,"last_seen":2}"#;
+        let agent: Agent = serde_json::from_str(line).unwrap();
+        assert_eq!(agent.last_assistant_message, None);
+    }
+
+    #[test]
+    fn report_payload_carries_last_assistant_message_on_stop() {
+        let line = r#"{"cmd":"report","event":"Stop","target":"t","session_id":"s","cwd":"/c","ts":1,"background_tasks":[],"last_assistant_message":"Done. All 54 tests pass."}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Report(p) = req else { panic!("expected Report") };
+        assert_eq!(p.last_assistant_message.as_deref(), Some("Done. All 54 tests pass."));
+    }
+
+    #[test]
+    fn report_payload_without_last_assistant_message_field_still_deserializes() {
+        // Backward compat: an older `shiibar-cc report` build never sent
+        // this field at all.
+        let line = r#"{"cmd":"report","event":"Stop","target":"t","session_id":"s","cwd":"/c","ts":1}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Report(p) = req else { panic!("expected Report") };
+        assert_eq!(p.last_assistant_message, None);
     }
 
     #[test]

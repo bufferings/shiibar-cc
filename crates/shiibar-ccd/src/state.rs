@@ -30,6 +30,14 @@ pub struct AgentEntry {
     /// or a reconcile's `waitingFor`). Cleared whenever the entry leaves
     /// `waiting` (§3.6).
     pub message: Option<String>,
+    /// Last assistant reply as of the most recent completion (Stop with
+    /// empty `background_tasks`), first 200 chars (§9). Cleared whenever the
+    /// entry transitions to `working` (§3.6 — same "not the current state's
+    /// description anymore" rule as `message` leaving `waiting`).
+    /// `#[serde(default)]` so a pre-M5 `state.json` (no such field at all)
+    /// still loads (M5 T4 brief: "old state files load").
+    #[serde(default)]
+    pub last_assistant_message: Option<String>,
 }
 
 impl AgentEntry {
@@ -42,6 +50,7 @@ impl AgentEntry {
             cwd: self.cwd.clone(),
             task: self.task.clone(),
             message: self.message.clone(),
+            last_assistant_message: self.last_assistant_message.clone(),
             since: self.since,
             last_seen: self.last_seen,
         }
@@ -49,8 +58,19 @@ impl AgentEntry {
 
     /// The subset of fields whose change triggers a `status_changed`
     /// broadcast (§4.2: "whenever any of status / unreviewed / session_id /
-    /// cwd / task / message changes").
-    fn observable(&self) -> (Status, bool, &str, &str, Option<&str>, Option<&str>) {
+    /// cwd / task / message / last_assistant_message changes").
+    #[allow(clippy::type_complexity)]
+    fn observable(
+        &self,
+    ) -> (
+        Status,
+        bool,
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+    ) {
         (
             self.status,
             self.unreviewed,
@@ -58,6 +78,7 @@ impl AgentEntry {
             self.cwd.as_str(),
             self.task.as_deref(),
             self.message.as_deref(),
+            self.last_assistant_message.as_deref(),
         )
     }
 
@@ -117,6 +138,7 @@ mod tests {
             last_seen: 2,
             task: None,
             message: None,
+            last_assistant_message: None,
         }
     }
 
@@ -152,6 +174,31 @@ mod tests {
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.len(), 1);
         assert!(!loaded[0].unreviewed);
+    }
+
+    #[test]
+    fn loads_pre_m5_state_json_without_a_last_assistant_message_field() {
+        // M5 T4 brief: a state.json written before this field existed (no
+        // `last_assistant_message` key at all) must still load, defaulting
+        // to `None` rather than failing.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"agents":[{"target":"a","status":"idle","unreviewed":true,"session_id":"s","cwd":"/c","since":1,"last_seen":2,"task":null,"message":null}]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].last_assistant_message, None);
+    }
+
+    #[test]
+    fn observably_differs_on_last_assistant_message_alone() {
+        let a = entry("a", Status::Idle);
+        let mut b = a.clone();
+        b.last_assistant_message = Some("Done.".into());
+        assert!(a.observably_differs_from(&b));
     }
 
     #[test]

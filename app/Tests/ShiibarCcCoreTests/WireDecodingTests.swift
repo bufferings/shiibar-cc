@@ -38,6 +38,21 @@ final class WireDecodingTests: XCTestCase {
         }
         XCTAssertNil(agent.task)
         XCTAssertNil(agent.message)
+        XCTAssertNil(agent.lastAssistantMessage, "pre-M5 wire line has no such field at all (backward compat)")
+    }
+
+    func testAgentDecodesLastAssistantMessageWhenPresent() throws {
+        // §4.2: `last_assistant_message` is a forward-compatible addition
+        // to the wire `Agent` (M5 T4).
+        let json = """
+        {"event":"status_changed","agent":{"target":"t","status":"idle","unreviewed":true,\
+        "session_id":"s","cwd":"/c","last_assistant_message":"Done. All 54 tests pass.",\
+        "since":1,"last_seen":2}}
+        """
+        guard case .statusChanged(let agent) = try decode(json) else {
+            return XCTFail("expected status_changed")
+        }
+        XCTAssertEqual(agent.lastAssistantMessage, "Done. All 54 tests pass.")
     }
 
     func testAgentRemovedDecodesTargetAndReason() throws {

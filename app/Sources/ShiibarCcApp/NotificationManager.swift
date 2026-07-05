@@ -1,11 +1,13 @@
-// Desktop notifications (DESIGN.md §4.5): UNUserNotificationCenter, fired on
-// the unreviewed rising edge, delayed 3s with a foreground re-check, sound
-// only for waiting (time-sensitive), threadIdentifier grouping per target,
-// a mute toggle (UserDefaults, sound only), and cleanup that skips
-// `session_end` removals. Rising-edge detection / de-dup / the delayed
-// decision / the cleanup rule are pure logic in ShiibarCcCore
-// (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
-// `NotificationCleanupRule`) — this type is the I/O wrapper around them.
+// Desktop notifications (DESIGN.md §4.5/§8.16): UNUserNotificationCenter,
+// fired on the unreviewed rising edge, delayed 3s with an unreviewed-only
+// re-check (no foreground suppression — dropped in M5, §8.16), the standard
+// sound for both waiting (time-sensitive) and done (active), threadIdentifier
+// grouping per target, a mute toggle (UserDefaults, sound only), and cleanup
+// that skips `session_end` removals. Rising-edge detection / de-dup / the
+// delayed decision / content building / the cleanup rule are pure logic in
+// ShiibarCcCore (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
+// `NotificationContentBuilder`, `NotificationCleanupRule`) — this type is the
+// I/O wrapper around them.
 
 import Foundation
 import UserNotifications
@@ -17,7 +19,6 @@ private let delaySeconds: TimeInterval = 3
 @MainActor
 final class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private let edgeTracker = UnreviewedEdgeTracker()
-    private let helpersDirectoryProvider: () -> URL?
     /// Called (main actor) when a notification is clicked, to focus that target.
     var onFocusRequested: ((String) -> Void)?
     /// Reflects the current authorization status for the "denied" warning row (§4.5).
@@ -43,8 +44,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return center
     }()
 
-    init(helpersDirectoryProvider: @escaping () -> URL?) {
-        self.helpersDirectoryProvider = helpersDirectoryProvider
+    override init() {
         super.init()
     }
 
@@ -66,7 +66,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     /// Feed the latest known agents (from any source: snapshot,
     /// status_changed, or a post-reconcile refresh, §4.5) to detect rising
-    /// edges and schedule their (delayed, foreground-checked) notifications.
+    /// edges and schedule their delayed notifications.
     func observe(agents: [Agent]) {
         for edge in edgeTracker.observe(agents: agents) {
             scheduleDelayedNotification(for: edge)
@@ -83,55 +83,52 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let target = edge.target
         DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
             guard let self else { return }
-            // Cheap early-out on the main actor: if the flag already
-            // dropped during the delay, skip the subprocess entirely.
-            guard self.currentlyUnreviewedTargets().contains(target) else { return }
-            let helpers = self.helpersDirectoryProvider()
-            // The foreground check runs `shiibar-cc focused` synchronously —
-            // that must happen off the main thread (it would otherwise
-            // block the run loop for the subprocess's duration), then hop
-            // back for the final decision + delivery.
-            DispatchQueue.global(qos: .userInitiated).async {
-                let probe = CLIRunner.focusedTarget(helpersDirectory: helpers)
-                let foreground = probe.target == target
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    // A TCC-blocked `focused` must surface like any other
-                    // TCC failure (§4.5: focus / reconcile / focused all
-                    // trigger the warning row). The probe result itself is
-                    // still usable: not-foreground is the safe default.
-                    if probe.exitCode == 3 {
-                        self.onTCCError?()
-                    }
-                    // Re-check at fire time (§4.5), with the state as of
-                    // *after* the subprocess finished.
-                    let stillUnreviewed = self.currentlyUnreviewedTargets().contains(target)
-                    guard DelayedNotificationDecision.shouldNotify(
-                        currentlyUnreviewed: stillUnreviewed,
-                        targetIsForeground: foreground
-                    ) else { return }
-                    self.deliver(edge: edge)
-                }
-            }
+            // Re-check at fire time (§4.5): only the "still unreviewed?"
+            // condition gates delivery now — foreground suppression was
+            // dropped in M5 (§8.16), so there's no subprocess probe here
+            // anymore, just a synchronous read of the live agent table.
+            let agents = self.currentAgentsProvider()
+            guard DelayedNotificationDecision.shouldNotify(
+                currentlyUnreviewed: agents.contains(where: { $0.target == target && $0.unreviewed })
+            ) else { return }
+            guard let agent = agents.first(where: { $0.target == target }) else { return }
+            self.deliver(edge: edge, agent: agent)
         }
     }
 
-    /// Supplied by `AppState` so the delayed re-check sees live data rather
-    /// than a stale capture from scheduling time.
-    var currentlyUnreviewedTargets: () -> Set<String> = { [] }
+    /// Supplied by `AppState` so the delayed re-check and notification
+    /// content both see live data rather than a stale capture from
+    /// scheduling time.
+    var currentAgentsProvider: () -> [Agent] = { [] }
 
-    /// Called (main actor) when the `focused` probe hits a TCC error
-    /// (exit 3) — wired by `AppState` to raise the warning row (§4.5).
-    var onTCCError: (() -> Void)?
+    /// `$HOME`, used to render the same cwd label the dropdown's second line
+    /// uses (§4.5/§3.6).
+    var homeProvider: () -> String? = { nil }
 
-    private func deliver(edge: UnreviewedEdge) {
+    private func deliver(edge: UnreviewedEdge, agent: Agent) {
+        let label = CwdLabel.format(cwd: agent.cwd, home: homeProvider())
+        let built = NotificationContentBuilder.build(
+            status: edge.status,
+            label: label,
+            message: agent.message,
+            task: agent.task,
+            lastAssistantMessage: agent.lastAssistantMessage
+        )
         let content = UNMutableNotificationContent()
-        content.title = edge.status == .waiting ? "Waiting for you" : "Done"
+        content.title = built.title
+        if let subtitle = built.subtitle {
+            content.subtitle = subtitle
+        }
+        if let body = built.body {
+            content.body = body
+        }
         content.threadIdentifier = edge.target
         if #available(macOS 12.0, *) {
             content.interruptionLevel = edge.status == .waiting ? .timeSensitive : .active
         }
-        if edge.playsSound, !isMuted {
+        // Both waiting and done play the same standard sound (§4.5/§8.16);
+        // Mute Sound silences either.
+        if !isMuted {
             content.sound = .default
         }
         let request = UNNotificationRequest(
