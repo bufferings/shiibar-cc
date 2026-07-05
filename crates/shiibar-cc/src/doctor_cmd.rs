@@ -170,18 +170,27 @@ pub fn run_doctor_checks(
         }
     }
 
-    match hooks_configured(settings_path) {
+    match hooks_plugin_enabled(settings_path) {
         Ok(true) => checks.push(CheckRecord::new(
             "hooks",
             CheckStatus::Ok,
-            format!("hooks configured in {}", settings_path.display()),
+            format!(
+                "{HOOKS_PLUGIN_KEY} is enabled in {}",
+                settings_path.display()
+            ),
             None,
         )),
         Ok(false) => checks.push(CheckRecord::new(
             "hooks",
             CheckStatus::Warn,
-            format!("hooks not found in {}", settings_path.display()),
-            Some("see scripts/install.sh / hooks/settings-snippet.json"),
+            format!(
+                "{HOOKS_PLUGIN_KEY} is not enabled in {}",
+                settings_path.display()
+            ),
+            Some(
+                "run `/plugin marketplace add bufferings/shiibar-cc` then \
+                 `/plugin install shiibar-cc@shiibar-cc`",
+            ),
         )),
         Err(e) => checks.push(CheckRecord::new(
             "hooks",
@@ -203,7 +212,7 @@ pub fn run_doctor_checks(
             "path",
             CheckStatus::Warn,
             "shiibar-cc is not on PATH".to_string(),
-            Some("hooks/report.sh needs it"),
+            Some("plugin/hooks/report.sh needs it"),
         ));
     }
 
@@ -249,12 +258,30 @@ pub fn run_doctor(
     DoctorReport { lines, exit_code }
 }
 
-fn hooks_configured(settings_path: &Path) -> std::io::Result<bool> {
+/// The key `enabledPlugins` uses for the hooks plugin: `<plugin>@<marketplace>`
+/// (DESIGN.md §4.1/§4.4/§8.19; both names are `shiibar-cc`).
+const HOOKS_PLUGIN_KEY: &str = "shiibar-cc@shiibar-cc";
+
+/// Checks whether the shiibar-cc hooks plugin is enabled, per DESIGN.md
+/// §4.4: `settings.json` parses as JSON and its `enabledPlugins` object has
+/// `HOOKS_PLUGIN_KEY` set to `true`. A missing file, unparseable JSON, or a
+/// missing `enabledPlugins` object are all folded into "not installed" —
+/// doctor has no finer-grained hint to offer for any of those cases. A read
+/// error on an existing file is kept distinct (`Err`): "settings.json is
+/// unreadable" needs a different remedy than "run /plugin install".
+fn hooks_plugin_enabled(settings_path: &Path) -> std::io::Result<bool> {
     if !settings_path.exists() {
         return Ok(false);
     }
     let content = std::fs::read_to_string(settings_path)?;
-    Ok(content.contains("report.sh"))
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Ok(false);
+    };
+    Ok(value
+        .get("enabledPlugins")
+        .and_then(|plugins| plugins.get(HOOKS_PLUGIN_KEY))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
 }
 
 fn shiibar_cc_on_path(path_env: Option<&OsStr>) -> Option<std::path::PathBuf> {
@@ -304,18 +331,61 @@ mod tests {
     }
 
     #[test]
-    fn hooks_check_reads_the_given_settings_path() {
+    fn hooks_check_is_ok_only_when_the_plugin_key_is_true() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
         std::fs::write(
             &settings_path,
-            r#"{"hooks":{"Stop":[{"hooks":[{"command":"report.sh Stop"}]}]}}"#,
+            r#"{"enabledPlugins":{"shiibar-cc@shiibar-cc":true}}"#,
         )
         .unwrap();
-        assert!(hooks_configured(&settings_path).unwrap());
+        assert!(hooks_plugin_enabled(&settings_path).unwrap());
+    }
 
+    #[test]
+    fn hooks_check_folds_every_not_installed_shape_into_the_same_result() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // enabledPlugins present but the value is false.
+        let disabled = dir.path().join("disabled.json");
+        std::fs::write(
+            &disabled,
+            r#"{"enabledPlugins":{"shiibar-cc@shiibar-cc":false}}"#,
+        )
+        .unwrap();
+        assert!(!hooks_plugin_enabled(&disabled).unwrap());
+
+        // enabledPlugins present but missing our key.
+        let other_plugin = dir.path().join("other-plugin.json");
+        std::fs::write(&other_plugin, r#"{"enabledPlugins":{"some-other@mkt":true}}"#).unwrap();
+        assert!(!hooks_plugin_enabled(&other_plugin).unwrap());
+
+        // Valid JSON with no enabledPlugins object at all.
+        let no_plugins_key = dir.path().join("no-plugins-key.json");
+        std::fs::write(&no_plugins_key, r#"{"hooks":{}}"#).unwrap();
+        assert!(!hooks_plugin_enabled(&no_plugins_key).unwrap());
+
+        // Unparseable JSON.
+        let invalid = dir.path().join("invalid.json");
+        std::fs::write(&invalid, "not json").unwrap();
+        assert!(!hooks_plugin_enabled(&invalid).unwrap());
+
+        // File does not exist at all.
         let missing = dir.path().join("nope.json");
-        assert!(!hooks_configured(&missing).unwrap());
+        assert!(!hooks_plugin_enabled(&missing).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hooks_check_keeps_a_read_error_distinct_from_not_installed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let unreadable = dir.path().join("unreadable.json");
+        std::fs::write(&unreadable, r#"{"enabledPlugins":{}}"#).unwrap();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        assert!(hooks_plugin_enabled(&unreadable).is_err());
     }
 
     #[test]
@@ -429,7 +499,7 @@ mod tests {
             .find(|c| c["id"] == "path")
             .expect("path check present");
         assert_eq!(path_check["status"], "warn");
-        assert_eq!(path_check["hint"], "hooks/report.sh needs it");
+        assert_eq!(path_check["hint"], "plugin/hooks/report.sh needs it");
     }
 
     #[test]

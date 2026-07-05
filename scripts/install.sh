@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# shiibar-cc install (M2 binaries+hooks, extended in M4 with .app bundling):
+# shiibar-cc install (M2 binaries+hooks, extended in M4 with .app bundling,
+# M6 hooks distribution moved to a Claude Code plugin):
 # build the menu bar app + shiibar-ccd/shiibar-cc in release mode, bundle
 # them into ShiibarCC.app (Contents/Helpers/), ad-hoc sign with a stable
 # local identity, symlink ~/.local/bin/shiibar-cc to the bundled binary,
 # register the app as a Login Item (by launching it once — the app
 # auto-registers via SMAppService on first launch only and never
 # re-registers after a user turns it off, DESIGN.md §4.5), and print
-# hooks configuration guidance.
+# the two-command guidance for installing the hooks plugin.
 #
-# Deliberately does NOT touch ~/.claude/settings.json: merging hooks into
-# a user's existing settings safely (preserving unrelated hooks/config,
-# never producing invalid JSON) needs a real JSON merge, and bash has no
-# reliable dependency-free way to do that. See the M2 completion report
-# for this decision. This script only prints the snippet and a suggested
-# copy-paste path.
+# This script never touches ~/.claude/settings.json itself: hooks are
+# shipped as a Claude Code plugin (this repository doubles as the
+# marketplace, DESIGN.md §4.1/§8.19), so Claude Code — not this script —
+# merges the plugin's hooks into the user's settings when they run
+# `/plugin install`. There is no JSON to hand-merge or print here anymore.
 
 set -euo pipefail
 
@@ -145,14 +145,12 @@ mkdir -p "$BIN_DIR"
 rm -f "$BIN_DIR/shiibar-cc" "$BIN_DIR/shiibar-ccd"
 ln -s "$APP_PATH/Contents/Helpers/shiibar-cc" "$BIN_DIR/shiibar-cc"
 ln -s "$APP_PATH/Contents/Helpers/shiibar-ccd" "$BIN_DIR/shiibar-ccd"
-install -m 755 "$ROOT/hooks/report.sh" "$BIN_DIR/report.sh"
 
 echo
 echo "Installed:"
 echo "  $APP_PATH"
 echo "  $BIN_DIR/shiibar-cc -> $APP_PATH/Contents/Helpers/shiibar-cc"
 echo "  $BIN_DIR/shiibar-ccd -> $APP_PATH/Contents/Helpers/shiibar-ccd"
-echo "  $BIN_DIR/report.sh"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -165,25 +163,29 @@ case ":$PATH:" in
 esac
 
 SETTINGS="$HOME/.claude/settings.json"
-echo
-echo "==> hooks setup (manual step)"
-if [ -f "$SETTINGS" ] && grep -q "report.sh" "$SETTINGS" 2>/dev/null; then
-  echo "$SETTINGS already references report.sh — nothing to do."
-else
-  echo "Merge $ROOT/hooks/settings-snippet.json into $SETTINGS by hand"
-  echo "(this script never edits it automatically, to avoid corrupting your"
-  echo "existing hooks/config). The snippet:"
-  echo
-  cat "$ROOT/hooks/settings-snippet.json"
-  echo
-  if [ ! -f "$SETTINGS" ]; then
-    echo "No $SETTINGS exists yet — you can just copy the snippet above to that path."
-  elif command -v jq >/dev/null 2>&1; then
-    echo "You have jq; a one-shot deep merge (review the result before trusting it):"
-    echo "  jq -s '.[0] * .[1]' \"$SETTINGS\" \"$ROOT/hooks/settings-snippet.json\" > /tmp/shiibar-settings.json"
-    echo "  diff \"$SETTINGS\" /tmp/shiibar-settings.json  # review"
-    echo "  mv /tmp/shiibar-settings.json \"$SETTINGS\""
+PLUGIN_KEY="shiibar-cc@shiibar-cc"
+
+plugin_installed=0
+if [ -f "$SETTINGS" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    if [ "$(jq -r --arg k "$PLUGIN_KEY" '.enabledPlugins[$k] // false' "$SETTINGS" 2>/dev/null)" = "true" ]; then
+      plugin_installed=1
+    fi
+  elif grep -q "\"$PLUGIN_KEY\"[[:space:]]*:[[:space:]]*true" "$SETTINGS" 2>/dev/null; then
+    plugin_installed=1
   fi
+fi
+
+echo
+echo "==> hooks setup"
+if [ "$plugin_installed" -eq 1 ]; then
+  echo "$PLUGIN_KEY is already enabled in $SETTINGS — nothing to do."
+else
+  echo "Install the hooks plugin from inside a Claude Code session (this"
+  echo "repository is its own marketplace, DESIGN.md §4.1):"
+  echo
+  echo "  /plugin marketplace add bufferings/shiibar-cc"
+  echo "  /plugin install shiibar-cc@shiibar-cc"
 fi
 
 echo

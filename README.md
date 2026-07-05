@@ -45,10 +45,12 @@ specific feature — nothing is requested speculatively.
   with a stable identity created on first install (`security` /
   `codesign`), so that rebuilding it doesn't reset the notification
   permission macOS ties to the app's signature.
-- **Hooks added to `~/.claude/settings.json`**: Shiibar CC needs Claude Code
-  to report session events to it. The installer **never edits this file
-  automatically** — it prints a JSON snippet and you merge it in yourself,
-  so your existing hooks and config are never at risk of being clobbered.
+- **Hooks, via a Claude Code plugin**: Shiibar CC needs Claude Code to report
+  session events to it. This repository is itself a Claude Code plugin
+  marketplace, so the hooks are installed with two `/plugin` commands
+  (below) rather than by hand-editing `~/.claude/settings.json` — Claude
+  Code merges the plugin's hooks into your settings itself, alongside
+  whatever hooks/config you already have.
 - **A state directory** (`~/.local/state/shiibar-cc/`): holds the daemon's
   Unix socket, its persisted session state, and its log file. Nothing here
   leaves your machine.
@@ -69,25 +71,29 @@ cd shiibar-cc
 
 This builds the daemon and CLI, builds and bundles the menu bar app as
 `ShiibarCC.app` (installed to `~/Applications` by default), code-signs it,
-symlinks `shiibar-cc` / `shiibar-ccd` onto `~/.local/bin`, installs
-`hooks/report.sh`, and launches the app once (which registers it as a Login
-Item and starts the daemon). It then prints the hooks snippet to merge into
-`~/.claude/settings.json` by hand, and points you at `shiibar-cc doctor` to
-verify everything end to end.
+symlinks `shiibar-cc` / `shiibar-ccd` onto `~/.local/bin`, and launches the
+app once (which registers it as a Login Item and starts the daemon). It
+then prints the two commands to install the hooks plugin, and points you
+at `shiibar-cc doctor` to verify everything end to end:
+
+```
+/plugin marketplace add bufferings/shiibar-cc
+/plugin install shiibar-cc@shiibar-cc
+```
 
 To remove it:
 
 ```sh
-./scripts/uninstall.sh          # quits the app, removes the app bundle,
-                                 # Login Item, and ~/.local/bin symlinks —
-                                 # settings.json hooks and state are left in
-                                 # place, so reinstalling is quick
-./scripts/uninstall.sh --purge  # also removes the hooks block from
-                                 # ~/.claude/settings.json (backed up first),
-                                 # the state directory, the app's saved
-                                 # preferences, the local signing
-                                 # certificate, and the iTerm2 Automation
-                                 # grant
+./scripts/uninstall.sh   # quits the app; removes the app bundle, Login
+                          # Item, ~/.local/bin symlinks, state directory,
+                          # the app's saved preferences, local signing
+                          # certificate, and iTerm2 Automation grant
+```
+
+Then remove the hooks plugin from inside a Claude Code session:
+
+```
+/plugin uninstall shiibar-cc
 ```
 
 Either way, the notification permission itself can't be removed by a
@@ -98,7 +104,7 @@ can revoke it.
 
 ```mermaid
 flowchart LR
-    hooks[Claude Code hooks] --> report["hooks/report.sh<br>(shiibar-cc report)"]
+    hooks[Claude Code hooks] --> report["plugin/hooks/report.sh<br>(shiibar-cc report)"]
     report -- "Unix socket, NDJSON" --> daemon[shiibar-ccd daemon]
     daemon --> app[menu bar app]
     daemon --> cli[shiibar-cc CLI]
@@ -106,9 +112,9 @@ flowchart LR
     cli -- "AppleScript" --> iterm[iTerm2 tab]
 ```
 
-- Every Claude Code hook event runs `hooks/report.sh`, which shells out to
-  `shiibar-cc report` to forward it to the daemon (`shiibar-ccd`) over a
-  Unix domain socket.
+- Every Claude Code hook event runs `plugin/hooks/report.sh`, which shells
+  out to `shiibar-cc report` to forward it to the daemon (`shiibar-ccd`)
+  over a Unix domain socket.
 - The daemon holds all session state in memory (and persists it to
   `~/.local/state/shiibar-cc/state.json`) and pushes changes to every
   connected subscriber.

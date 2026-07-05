@@ -40,9 +40,11 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 ## hooks の検証
 
-- `hooks/settings-snippet.json` は `$HOME/.local/bin/report.sh` を指す(install.sh 導入後の配置。M2)。
-  それ以前に実機で試す場合は、コマンドをリポジトリ内 `hooks/report.sh` の絶対パスに読み替え、
-  `shiibar-cc` は `cargo build` 後に `target/debug/` を PATH に入れる
+- hooks は Claude Code プラグイン(`plugin/`)として配布する(DESIGN.md §4.1/§8.19)。
+  リポジトリ自体がマーケットプレイスを兼ねるので、ローカルのリポジトリ絶対パスを
+  `claude plugin marketplace add <path>` に渡せば push 前でも動作を試せる
+  (`claude plugin install shiibar-cc@shiibar-cc` で有効化する)。
+  `shiibar-cc` 本体は `cargo build` 後に `target/debug/` を PATH に入れて解決させる
 
 - 実ペイロードの採取: hooks を設定した実セッションで対象イベントを発生させ、受信した実 hook JSON を `fixtures/` に保存する
 - 偽装再生: `echo '<hook JSON>' | shiibar-cc report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
@@ -125,23 +127,20 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   (`SHIIBAR_CC_APP_DIR` で上書き可)を組み立て、安定したローカル署名 ID で署名する
   (再ビルドで通知権限がリセットされないようにするため。DESIGN.md §4.5。ID が無ければ
   `scripts/lib/make-local-signing-identity.sh` で作成する)。`~/.local/bin/`
-  (`SHIIBAR_CC_BIN_DIR` で上書き可)には bundle 内バイナリへのシンボリックリンクと
-  `report.sh` を配置。最後にアプリを 1 回起動する(Login Item として自己登録。§4.5)。
-  `~/.claude/settings.json` への自動マージはしない(既存設定を壊すリスクを避けるため。
-  `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)
-- `scripts/uninstall.sh`: 2 段階
-  - 引数なし: `.app`(Login Item 登録ごと)と `~/.local/bin/` に置いたシンボリックリンク・
-    `report.sh` を削除する。settings.json に `report.sh` への参照が残っていれば手動で外す案内を
-    表示するのみ(自動編集はしない)。state dir・署名 ID・TCC・通知許可はそのまま残す
-    (入れ直しを前提にした軽い撤去)
-  - `--purge`: 上記に加えてフルの撤去を行う。`~/.claude/settings.json` から `report.sh` を指す
-    hooks エントリだけを jq で取り除き(他の hooks・設定は保持、書き換え前に
-    `settings.json.bak` へバックアップ。ファイルが無ければ何もせず終了し、jq が無い・
-    JSON が壊れている場合は自動編集をスキップして手動での案内を表示する)、state dir
-    (`SHIIBAR_CC_STATE_DIR` の既定パス)を削除し、`defaults delete cc.shiibar.menubar`・
-    ローカル署名 ID(`shiibar-cc-local-signing`、`scripts/lib/signing.sh`)の
-    `security delete-certificate`・`tccutil reset AppleEvents cc.shiibar.menubar` を実行する。
-    通知許可だけはプログラムから削除できないため、システム設定 → 通知 からの手動削除を案内して終わる
+  (`SHIIBAR_CC_BIN_DIR` で上書き可)には bundle 内バイナリへのシンボリックリンクを配置する。
+  最後にアプリを 1 回起動する(Login Item として自己登録。§4.5)。hooks は Claude Code
+  プラグインとして配布するため(§4.1/§8.19)、`~/.claude/settings.json` はこのスクリプトが
+  一切触らない。`enabledPlugins` に `shiibar-cc@shiibar-cc: true` が無ければ
+  `/plugin marketplace add bufferings/shiibar-cc` → `/plugin install shiibar-cc@shiibar-cc`
+  の 2 コマンドを案内するだけ
+- `scripts/uninstall.sh`: 一段のみ(引数を取らない。DESIGN.md §8.20)。`.app`
+  (Login Item 登録ごと)・`~/.local/bin/` のシンボリックリンク・state dir
+  (`SHIIBAR_CC_STATE_DIR` の既定パス)・`defaults delete cc.shiibar.menubar`・
+  ローカル署名 ID(`shiibar-cc-local-signing`、`scripts/lib/signing.sh`)の
+  `security delete-certificate`・`tccutil reset AppleEvents cc.shiibar.menubar` を
+  常に実行する。hooks の撤去はプラグイン管轄なので `~/.claude/settings.json` は触らず、
+  `/plugin uninstall shiibar-cc` を案内するだけ。通知許可だけはプログラムから削除できない
+  ため、システム設定 → 通知 からの手動削除を案内して終わる
 - `scripts/dev-reload.sh`: 日常のホットスワップ。デバッグビルド(cargo + swift)を作り、
   インストール済みアプリを Quit し、daemon が確実に終了するのをスクリプト側で保証してから
   (Quit 経由の shutdown 送信は投げっぱなしでプロセス終了と競合して失われ得るため、

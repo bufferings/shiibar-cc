@@ -1,0 +1,12 @@
+{
+  "name": "shiibar-cc",
+  "owner": {
+    "name": "bufferings"
+  },
+  "plugins": [
+    {
+      "name": "shiibar-cc",
+      "source": "./plugin"
+    }
+  ]
+}

@@ -10,8 +10,8 @@ final class SetupCheckLogicTests: XCTestCase {
         let json = """
         {"checks":[
             {"id":"daemon","status":"fail","summary":"daemon not reachable at /tmp/x.sock: connection refused","hint":"start it with `shiibar-ccd --foreground`"},
-            {"id":"hooks","status":"ok","summary":"hooks configured in /Users/example/.claude/settings.json","hint":null},
-            {"id":"path","status":"warn","summary":"shiibar-cc is not on PATH","hint":"hooks/report.sh needs it"}
+            {"id":"hooks","status":"ok","summary":"shiibar-cc@shiibar-cc is enabled in /Users/example/.claude/settings.json","hint":null},
+            {"id":"path","status":"warn","summary":"shiibar-cc is not on PATH","hint":"plugin/hooks/report.sh needs it"}
         ]}
         """
         let rows = SetupCheckParsing.parseDoctorJSON(json)

@@ -72,7 +72,7 @@ pub struct Agent {
 
 /// Hook event kind, as normalized by `shiibar-cc report` (§4.1) and sent to
 /// shiibar-ccd over the wire (§4.2). This is a closed set for M1: the seven
-/// events wired up in `hooks/settings-snippet.json`.
+/// events wired up in `plugin/hooks/hooks.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HookEvent {
     SessionStart,
