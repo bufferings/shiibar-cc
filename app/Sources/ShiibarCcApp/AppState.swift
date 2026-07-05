@@ -147,8 +147,15 @@ final class AppState: ObservableObject {
             guard let window = notification.object as? NSWindow,
                   !window.className.contains("NSStatusBarWindow"),
                   let self else { return }
+            // Losing key status is NOT the same as closing: opening the
+            // v-chip's NSMenu also resigns key while the panel stays on
+            // screen (and in an LSUIElement app, key may never come back
+            // after the menu closes). Treat "closed" as key-loss WHILE
+            // no longer visible; a visible panel stays "open" so the row
+            // spinners keep turning through menu interactions.
+            let stillVisible = window.isVisible
             Task { @MainActor in
-                self.isDropdownOpen = false
+                self.isDropdownOpen = stillVisible
             }
         }
     }
