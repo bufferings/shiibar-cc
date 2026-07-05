@@ -3,8 +3,6 @@
 日々の開発・ドッグフーディングで使う手順のメモ。仕様の正は [DESIGN.md](DESIGN.md)、
 メニューバーの見た目の正は [menubar-design.html](menubar-design.html)。
 
-> このメモは実装の進行に合わせて追記する。未実装のものは「(Mx で追記)」と記してある。
-
 ## レビュー・検証体制
 
 マイルストーンごとに 3 段階で受け入れる:
@@ -30,7 +28,7 @@
 cargo build
 cargo test
 
-# daemon をログ付きフォアグラウンドで起動(開発中の基本形)
+# daemon 単体をログを見ながら動かす(daemon まわりを触るときの手動運用)
 SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground
 
 # 別ターミナルからイベント観測
@@ -85,23 +83,40 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   この種の「実 iTerm2 と AppleScript の相性」は fake runner の単体テストでは捕まらないので、
   iterm モジュールを変えたら必ず実機で focus / focused を叩くこと
 
-## ドッグフーディング運用(M2〜M3 の期間)
+## ドッグフーディング運用
 
-- daemon は launchd に入れない(DESIGN.md §8.8)。iTerm2 の 1 タブで `shiibar-ccd --foreground` を
-  動かしておく(ログが見えるので開発中はむしろ都合が良い)
+- 日常のドッグフーディングはインストール済みの `.app` で行う(`scripts/install.sh` で
+  `~/Applications/shiibar-cc.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
+  停止はアプリが管理する。DESIGN.md §4.5 / §8.8。launchd には入れない、§8.8)
+- コード変更の反映は `scripts/dev-reload.sh`(下記「リリース・インストール」参照)
+- daemon 単体をログを見ながら動かしたいとき(daemon とアプリの連携をいじるときなど)は
+  手動運用に切り替える: アプリを Quit してから iTerm2 の 1 タブで
+  `SHIIBAR_CC_LOG=debug shiibar-ccd --foreground` を動かし、アプリは
+  `swift run --package-path app ShiibarCCApp` で起動する。アプリは起動時に既存 daemon に
+  アタッチするので、手動 daemon と併用しても壊れない。ただしアプリを Quit すると
+  daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
-- アプリ(M4 以降)は起動時に既存 daemon にアタッチするので、手動 daemon と併用しても壊れない。
-  ただしアプリを Quit すると daemon も止まる(仕様)
 
-## リリース・インストール(`.app` 化まわりは M4 で追記)
+## リリース・インストール
 
-- `scripts/install.sh`: `cargo build --release` して `shiibar-ccd` / `shiibar-cc` / `hooks/report.sh` を
-  `~/.local/bin/`(`SHIIBAR_CC_BIN_DIR` で上書き可)に配置する。M2 段階ではバイナリ配置 + hooks 案内のみで、
+- `scripts/install.sh`: リリースビルドして `~/Applications/shiibar-cc.app`
+  (`SHIIBAR_CC_APP_DIR` で上書き可)を組み立て、安定したローカル署名 ID で署名する
+  (再ビルドで通知権限がリセットされないようにするため。DESIGN.md §4.5。ID が無ければ
+  `scripts/lib/make-local-signing-identity.sh` で作成する)。`~/.local/bin/`
+  (`SHIIBAR_CC_BIN_DIR` で上書き可)には bundle 内バイナリへのシンボリックリンクと
+  `report.sh` を配置。最後にアプリを 1 回起動する(Login Item として自己登録。§4.5)。
   `~/.claude/settings.json` への自動マージはしない(既存設定を壊すリスクを避けるため。
-  `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)。
-  `.app` 化・Login Items・CLI シンボリックリンクの `.app` 由来化は M4
-- `scripts/uninstall.sh`: `~/.local/bin/` に置いたものを削除し、settings.json から hooks を外す案内を表示する
-  (`~/.local/state/shiibar-cc/` は消さない。ログが要らないなら手動で消す)
-- `scripts/dev-reload.sh`: `cargo build`(デバッグビルド)を再実行するだけの薄いラッパー。
-  daemon は手動運用(§8.8)なので、動かしている `shiibar-ccd --foreground` は自分で Ctrl-C → 再実行する
+  `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)
+- `scripts/uninstall.sh`: `.app`(Login Item 登録ごと)と `~/.local/bin/` に置いたものを削除し、
+  settings.json から hooks を外す案内を表示する
+  (`~/.local/state/shiibar-cc/` と署名 ID は消さない。要らなければ表示される手順で手動で消す)
+- `scripts/dev-reload.sh`: 日常のホットスワップ。デバッグビルド(cargo + swift)を作り、
+  インストール済みアプリを Quit し、daemon が確実に終了するのをスクリプト側で保証してから
+  (Quit 経由の shutdown 送信は投げっぱなしでプロセス終了と競合して失われ得るため、
+  socket への `{"cmd":"shutdown"}` → SIGTERM → SIGKILL の順に確認する)、bundle 内の
+  バイナリを差し替え、install.sh と同じ安定した署名 ID で再署名して(`scripts/lib/signing.sh`。
+  ID が keychain に無ければ警告付きで ad-hoc にフォールバック)、アプリを再起動する。
+  署名 ID が安定しているので、通知権限はリロードをまたいで維持される(§4.5)。
+  アプリ未インストールの環境ではビルドのみ行い、手動運用の手順
+  (`shiibar-ccd --foreground` + `swift run`)を表示する
 - 動作確認は `shiibar-cc doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)

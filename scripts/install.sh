@@ -22,7 +22,9 @@ APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
 APP_NAME="shiibar-cc.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 BUNDLE_ID="cc.shiibar.menubar"
-SIGNING_IDENTITY_CN="shiibar-cc-local-signing"
+
+# shellcheck source=scripts/lib/signing.sh
+source "$ROOT/scripts/lib/signing.sh"
 
 echo "==> Building shiibar-ccd / shiibar-cc (release)..."
 (cd "$ROOT" && cargo build --release -p shiibar-ccd -p shiibar-cc)
@@ -69,17 +71,11 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 PLIST
 
 echo "==> Code signing (stable local identity, so rebuilds don't reset notification permission — DESIGN.md §4.5)"
-find_identity() {
-  security find-identity -v -p codesigning 2>/dev/null \
-    | grep "$SIGNING_IDENTITY_CN" \
-    | head -1 \
-    | sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+([0-9A-Fa-f]+)[[:space:]].*$/\1/'
-}
-SIGN_ID="$(find_identity || true)"
+SIGN_ID="$(find_signing_identity || true)"
 if [ -z "$SIGN_ID" ]; then
   echo "    no existing '$SIGNING_IDENTITY_CN' codesigning identity — creating one (one-time; see scripts/lib/make-local-signing-identity.sh)."
   "$ROOT/scripts/lib/make-local-signing-identity.sh" "$SIGNING_IDENTITY_CN" || true
-  SIGN_ID="$(find_identity || true)"
+  SIGN_ID="$(find_signing_identity || true)"
 fi
 
 # NO entitlements are requested. com.apple.developer.usernotifications.
