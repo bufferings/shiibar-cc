@@ -353,7 +353,8 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   (開くたびに並びが安定)。クリックで `shiibar-cc focus <target>` を subprocess 実行し、**ドロップダウンを閉じる**。
   `agent_removed` で行を消す。
   「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)・
-  音のミュート(Mute Sound)・**Quit** は最上部の **⌄ メニュー**に置く。UI 文言は英語。
+  ログイン時起動(Start at Login、チェック表示)・音のミュート(Mute Sound)・**Quit** は
+  最上部の **⌄ メニュー**に置く。UI 文言は英語。
   Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **表示ラベル**: cwd をホーム配下なら `~` 起点にし、末尾 2 要素を表示(足りなければあるだけ)。
   ラベルの重複はそのまま表示する(並び順が安定していれば足りる。区別の工夫は §8.10)。
@@ -382,7 +383,13 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 - **daemon のライフサイクル管理**: アプリ起動時に socket へ接続し、応答があれば**既存 daemon にアタッチ**する
   (アプリのクラッシュ等で残った orphan daemon もここで回収される。daemon 側の二重起動防止は §4.2 の
   起動シーケンスが担う)。応答がなければ同梱の `shiibar-ccd` を spawn し、バックオフ再接続で繋ぐ。
-  アプリ終了(Quit)時は `shutdown` を送って daemon も止める。アプリ自体は Login Items に登録(install スクリプトが設定)
+  アプリ終了(Quit)時は `shutdown` を送って daemon も止める
+- **ログイン時起動**: `SMAppService.mainApp` を使う。**初回起動時のみ自動登録**する
+  (実施済みかだけを UserDefaults に記録し、以後は自動登録しない — OFF にした選択を次回起動で
+  上書きしないため)。以降の ON/OFF は ⌄ メニューの「Start at Login」トグルで行い、
+  チェック表示は毎回 SMAppService の status を読む(システム設定側で変えられてもずれない。
+  自前フラグを状態の正にしない)。install スクリプトはアプリを一度起動するだけで、
+  Login Items API を直接は呼ばない
 - **reconcile の実行**: アプリは `shiibar-cc reconcile` を **(1) 起動時 / daemon 再接続時、(2) ドロップダウン
   ⌄ メニューの「再スキャン(Rescan)」** で呼ぶ(§3.5)。これで daemon 不在中の取りこぼし(幽霊・見逃した waiting)を
   status レベルで自己修復する。定期ポーリングは v1 では行わない(§8.10 — 主要な穴は起動時 reconcile で塞がり、
