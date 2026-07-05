@@ -60,9 +60,7 @@ specific feature — nothing is requested speculatively.
 - **Hooks, via a Claude Code plugin**: Shiibar CC needs Claude Code to report
   session events to it. This repository is itself a Claude Code plugin
   marketplace, so the hooks are installed with two `/plugin` commands
-  (below) rather than by hand-editing `~/.claude/settings.json` — Claude
-  Code merges the plugin's hooks into your settings itself, alongside
-  whatever hooks/config you already have.
+  (below) and coexist with whatever hooks you already have.
 - **A state directory** (`~/.local/state/shiibar-cc/`): holds the daemon's
   Unix socket, its persisted session state, and its log file. Nothing here
   leaves your machine.
