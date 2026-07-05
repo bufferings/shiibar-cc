@@ -339,7 +339,7 @@ final class AppState: ObservableObject {
     /// mode if a macOS version breaks either: we fall back to closing the
     /// panel window directly, which still closes the dropdown but degrades
     /// to the consumed-first-click behavior (on-device checkpoint).
-    private func dismissDropdown() {
+    func dismissDropdown() {
         if let statusWindow = NSApp.windows.first(where: { $0.className.contains("NSStatusBarWindow") }),
            let button = firstButton(in: statusWindow.contentView) {
             button.performClick(nil)

@@ -279,6 +279,9 @@ private final class VMenuHandler: NSObject {
 
     @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
     @objc func openSetupCheck(_ sender: Any?) {
+        // Moving to a real window: the dropdown's job is done, close it
+        // (same as a row click does).
+        state?.dismissDropdown()
         // NSApp.activate happens again in SetupCheckView.onAppear — doing
         // it here too covers the case where the window is already open
         // (onAppear won't refire) and just needs to come forward.
