@@ -8,14 +8,14 @@ final class CwdLabelTests: XCTestCase {
     func testHomeRelativePathGetsTildeAndLastTwoComponents() {
         XCTAssertEqual(
             CwdLabel.format(cwd: "/Users/example/projects/shiibar", home: "/Users/example"),
-            "~/projects/shiibar"
+            "projects/shiibar"
         )
     }
 
     func testHomeRelativePathWithOneComponentShowsWhatItHas() {
         XCTAssertEqual(
             CwdLabel.format(cwd: "/Users/example/shiibar", home: "/Users/example"),
-            "~/shiibar"
+            "shiibar"
         )
     }
 

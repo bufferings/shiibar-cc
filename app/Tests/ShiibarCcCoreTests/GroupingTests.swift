@@ -66,7 +66,7 @@ final class GroupingTests: XCTestCase {
         let a = agent(target: "t", status: .idle, cwd: "/Users/example/proj/foo", task: nil, message: nil)
         let row = Grouping.makeRow(agent: a, now: 0, home: "/Users/example")
         XCTAssertEqual(row.primaryLine, row.label)
-        XCTAssertEqual(row.label, "~/proj/foo")
+        XCTAssertEqual(row.label, "proj/foo")
     }
 
     func testElapsedSecondsIsNowMinusSinceAndNeverNegative() {

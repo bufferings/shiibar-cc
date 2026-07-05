@@ -1,6 +1,8 @@
-// cwd -> display label formatting (DESIGN.md §4.5): if `cwd` is under the
-// home directory, rewrite it to start with `~`; either way, show only the
-// last two path components (or fewer, if the path is shorter). This is a
+// cwd -> display label formatting (DESIGN.md §4.5): show only the last two
+// path components (or fewer, if the path is shorter), computed on the
+// home-relative path when `cwd` is under the home directory (no `~/`
+// prefix — it carried no information since everything lives under home;
+// `cwd` == home itself still shows as `~`). This is a
 // direct port of `shiibar-cc-client::label::format_cwd_label` (Rust) — the
 // spec (§4.5) requires the CLI and the app to agree on the exact same
 // rule, and since the app can't share that Rust crate (§8.5), the rule is
@@ -31,8 +33,8 @@ public enum CwdLabel {
         let tailStart = max(0, components.count - 2)
         let tail = components[tailStart...].joined(separator: "/")
 
-        if isHomeRelative {
-            return tail.isEmpty ? "~" : "~/\(tail)"
+        if isHomeRelative && tail.isEmpty {
+            return "~"
         }
         return tail
     }

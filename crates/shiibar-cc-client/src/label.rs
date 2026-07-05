@@ -1,6 +1,8 @@
-//! cwd -> display label formatting (DESIGN.md §4.5): if `cwd` is under the
-//! home directory, rewrite it to start with `~`; either way, show only the
-//! last two path components (or fewer, if the path is shorter). This lives
+//! cwd -> display label formatting (DESIGN.md §4.5): show only the last
+//! two path components (or fewer, if the path is shorter), computed on the
+//! home-relative path when `cwd` is under the home directory (no `~/`
+//! prefix — it carried no information since everything lives under home;
+//! `cwd` == home itself still shows as `~`). This lives
 //! in shiibar-cc-client (rather than duplicated in `shiibar-cc` and the menu
 //! bar app) because both consumers need the exact same rule (§4.5:
 //! "this formatting will later be used by both the app and the CLI, so it
@@ -35,12 +37,8 @@ pub fn format_cwd_label_with_home(cwd: &str, home: Option<&str>) -> String {
     let tail_start = components.len().saturating_sub(2);
     let tail = components[tail_start..].join("/");
 
-    if is_home_relative {
-        if tail.is_empty() {
-            "~".to_string()
-        } else {
-            format!("~/{tail}")
-        }
+    if is_home_relative && tail.is_empty() {
+        "~".to_string()
     } else {
         tail
     }
@@ -51,13 +49,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn home_relative_path_gets_tilde_and_last_two_components() {
+    fn home_relative_path_shows_last_two_components_without_tilde() {
         assert_eq!(
             format_cwd_label_with_home(
                 "/Users/example/projects/shiibar",
                 Some("/Users/example")
             ),
-            "~/projects/shiibar"
+            "projects/shiibar"
         );
     }
 
@@ -65,7 +63,7 @@ mod tests {
     fn home_relative_path_with_one_component_shows_what_it_has() {
         assert_eq!(
             format_cwd_label_with_home("/Users/example/shiibar", Some("/Users/example")),
-            "~/shiibar"
+            "shiibar"
         );
     }
 
