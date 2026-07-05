@@ -480,7 +480,7 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 
 ## 5. リポジトリ構成(monorepo)
 
-全マイルストーン完了時点の構成。`(未作成)` の項目はまだリポジトリに存在しない(ライセンスと README は本節末尾)。
+全マイルストーン完了時点の構成。
 
 ```
 shiibar/
@@ -509,12 +509,14 @@ shiibar/
 │   ├── menubar-design.html # メニューバー確定デザイン(見た目の正)
 │   ├── DEVELOPMENT.md      # 開発メモ(手順・運用。実装の進行に合わせて追記)
 │   └── tasks/              # マイルストーンごとの実装指示書(M1.md, …)
+├── .github/workflows/ci.yml       # push / PR で cargo test / clippy / swift build / swift test + cargo-deny(§10)
+├── deny.toml                       # cargo-deny 設定(advisories / licenses / bans。§10)
 ├── CLAUDE.md
-├── LICENSE-MIT / LICENSE-APACHE   # (未作成)
+├── LICENSE-MIT / LICENSE-APACHE
 └── README.md
 ```
 
-ライセンス: MIT OR Apache-2.0(デュアル)。ライセンスファイルは公開前に追加する。
+ライセンス: MIT OR Apache-2.0(デュアル)。
 
 ## 6. マイルストーン
 

@@ -1,0 +1,46 @@
+# CI: the same checks CLAUDE.md lists as the local commands, on every push
+# and PR, plus the supply-chain checks DESIGN.md §10 requires from the
+# start (--locked enforces the committed Cargo.lock; cargo-deny covers
+# advisories / licenses / bans via deny.toml).
+#
+# The build/test job needs macOS: the app build (swift build) and swift
+# test require it, and GitHub's macOS images ship the full Xcode that
+# swift test needs. The pinned Rust toolchain comes from
+# rust-toolchain.toml — rustup installs it automatically on the first
+# cargo invocation. cargo-deny runs as a separate Linux job because the
+# official action is a Docker action (Linux-only) and the check is
+# platform-independent.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Clippy (warning-free)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: App build
+        run: swift build
+        working-directory: app
+
+      - name: App tests
+        run: swift test
+        working-directory: app
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo-deny (advisories / licenses / bans)
+        uses: EmbarkStudios/cargo-deny-action@v2
