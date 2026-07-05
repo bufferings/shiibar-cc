@@ -107,9 +107,19 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   `report.sh` を配置。最後にアプリを 1 回起動する(Login Item として自己登録。§4.5)。
   `~/.claude/settings.json` への自動マージはしない(既存設定を壊すリスクを避けるため。
   `hooks/settings-snippet.json` の中身を表示するので手で貼るか、jq があれば案内されるコマンドで確認しながらマージする)
-- `scripts/uninstall.sh`: `.app`(Login Item 登録ごと)と `~/.local/bin/` に置いたものを削除し、
-  settings.json から hooks を外す案内を表示する
-  (`~/.local/state/shiibar-cc/` と署名 ID は消さない。要らなければ表示される手順で手動で消す)
+- `scripts/uninstall.sh`: 2 段階
+  - 引数なし: `.app`(Login Item 登録ごと)と `~/.local/bin/` に置いたシンボリックリンク・
+    `report.sh` を削除する。settings.json に `report.sh` への参照が残っていれば手動で外す案内を
+    表示するのみ(自動編集はしない)。state dir・署名 ID・TCC・通知許可はそのまま残す
+    (入れ直しを前提にした軽い撤去)
+  - `--purge`: 上記に加えてフルの撤去を行う。`~/.claude/settings.json` から `report.sh` を指す
+    hooks エントリだけを jq で取り除き(他の hooks・設定は保持、書き換え前に
+    `settings.json.bak` へバックアップ。ファイルが無ければ何もせず終了し、jq が無い・
+    JSON が壊れている場合は自動編集をスキップして手動での案内を表示する)、state dir
+    (`SHIIBAR_CC_STATE_DIR` の既定パス)を削除し、`defaults delete cc.shiibar.menubar`・
+    ローカル署名 ID(`shiibar-cc-local-signing`、`scripts/lib/signing.sh`)の
+    `security delete-certificate`・`tccutil reset AppleEvents cc.shiibar.menubar` を実行する。
+    通知許可だけはプログラムから削除できないため、システム設定 → 通知 からの手動削除を案内して終わる
 - `scripts/dev-reload.sh`: 日常のホットスワップ。デバッグビルド(cargo + swift)を作り、
   インストール済みアプリを Quit し、daemon が確実に終了するのをスクリプト側で保証してから
   (Quit 経由の shutdown 送信は投げっぱなしでプロセス終了と競合して失われ得るため、
