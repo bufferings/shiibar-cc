@@ -58,6 +58,18 @@ pub fn exclude_running(sessions: Vec<SessionRecord>, running_agents: &[Agent]) -
         .collect()
 }
 
+/// Keep only candidates whose Claude conversation file exists (§4.4/§7-3:
+/// subagent sessions land in history but have no conversation file, so
+/// `claude --resume` on them fails with "No conversation found"). Fail-open
+/// per candidate: an unresolvable project dir keeps the candidate (see
+/// `conversations::is_resumable`). Order is preserved.
+pub fn filter_resumable(candidates: Vec<Candidate>, projects_root: &Path) -> Vec<Candidate> {
+    candidates
+        .into_iter()
+        .filter(|c| crate::conversations::is_resumable(projects_root, &c.cwd, &c.session_id))
+        .collect()
+}
+
 // ---------------------------------------------------------------------
 // Pure: candidate line formatting / selection-result interpretation
 // ---------------------------------------------------------------------
@@ -197,17 +209,23 @@ fn now_epoch_secs() -> i64 {
 }
 
 /// `resume` (DESIGN.md §4.4): fetch history (`sessions`) + running agents
-/// (`list`), exclude running sessions from the candidates, let the caller
-/// pick one via `selection_runner`, and `open_tab` a `claude --resume
-/// <session_id>` in its `cwd` (falling back to `home_dir` with a warning if
-/// that `cwd` no longer exists on disk).
+/// (`list`), exclude running sessions from the candidates, keep only
+/// candidates with an existing Claude conversation file (fail-open on an
+/// unresolvable project dir; `projects_root` is injectable for tests,
+/// production passes `conversations::default_projects_root`), let the
+/// caller pick one via `selection_runner`, and `open_tab` a `claude
+/// --resume <session_id>` in its `cwd` (falling back to `home_dir` with a
+/// warning if that `cwd` no longer exists on disk).
 ///
 /// Exit codes (§4.4 common rule): 0 success / 1 connection or internal
-/// error / **2 no candidates (empty history or all running) or aborted
-/// selection** (reason on stderr) / 3 osascript TCC denial.
+/// error / **2 no candidates (empty history, all running, or no
+/// conversation file) or aborted selection** (reason on stderr) / 3
+/// osascript TCC denial. Ctrl-C (SIGINT) is deliberately not handled —
+/// POSIX default behavior (130), §4.4.
 pub fn run_resume(
     socket_path: &Path,
     home_dir: &Path,
+    projects_root: &Path,
     selection_runner: &dyn SelectionRunner,
     script_runner: &dyn AppleScriptRunner,
 ) -> (i32, Option<String>) {
@@ -226,13 +244,13 @@ pub fn run_resume(
         Err(e) => return (exitcode::ERROR, Some(format!("shiibar-cc resume: {e}"))),
     };
 
-    let candidates = exclude_running(sessions, &agents);
+    let candidates = filter_resumable(exclude_running(sessions, &agents), projects_root);
     if candidates.is_empty() {
         return (
             exitcode::NOT_FOUND,
             Some(
-                "shiibar-cc resume: no resumable sessions (history is empty, or every \
-                 known session is currently running)"
+                "shiibar-cc resume: no resumable sessions (history is empty, every \
+                 known session is currently running, or none has a conversation file)"
                     .to_string(),
             ),
         );
@@ -512,6 +530,64 @@ mod tests {
         }
     }
 
+    /// A projects root whose project dirs never exist: every candidate is
+    /// kept by the fail-open rule, so tests that aren't about the
+    /// conversation-file filter see pre-filter behavior unchanged.
+    fn empty_projects_root() -> std::path::PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        // Leak the TempDir so the path stays alive for the test's duration.
+        let path = dir.path().to_path_buf();
+        std::mem::forget(dir);
+        path
+    }
+
+    // ---- filter_resumable (conversation-file rule, §4.4/§7-3) ----
+
+    fn candidate(session_id: &str, cwd: &str) -> Candidate {
+        Candidate {
+            session_id: session_id.to_string(),
+            cwd: cwd.to_string(),
+            last_status: Status::Idle,
+            last_seen: 10,
+        }
+    }
+
+    #[test]
+    fn filter_resumable_keeps_candidates_with_a_conversation_file() {
+        let root = tempfile::tempdir().unwrap();
+        let project_dir = root.path().join("-proj-a");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join("s-real.jsonl"), "{}\n").unwrap();
+
+        let kept = filter_resumable(vec![candidate("s-real", "/proj/a")], root.path());
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].session_id, "s-real");
+    }
+
+    #[test]
+    fn filter_resumable_excludes_candidates_missing_their_conversation_file() {
+        // The subagent case (§7-3): the project dir exists (parent has a
+        // conversation) but this session_id has no .jsonl.
+        let root = tempfile::tempdir().unwrap();
+        let project_dir = root.path().join("-proj-a");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join("s-parent.jsonl"), "{}\n").unwrap();
+
+        let kept = filter_resumable(
+            vec![candidate("s-parent", "/proj/a"), candidate("s-subagent", "/proj/a")],
+            root.path(),
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].session_id, "s-parent");
+    }
+
+    #[test]
+    fn filter_resumable_fails_open_when_the_project_dir_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let kept = filter_resumable(vec![candidate("s-1", "/proj/never-seen")], root.path());
+        assert_eq!(kept.len(), 1, "unresolvable project dir must keep the candidate (§4.4)");
+    }
+
     #[test]
     fn run_resume_exits_2_when_history_is_empty() {
         let daemon = FakeDaemon::start(
@@ -527,7 +603,7 @@ mod tests {
                 stderr: String::new(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::NOT_FOUND);
         assert!(msg.unwrap().contains("no resumable sessions"));
     }
@@ -547,9 +623,42 @@ mod tests {
                 stderr: String::new(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::NOT_FOUND);
         assert!(msg.unwrap().contains("no resumable sessions"));
+    }
+
+    #[test]
+    fn run_resume_exits_2_when_no_candidate_has_a_conversation_file() {
+        // History has one non-running session, but its project dir exists
+        // WITHOUT its .jsonl (the subagent shape, §7-3) — after the
+        // conversation-file filter there are zero candidates, and the
+        // stderr message names the no-conversation case.
+        let daemon = FakeDaemon::start(
+            r#"{"ok":true,"sessions":[{"session_id":"s-subagent","cwd":"/proj/a","last_status":"idle","last_seen":10}]}"#,
+            r#"{"ok":true,"agents":[]}"#,
+        );
+        let home = tempfile::tempdir().unwrap();
+        let projects_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(projects_root.path().join("-proj-a")).unwrap();
+
+        let selection = AbortedSelection; // must never be consulted
+        let script = FakeScript {
+            output: AppleScriptOutput {
+                success: true,
+                stdout: "OK\n".to_string(),
+                stderr: String::new(),
+            },
+        };
+        let (code, msg) = run_resume(
+            &daemon.sock_path,
+            home.path(),
+            projects_root.path(),
+            &selection,
+            &script,
+        );
+        assert_eq!(code, exitcode::NOT_FOUND);
+        assert!(msg.unwrap().contains("conversation file"));
     }
 
     #[test]
@@ -567,7 +676,7 @@ mod tests {
                 stderr: String::new(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::NOT_FOUND);
         assert!(msg.unwrap().contains("aborted"));
     }
@@ -593,7 +702,7 @@ mod tests {
                 stderr: String::new(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::OK, "msg={msg:?}");
     }
 
@@ -620,7 +729,7 @@ mod tests {
                 stderr: String::new(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::OK, "msg={msg:?}");
     }
 
@@ -652,7 +761,7 @@ mod tests {
         let selection = FakeSelection {
             line: Mutex::new(Some(selected_line)),
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &PanicScript);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &PanicScript);
         assert_eq!(code, exitcode::ERROR);
         assert!(msg.unwrap().contains("did not match a candidate"));
     }
@@ -674,7 +783,7 @@ mod tests {
         let selection = FakeSelection {
             line: Mutex::new(Some("   ".to_string())),
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &PanicScript);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &PanicScript);
         assert_eq!(code, exitcode::ERROR);
         assert!(msg.unwrap().contains("could not parse"));
     }
@@ -702,7 +811,7 @@ mod tests {
                 stderr: "Not authorized to send Apple events to iTerm2. (-1743)".to_string(),
             },
         };
-        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &selection, &script);
+        let (code, msg) = run_resume(&daemon.sock_path, home.path(), &empty_projects_root(), &selection, &script);
         assert_eq!(code, exitcode::TCC_DENIED);
         assert!(msg.unwrap().contains("automation permission"));
     }
@@ -722,6 +831,7 @@ mod tests {
         let (code, msg) = run_resume(
             &dir.path().join("no-such-socket"),
             home.path(),
+            &empty_projects_root(),
             &selection,
             &script,
         );

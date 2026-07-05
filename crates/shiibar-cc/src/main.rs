@@ -190,9 +190,11 @@ fn cmd_resume(_args: &[String]) -> i32 {
         } else {
             Box::new(shiibar_cc::resume_cmd::NumberedPromptRunner)
         };
+    let projects_root = shiibar_cc::conversations::default_projects_root(&home_dir);
     let (code, err) = shiibar_cc::resume_cmd::run_resume(
         &shiibar_cc_client::resolve_socket_path(),
         &home_dir,
+        &projects_root,
         selection_runner.as_ref(),
         &script_runner,
     );
