@@ -1,0 +1,9 @@
+{
+  "session_id": "5fd63692-695e-4621-80d2-517b96d43856",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/5fd63692-695e-4621-80d2-517b96d43856.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "ec4b72b8-6faa-471b-a4b6-177b776ef23d",
+  "hook_event_name": "Notification",
+  "message": "Elicitation response for server \"elicit-test\": cancel",
+  "notification_type": "elicitation_response"
+}

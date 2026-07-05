@@ -1,0 +1,8 @@
+{
+  "session_id": "0f35e7c1-6aa6-4e12-b106-cbd001f59d6a",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/0f35e7c1-6aa6-4e12-b106-cbd001f59d6a.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "04700f79-f0c8-4900-a377-98d48491c4ad",
+  "hook_event_name": "SessionEnd",
+  "reason": "prompt_input_exit"
+}

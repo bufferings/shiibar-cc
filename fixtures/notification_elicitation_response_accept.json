@@ -1,0 +1,9 @@
+{
+  "session_id": "0f35e7c1-6aa6-4e12-b106-cbd001f59d6a",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/0f35e7c1-6aa6-4e12-b106-cbd001f59d6a.jsonl",
+  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "prompt_id": "5b66240c-d765-4984-a853-1cb1cecee0e7",
+  "hook_event_name": "Notification",
+  "message": "Elicitation response for server \"elicit-test\": accept",
+  "notification_type": "elicitation_response"
+}

@@ -138,6 +138,102 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
     daemon.shutdown_and_join().await;
 }
 
+/// The MCP-elicitation and prompt_input_exit captures (fixtures/README.md),
+/// replayed against §3.4: an `elicitation_dialog` notification is
+/// waiting-inducing (same bucket as `permission_prompt`), the
+/// `elicitation_response` notifications are ignored (status/flag columns
+/// untouched), and a `prompt_input_exit` SessionEnd removes the entry like
+/// any other SessionEnd.
+#[tokio::test]
+async fn elicitation_and_prompt_input_exit_fixtures_replay() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = TestDaemon::start(dir.path(), Arc::new(SystemClock)).await;
+
+    let mut sub = daemon.subscribe().await;
+    match sub.next_event().await {
+        SubscribeEvent::Snapshot { agents } => assert!(agents.is_empty()),
+        other => panic!("expected empty snapshot, got {other:?}"),
+    }
+
+    // 1. SessionStart(startup) -> registers idle (a registered entry for the
+    //    elicitation transitions below to act on).
+    send(&daemon, "session_start_startup.json", HookEvent::SessionStart).await;
+    match sub.next_event().await {
+        SubscribeEvent::StatusChanged { agent } => {
+            assert_eq!(agent.target, TARGET);
+            assert_eq!(agent.status, Status::Idle);
+            assert!(!agent.unreviewed);
+        }
+        other => panic!("expected status_changed(idle), got {other:?}"),
+    }
+
+    // 2. Notification(elicitation_dialog) -> waiting, message set, unreviewed
+    //    raised — the same waiting-inducing bucket as permission_prompt
+    //    (§3.4; transitions.rs `apply_notification`).
+    send(
+        &daemon,
+        "notification_elicitation_dialog.json",
+        HookEvent::Notification,
+    )
+    .await;
+    match sub.next_event().await {
+        SubscribeEvent::StatusChanged { agent } => {
+            assert_eq!(agent.status, Status::Waiting);
+            assert_eq!(agent.message.as_deref(), Some("Claude Code needs your input"));
+            assert!(agent.unreviewed);
+        }
+        other => panic!("expected status_changed(waiting), got {other:?}"),
+    }
+
+    // 3-4. Notification(elicitation_response accept / cancel) are ignored for
+    //    the status and flag columns (§3.4 ignored family): status stays
+    //    waiting, the flag stays raised, and the waiting message is NOT
+    //    overwritten. The report still refreshes common attributes
+    //    (session_id / cwd / last_seen, §3.6); each of these captured
+    //    fixtures carries a session_id that differs from the current entry's,
+    //    so the daemon re-broadcasts the (unchanged) status — which is what
+    //    lets us read a deterministic event here and assert the columns are
+    //    untouched.
+    for fixture in [
+        "notification_elicitation_response_accept.json",
+        "notification_elicitation_response_cancel.json",
+    ] {
+        send(&daemon, fixture, HookEvent::Notification).await;
+        match sub.next_event().await {
+            SubscribeEvent::StatusChanged { agent } => {
+                assert_eq!(agent.status, Status::Waiting, "{fixture}: status untouched");
+                assert!(agent.unreviewed, "{fixture}: flag untouched");
+                assert_eq!(
+                    agent.message.as_deref(),
+                    Some("Claude Code needs your input"),
+                    "{fixture}: an ignored notification must not overwrite the waiting message"
+                );
+            }
+            other => panic!("{fixture}: expected status_changed, got {other:?}"),
+        }
+    }
+
+    // 5. SessionEnd(prompt_input_exit) -> removed. SessionEnd deletes a
+    //    registered entry regardless of `reason` (transitions.rs
+    //    `apply_session_end` never inspects it), and §4.2 puts reason
+    //    session_end on the wire.
+    send(
+        &daemon,
+        "session_end_prompt_input_exit.json",
+        HookEvent::SessionEnd,
+    )
+    .await;
+    match sub.next_event().await {
+        SubscribeEvent::AgentRemoved { target, reason } => {
+            assert_eq!(target, TARGET);
+            assert_eq!(reason, RemovalReason::SessionEnd);
+        }
+        other => panic!("expected agent_removed, got {other:?}"),
+    }
+
+    daemon.shutdown_and_join().await;
+}
+
 async fn send(daemon: &TestDaemon, fixture: &str, event: HookEvent) {
     let raw = load_fixture(fixture);
     let payload = build_report(event, &raw, Some(ITERM_SESSION_ID), 1_700_000_000)

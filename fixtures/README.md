@@ -1,8 +1,10 @@
 # fixtures/ — hook payload provenance
 
 Real Claude Code hook payloads, captured on a live machine on 2026-07-05
-(a dedicated capture session driving each event on purpose; see
-DESIGN.md §7-3 for what the capture campaign verified). The daemon's
+(a dedicated capture session driving each event on purpose, including an
+MCP elicitation flow to capture the `elicitation_dialog` /
+`elicitation_response` notifications and a `prompt_input_exit` SessionEnd;
+see DESIGN.md §7-3 for what the capture campaign verified). The daemon's
 integration tests (`crates/shiibar-ccd/tests/fixtures_replay.rs` and
 friends) replay these through the same extraction pipeline the real
 `shiibar-cc report` uses.
@@ -32,11 +34,15 @@ forward-compat ignoring works):
 | `session_start_compact.json` | captured 2026-07-05 (`SessionStart-112222-2839`, fired by `/compact`) |
 | `session_end.json` | captured 2026-07-05 (`SessionEnd-112233-2848`, `reason: "other"`) |
 | `session_end_clear.json` | captured 2026-07-05 (`SessionEnd-112046-2735`, `reason: "clear"` — the SessionEnd half of a `/clear`) |
+| `session_end_prompt_input_exit.json` | captured 2026-07-05 (`SessionEnd-120421-6780`, `reason: "prompt_input_exit"`) |
 | `user_prompt_submit.json` | captured 2026-07-05 (`UserPromptSubmit-111518-2362`; prompt translated) |
 | `post_tool_use.json` | captured 2026-07-05 (`PostToolUse-111523-2477`, Bash `ls`) |
 | `post_tool_use_failure.json` | captured 2026-07-05 (`PostToolUseFailure-111547-2534`, Read of a nonexistent file). Note: real PostToolUseFailure payloads carry the failure text in an `error` field and have NO `tool_response` (all three captures agree); the Read capture was chosen over the Bash ones because its `error` text is self-contained |
 | `notification_permission_prompt.json` | captured 2026-07-05 (`Notification-111544-2527`) |
 | `notification_idle_prompt.json` | captured 2026-07-05 (`Notification-111755-2661`) |
+| `notification_elicitation_dialog.json` | captured 2026-07-05 (`Notification-121243-7718`, `notification_type: "elicitation_dialog"`) |
+| `notification_elicitation_response_accept.json` | captured 2026-07-05 (`Notification-120358-6700`, `notification_type: "elicitation_response"`, accept) |
+| `notification_elicitation_response_cancel.json` | captured 2026-07-05 (`Notification-121314-7751`, `notification_type: "elicitation_response"`, cancel) |
 | `notification_auth_success.json` | **hand-written, pending capture** — no `auth_success` notification was observed in the 2026-07-05 capture session |
 | `stop_no_background_tasks.json` | captured 2026-07-05 (`Stop-111529-2484`, `background_tasks: []`; message translated) |
 | `stop_with_background_tasks.json` | captured 2026-07-05 (`Stop-111655-2638`, one real background task: `id`/`type`/`status`/`description`/`command`; message translated) |
