@@ -108,26 +108,9 @@ private struct TopBar: View {
                 // highlighted-row style on the open popup itself — no
                 // custom hover handling for the popup items here.
                 Button("Rescan") { state.runReconcile(showFeedback: true) }
-                // "Start at Login" reads `SMAppService.mainApp.status`
-                // fresh on every render (DESIGN.md §4.5, M5 T3: no cached
-                // source of truth, so it can't drift from System Settings'
-                // own Login Items UI). Toggling calls register()/
-                // unregister() directly. The refresh trigger for "fresh on
-                // every render" is the same one that already drives every
-                // other per-open dropdown value: `state.dropdownOpenedAt`
-                // changing is a `@Published` write on this `@ObservedObject`,
-                // which re-invokes this whole body (including this Menu's
-                // content closure) on each dropdown open — see
-                // `AppState.observeDropdownOpen`.
-                Toggle("Start at Login", isOn: Binding(
-                    get: { state.loginItemEnabled },
-                    set: { _ in state.toggleLoginItem() }
-                ))
-                // "Sort by" (§4.5, M5 T9): three radio-style items between
-                // Start at Login and Mute Sound (menubar-design.html's
-                // v-menu bullet ordering). A `Picker` with `.inline` style
-                // inside a `Menu` is what SwiftUI/AppKit render as a
-                // checkmark-on-the-active-item radio group.
+                // "Sort by" (§4.5, M5 T9): a `Picker` with `.inline` style
+                // inside a `Menu` renders as a checkmark-on-the-active-item
+                // radio group.
                 Menu("Sort by") {
                     Picker("Sort by", selection: Binding(
                         get: { state.sortMode },
@@ -139,26 +122,48 @@ private struct TopBar: View {
                     }
                     .pickerStyle(.inline)
                 }
-                // A Toggle inside a Menu renders the native menu checkmark
-                // while muted (the spec's "checkmark while muted").
-                Toggle("Mute Sound", isOn: Binding(
-                    get: { state.muted },
-                    set: { _ in state.toggleMute() }
-                ))
+                // Rarely-touched switches live one level down (§4.5:
+                // Settings submenu below Sort by).
+                Menu("Settings") {
+                    // "Start at Login" reads `SMAppService.mainApp.status`
+                    // fresh on every render (DESIGN.md §4.5, M5 T3: no
+                    // cached source of truth, so it can't drift from System
+                    // Settings' own Login Items UI). The refresh trigger is
+                    // `state.dropdownOpenedAt`'s @Published write re-invoking
+                    // this body on each dropdown open.
+                    Toggle("Start at Login", isOn: Binding(
+                        get: { state.loginItemEnabled },
+                        set: { _ in state.toggleLoginItem() }
+                    ))
+                    // A Toggle inside a Menu renders the native menu
+                    // checkmark while muted.
+                    Toggle("Mute Sound", isOn: Binding(
+                        get: { state.muted },
+                        set: { _ in state.toggleMute() }
+                    ))
+                }
                 Divider()
                 Button("Quit") { state.quit() }
             } label: {
-                // T2 follow-up (M5): the chip's text color never changes on
-                // hover/press — only the background does, below.
+                // The chip IS the label: a fixed 34x24 rounded rect with
+                // the glyph frame-centered inside it. Padding-based sizing
+                // on a borderlessButton Menu label proved unreliable
+                // on-device (the style imposes its own label layout and the
+                // glyph ended up floating top-left), so the label carries
+                // its own explicit size and background instead.
+                // T2 follow-up (M5): text color never changes on
+                // hover/press — only the background darkens.
                 Text("⌄")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     // U+2304 sits low in its em box; nudge it up so it
-                    // reads centered in the chip (menubar-design.html's
-                    // .vbtn look: a rounded chip with the glyph centered).
+                    // reads optically centered.
                     .offset(y: -1.5)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
+                    .frame(width: 34, height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.gray.opacity(chipBackgroundOpacity))
+                    )
             }
             // The macOS Menu draws its own pull-down disclosure indicator
             // next to the label, which stacked a second chevron under our ⌄
@@ -179,10 +184,6 @@ private struct TopBar: View {
             // pressed state through) — `.simultaneousGesture` only OBSERVES
             // the press, leaving Menu's own tap gesture (which opens the
             // popup) intact.
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.gray.opacity(chipBackgroundOpacity))
-            )
             .onHover { isHoveringVButton = $0 }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)

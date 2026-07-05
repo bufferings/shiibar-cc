@@ -378,9 +378,9 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
      空グループは非表示)+ グループごとのカード。並びは waiting → working → idle、
      unreviewed を各グループ内で上に
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
-- 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)・
-  ログイン時起動(Start at Login、チェック表示)・並び替え(Sort by)・
-  音のミュート(Mute Sound)・**Quit** は最上部の **⌄ メニュー**に置く。UI 文言は英語。
+- 最上部の **⌄ メニュー**の構成: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
+  並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(ログイン時起動 = Start at Login・
+  音のミュート = Mute Sound。滅多に触らないスイッチ類の置き場)/ **Quit**。UI 文言は英語。
   Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **表示ラベル**: cwd をホーム配下なら `~` 起点にし、末尾 2 要素を表示(足りなければあるだけ)。
   ラベルの重複はそのまま表示する(並び順が安定していれば足りる。区別の工夫は §8.10)。
