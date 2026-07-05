@@ -119,7 +119,11 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
      内のアプリ記録に**バンドルパス**を保持しており、.app をリネームするとこのパスが旧名を指したまま残る
      (許可の照合は署名要件なので通知は届き続け、アイコンだけ壊れる。再起動でも直らない。実測 2026-07-05)。
      対処: `defaults export com.apple.ncprefs` → 旧パスを新パスに置換 → `defaults import` →
-     `killall usernoted` → アプリ再起動。plist を直接編集しない(cfprefsd のキャッシュに負ける)
+     `killall usernoted` → アプリ再起動。plist を直接編集しない(cfprefsd のキャッシュに負ける)。
+     なお .app のリネーム(= パスが変わる)でも、**旧パスのバンドルを先に削除してから**同一署名・
+     同一 bundle id の新バンドルを**新パスで**起動した場合は、通知システムが ncprefs のパスを
+     自動で新パスに追従させることがあり、この手当てが不要なことも(実測 2026-07-05)。
+     書き換え前に `defaults export com.apple.ncprefs - | grep -o 'shiibar[^<]*'` で現状を確認するとよい
 
 ## リリース・インストール
 
