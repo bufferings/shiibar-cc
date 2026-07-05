@@ -17,7 +17,7 @@ use support::TestDaemon;
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
 
 async fn send(daemon: &TestDaemon, event: HookEvent, raw: serde_json::Value) {
-    let payload = build_report(event, &raw, Some(ITERM_SESSION_ID), 1)
+    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1)
         .expect("extraction should succeed")
         .expect("must not be dropped");
     daemon.report(payload).await;

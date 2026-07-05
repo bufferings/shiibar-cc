@@ -24,7 +24,7 @@ async fn manual_remove_deletes_the_entry_and_broadcasts_reason_remove() {
 
     // Register an entry via a real hook report.
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some(ITERM_SESSION_ID), 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;

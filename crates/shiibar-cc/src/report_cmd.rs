@@ -43,15 +43,27 @@ pub fn run(event_arg: Option<String>, socket_path: &Path) {
         }
     };
 
-    // Target generation rule (§2/§4.1): the UUID half of $ITERM_SESSION_ID
-    // (`wNtNpN:UUID`). No $ITERM_SESSION_ID (or one with no `:`) means this
-    // session isn't in iTerm2 at all (§8.11) — build_report signals that
-    // with `Ok(None)`, and the report is dropped without ever touching the
-    // socket (still exit 0, per this command's always-succeed contract).
+    // Target generation rule (§4.1): iTerm2 detection requires BOTH
+    // $TERM_PROGRAM == "iTerm.app" AND $ITERM_SESSION_ID (`wNtNpN:UUID`) —
+    // $ITERM_SESSION_ID alone isn't enough, since iTerm2-launched apps (e.g.
+    // VS Code's integrated terminal) inherit it while overwriting
+    // $TERM_PROGRAM (§7-1). Either missing means this session isn't in
+    // iTerm2 at all (§8.11) — build_report signals that with `Ok(None)`,
+    // and the report is dropped without ever touching the socket (still
+    // exit 0, per this command's always-succeed contract). This is the only
+    // place these two env vars are read; the classification rule itself
+    // lives entirely in build_report.
+    let term_program = std::env::var("TERM_PROGRAM").ok();
     let iterm_session_id = std::env::var("ITERM_SESSION_ID").ok();
     let now = now_epoch_secs();
 
-    let payload = match extract::build_report(event, &raw, iterm_session_id.as_deref(), now) {
+    let payload = match extract::build_report(
+        event,
+        &raw,
+        term_program.as_deref(),
+        iterm_session_id.as_deref(),
+        now,
+    ) {
         Ok(Some(p)) => p,
         Ok(None) => return, // outside iTerm2: drop, no fallback target (§8.11)
         Err(e) => {

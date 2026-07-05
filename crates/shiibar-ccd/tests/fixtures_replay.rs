@@ -236,7 +236,7 @@ async fn elicitation_and_prompt_input_exit_fixtures_replay() {
 
 async fn send(daemon: &TestDaemon, fixture: &str, event: HookEvent) {
     let raw = load_fixture(fixture);
-    let payload = build_report(event, &raw, Some(ITERM_SESSION_ID), 1_700_000_000)
+    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1_700_000_000)
         .expect("fixture should extract cleanly")
         .expect("fixture + ITERM_SESSION_ID should never be dropped");
     daemon.report(payload).await;

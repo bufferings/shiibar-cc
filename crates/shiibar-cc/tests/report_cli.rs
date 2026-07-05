@@ -26,6 +26,7 @@ fn run_report(
     event: &str,
     stdin_bytes: &[u8],
     state_dir: &std::path::Path,
+    term_program: Option<&str>,
     iterm_session_id: Option<&str>,
 ) -> (i32, Duration) {
     let mut cmd = Command::new(bin());
@@ -35,10 +36,17 @@ fn run_report(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    match iterm_session_id {
-        Some(v) => cmd.env("ITERM_SESSION_ID", v),
-        None => cmd.env_remove("ITERM_SESSION_ID"),
-    };
+    // Always clear both first, regardless of what the test wants set: the
+    // child must never inherit the *developer's own* terminal's TERM_PROGRAM
+    // / ITERM_SESSION_ID (§4.1) — otherwise this test's outcome would depend
+    // on whether it happens to run inside iTerm2.
+    cmd.env_remove("TERM_PROGRAM").env_remove("ITERM_SESSION_ID");
+    if let Some(v) = term_program {
+        cmd.env("TERM_PROGRAM", v);
+    }
+    if let Some(v) = iterm_session_id {
+        cmd.env("ITERM_SESSION_ID", v);
+    }
 
     let start = Instant::now();
     let mut child = cmd.spawn().expect("spawn shiibar-cc");
@@ -56,7 +64,7 @@ fn run_report(
 fn exits_0_when_daemon_is_absent() {
     let dir = tempfile::tempdir().unwrap();
     let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
-    let (code, elapsed) = run_report("SessionStart", &stdin, dir.path(), None);
+    let (code, elapsed) = run_report("SessionStart", &stdin, dir.path(), None, None);
     assert_eq!(code, 0);
     assert!(
         elapsed < Duration::from_secs(3),
@@ -67,7 +75,7 @@ fn exits_0_when_daemon_is_absent() {
 #[test]
 fn exits_0_on_malformed_stdin() {
     let dir = tempfile::tempdir().unwrap();
-    let (code, _) = run_report("SessionStart", b"not json at all", dir.path(), None);
+    let (code, _) = run_report("SessionStart", b"not json at all", dir.path(), None, None);
     assert_eq!(code, 0);
 }
 
@@ -125,6 +133,7 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
         "UserPromptSubmit",
         &stdin,
         dir.path(),
+        Some("iTerm.app"),
         Some("w0t0p0:D2DA6A1F-TEST"),
     );
     assert_eq!(code, 0);
@@ -147,9 +156,10 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     assert_eq!(payload.session_id, "f27c326c-213e-4728-a79c-f0f8f3afa0f2");
 }
 
-/// §8.11: outside iTerm2 (no `$ITERM_SESSION_ID`), there is no fallback
-/// target — the report is dropped before ever touching the socket. Still
-/// exits 0 (this command's always-succeed contract, §4.4).
+/// §8.11: outside iTerm2 (no `$ITERM_SESSION_ID`, even with `$TERM_PROGRAM`
+/// correctly set to `iTerm.app`), there is no fallback target — the report
+/// is dropped before ever touching the socket. Still exits 0 (this
+/// command's always-succeed contract, §4.4).
 #[test]
 fn drops_the_report_without_connecting_when_there_is_no_iterm_session_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -158,7 +168,7 @@ fn drops_the_report_without_connecting_when_there_is_no_iterm_session_id() {
     listener.set_nonblocking(true).unwrap();
 
     let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
-    let (code, _) = run_report("SessionStart", &stdin, dir.path(), None);
+    let (code, _) = run_report("SessionStart", &stdin, dir.path(), Some("iTerm.app"), None);
     assert_eq!(code, 0);
 
     // Bounded, but generous, window to prove a connection *never* arrives —
@@ -183,6 +193,78 @@ fn drops_the_report_without_connecting_when_there_is_no_iterm_session_id() {
 fn drops_the_report_when_iterm_session_id_has_no_colon() {
     let dir = tempfile::tempdir().unwrap();
     let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
-    let (code, _) = run_report("SessionStart", &stdin, dir.path(), Some("not-the-right-shape"));
+    let (code, _) = run_report(
+        "SessionStart",
+        &stdin,
+        dir.path(),
+        Some("iTerm.app"),
+        Some("not-the-right-shape"),
+    );
     assert_eq!(code, 0);
+}
+
+/// §4.1/§7-1: iTerm2-launched apps (e.g. VS Code's integrated terminal)
+/// inherit `$ITERM_SESSION_ID` from the launching iTerm2 tab verbatim but
+/// overwrite `$TERM_PROGRAM` with their own value — checking
+/// `$ITERM_SESSION_ID` alone would misclassify that inherited session as
+/// the iTerm2 tab it was launched from. Must drop, not connect.
+#[test]
+fn drops_the_report_without_connecting_when_term_program_is_not_iterm_even_with_a_session_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let sock_path = dir.path().join("shiibar-ccd.sock");
+    let listener = UnixListener::bind(&sock_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
+    let (code, _) = run_report(
+        "SessionStart",
+        &stdin,
+        dir.path(),
+        Some("vscode"),
+        Some("w0t0p0:D2DA6A1F-TEST"),
+    );
+    assert_eq!(code, 0);
+
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut connected = false;
+    while Instant::now() < deadline {
+        if listener.accept().is_ok() {
+            connected = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!connected, "a dropped report must never connect to the socket at all");
+}
+
+/// Same inheritance scenario, but `$TERM_PROGRAM` is unset entirely rather
+/// than overwritten to a known non-iTerm2 value — still must drop (§4.1
+/// checks `TERM_PROGRAM == "iTerm.app"`, not merely "TERM_PROGRAM present").
+#[test]
+fn drops_the_report_without_connecting_when_term_program_is_unset_even_with_a_session_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let sock_path = dir.path().join("shiibar-ccd.sock");
+    let listener = UnixListener::bind(&sock_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let stdin = std::fs::read(fixture_path("session_start_startup.json")).unwrap();
+    let (code, _) = run_report(
+        "SessionStart",
+        &stdin,
+        dir.path(),
+        None,
+        Some("w0t0p0:D2DA6A1F-TEST"),
+    );
+    assert_eq!(code, 0);
+
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut connected = false;
+    while Instant::now() < deadline {
+        if listener.accept().is_ok() {
+            connected = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!connected, "a dropped report must never connect to the socket at all");
 }

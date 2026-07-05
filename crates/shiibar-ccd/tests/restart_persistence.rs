@@ -26,7 +26,7 @@ async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
         assert!(matches!(sub.next_event().await, SubscribeEvent::Snapshot { .. }));
 
         let prompt = load_fixture("user_prompt_submit.json");
-        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, Some(ITERM_SESSION_ID), 1_700_000_000)
+        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1_700_000_000)
             .unwrap()
             .unwrap();
         daemon.report(payload).await;
@@ -36,7 +36,7 @@ async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
         }
 
         let notif = load_fixture("notification_permission_prompt.json");
-        let payload = build_report(HookEvent::Notification, &notif, Some(ITERM_SESSION_ID), 1_700_000_100)
+        let payload = build_report(HookEvent::Notification, &notif, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1_700_000_100)
             .unwrap()
             .unwrap();
         daemon.report(payload).await;

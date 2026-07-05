@@ -134,7 +134,7 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     // Register a session that a hook, not reconcile, put there (a ghost
     // candidate: still tracked by shiibar-ccd, but no longer live).
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some(ITERM_SESSION_ID), 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;
