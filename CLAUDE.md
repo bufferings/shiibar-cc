@@ -61,6 +61,8 @@ or hook-field fact from memory — verify against the real thing and cite how yo
 cargo build                 # workspace build
 cargo test                  # all tests
 cargo clippy --all-targets  # keep it warning-free
+(cd app && swift build)     # menu bar app build (CLT is enough)
+(cd app && swift test)      # app unit tests (requires full Xcode, not just CLT)
 SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground   # run daemon with logs
 ```
 

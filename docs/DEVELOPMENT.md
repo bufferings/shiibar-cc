@@ -19,7 +19,10 @@
 ## セットアップ
 
 - **Rust**: `rust-toolchain.toml` でバージョン固定(rustup が自動でダウンロードする)。mise は使わない
-- **Swift**: Command Line Tools のみでビルド可。Xcode 本体は不要
+- **Swift**: ビルド(`swift build`)は Command Line Tools のみで可(いずれも `app/` で実行)。
+  **`swift test` には Xcode 本体が必要**
+  (CLT のみの環境では `could not determine XCTest paths` の警告が出るが、ビルドには無害)。
+  Xcode を入れたら `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` で切り替える
 
 ## よく使うコマンド
 
