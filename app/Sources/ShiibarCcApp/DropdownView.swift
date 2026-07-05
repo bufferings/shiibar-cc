@@ -113,7 +113,7 @@ private struct TopBar: View {
                     // U+2304 sits low in its em box; nudge it up so it
                     // reads optically centered in the chip.
                     .offset(y: -1.5)
-                    .frame(width: 34, height: 24)
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(ChipButtonStyle(isHovering: isHoveringVButton))
