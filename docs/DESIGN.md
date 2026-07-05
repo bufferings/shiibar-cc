@@ -346,7 +346,8 @@ shiibar-cc doctor             # 診断(下記)
   (`~/.claude/settings.json` に report.sh が含まれるか)/ `shiibar-cc` が PATH にあるか /
   osascript の TCC 権限(無害な iTerm2 走査を 1 回試す)。「通知が来ない」の切り分けはまずこれを実行する。
   **`--json`** で同じ検査結果を `{"checks":[{"id","status"("ok"|"warn"|"fail"),"summary","hint"}]}` として
-  出力する(アプリの Setup Check が読む。exit code の意味は人間向けと同じ。判定ロジックは CLI 側が正)
+  出力する(アプリの Setup Check が読む。exit code の意味は人間向けと同じ。判定ロジックは CLI 側が正。
+  人間向け出力だけにある `[info]`(iTerm2 未起動で TCC 未検査)は JSON では `ok` に畳む — 失敗ではないため)
 
 ### 4.5 メニューバーアプリ(`app/`)
 
@@ -381,8 +382,9 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
      unreviewed を各グループ内で上に
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
 - 最上部の **⌄ メニュー**の構成: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
-  並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(ログイン時起動 = Start at Login・
-  音のミュート = Mute Sound。滅多に触らないスイッチ類の置き場)/ **Setup Check…** / **Quit**。
+  並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(Start at Login・
+  Mute Banners・Mute Sound — ミュート 2 つは ✓ = 止めている、の独立スイッチ。
+  滅多に触らないスイッチ類の置き場)/ **Setup Check…** / **Quit**。
   UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
   結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて
@@ -402,7 +404,13 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
     完了(idle+unreviewed)の立ち上がり = トースト + **音**(interruption level は active。§8.16)。
     音は waiting / 完了とも同じシステム標準音。
     同一 target で `threadIdentifier` グループ化(同じエージェントの通知が積み上がらない)。
-    メニューに**音のミュート切り替え**(UserDefaults 永続。ミュート中は waiting / 完了両方の音を止め、トーストは出す)。
+    メニューに**独立したミュート 2 スイッチ**(Settings サブメニュー。いずれも UserDefaults 永続):
+    **Mute Banners**(✓ = トーストを止める)と **Mute Sound**(✓ = 音を止める)。直交する 4 通りが
+    そのまま動く — 両方 OFF = 従来どおり / Mute Sound のみ = 無音トースト /
+    **Mute Banners のみ = 音だけモード**(トーストなしで waiting / 完了の音だけ。
+    音はアプリが直接鳴らすため Focus・おやすみモードには従わない。
+    バナーが出るときの音は従来どおり通知に付属 = Focus に従う)/ 両方 ON = 完全に静か。
+    どの組み合わせでも unreviewed フラグ・赤バッジ・トレイ表示は動き続ける(見張りは止まらない)。
     2 レベル別の通知/音の種類/オンオフを細かく制御する設定画面は post-v1(§8.14)
   - **通知の内容**: waiting = タイトル `Waiting for you — <ラベル>`、サブタイトルに `message`(待ちの種別。
     例 "Claude needs your permission")、本文に `task`(どの用件で待たれているか)。
@@ -667,6 +675,9 @@ resume は §8.15 のとおり実装後に削除した)。
 - **設定画面(post-v1)で持たせたいもの**(考慮だけしておく): waiting / 完了の**2 レベル別**に、
   通知のオン/オフ・音のオン/オフ・音の種類。UserDefaults に保存し、アプリの Preferences ウィンドウで編集
 - **再検討の条件**: ドッグフーディングで「実際にいじりたいツマミ」が見えたとき。そのツマミだけ設定画面に足す
+- 追記(2026-07-05): 最初に実際に欲しくなったツマミは「バナーと音を独立に止める」だった。設定画面ではなく
+  Settings サブメニューの独立ミュート 2 スイッチ(Mute Banners / Mute Sound。§4.5)として追加。
+  細分化は引き続き post-v1
 
 ### 8.15 resume は実装後に削除した
 
