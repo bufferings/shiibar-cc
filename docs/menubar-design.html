@@ -47,8 +47,6 @@
     background:rgba(127,127,127,.14); border-radius:7px; color:var(--menu-text2); font-size:12px; }
   .ghdr { font-size:14px; font-weight:700; color:var(--text); padding:14px 10px 6px; letter-spacing:.02em;
     display:flex; align-items:center; gap:8px; line-height:1; }
-  .gic2 { display:inline-block; width:24px; height:24px; color:var(--text); transform:translateY(-1.5px); }
-  .gic2 svg { width:100%; height:100%; display:block; }
   .gcard { background:rgba(127,127,127,.09); border-radius:9px; margin:0 4px; padding:3px; }
   .mi { display:flex; align-items:center; gap:9px; padding:8px 11px; border-radius:7px; }
   .mi.hover { background:#3478f6; color:#fff; }
@@ -143,7 +141,7 @@
     <li><strong>並び替え(⌄ の Sort by)</strong>: <strong>Newest session(既定)</strong>=
       登録時刻の新しい順(キー不変 = 行が動かない)/ <strong>Recent activity</strong> =
       最後の hook report の新しい順(並びの確定は開いた時点)/ <strong>Grouped</strong> =
-      グループ見出し <strong>Waiting / Working / Idle</strong>(トレイと同形の窓アイコン・線画 24px 相当。
+      グループ見出し <strong>Waiting / Working / Idle</strong>(太字テキストのみ。
       空グループは非表示)+ グループごとの<strong>薄い背景カード</strong>、各グループ内は未読が上。
       フラットな 2 モードでは未読を上に寄せない(並びの安定を優先)。行クリックで focus</li>
     <li><strong>ホバー / プレス</strong>: <strong>セッション行</strong>はホバーで<strong>選択色のハイライト</strong>
@@ -175,11 +173,11 @@
     <div class="mock-label">Grouped モード(Sort by で選択。見出し + カード、未読が各グループの上)</div>
     <div class="menu">
       <div class="topbar"><span class="vbtn">⌄</span></div>
-      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.2" x="1" y="1" width="14" height="14" rx="3"/><text x="4.6" y="7.4" font-size="7" text-anchor="middle" fill="currentColor">&#x2733;&#xFE0E;</text><text x="10.6" y="12.6" font-size="8.5" font-weight="700" text-anchor="middle" fill="currentColor">!</text></svg></span>Waiting</div>
+      <div class="ghdr">Waiting</div>
       <div class="gcard">
       <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
       </div>
-      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.2" x="1" y="1" width="14" height="14" rx="3"/><text x="4.6" y="7.4" font-size="7" text-anchor="middle" fill="currentColor">&#x2733;&#xFE0E;</text><circle cx="8.2" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="10.799999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="13.399999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="0.35"/></svg></span>Working</div>
+      <div class="ghdr">Working</div>
       <div class="gcard">
       <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       </div>
@@ -208,9 +206,8 @@
     <li><strong>✳ は 8 本スポークの単純な米印(U+2733 系の文字記号)に留め、Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
     <li>ドロップダウンは標準 NSMenu ではなく<strong>カスタムビュー(SwiftUI `MenuBarExtra` の window スタイル)</strong>。
       ホバー・クリック・警告行は自前実装になる(M4 の工数に織り込む)</li>
-    <li>見出しラベルはアイコンの縦センター基準 + <strong>わずかに下げる光学調整</strong>(モックでは 1.5px 相当)</li>
     <li>線の太さ・間隔・光学調整はすべて<strong>実機(Retina レンダリング)で最終決定</strong>。実機確認項目:
-      ✳ と枠の間隔が融合して見えないか / 点灯ドットの濃淡差が小サイズで読めるか / 見出し窓アイコン 24px の可読性(Grouped モード)/
+      ✳ と枠の間隔が融合して見えないか / 点灯ドットの濃淡差が小サイズで読めるか /
       赤ドットのハローが各種メニューバー色で機能するか</li>
     <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は 1 クリックで見える)</li>
   </ul>

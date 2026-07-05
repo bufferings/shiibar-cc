@@ -257,31 +257,13 @@ private struct GroupSection: View {
 
     /// The header shows the tray-shaped window glyph carrying this group's
     /// own status character (menubar-design.html: group heading = window
-    /// icon of the same shape as the tray, ~24px, + bold label).
-    private var headerGlyph: TrayGlyph {
-        switch group.status {
-        case .waiting: return .waiting
-        // The header glyph is static (menubar-design.html: no animation on
-        // the group heading), so frame 0 always — only the tray's own
-        // rendering animates (`TrayIconRenderer`).
-        case .working: return .working(frame: 0)
-        case .idle: return .idle
-        case .unknown: return .idle // unreachable, as above
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                WindowGlyphView(glyph: headerGlyph, size: 24)
-                    // Optical adjustment from the mock: the label sits on the
-                    // icon's vertical center, icon nudged up ~1.5pt.
-                    .offset(y: -1.5)
-                Text(heading)
-                    .font(.system(size: 13, weight: .bold))
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
+            // Text-only heading (dropdown redesign mock: no window icon).
+            Text(heading)
+                .font(.system(size: 13, weight: .bold))
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
 
             VStack(spacing: 1) {
                 ForEach(group.rows) { row in
@@ -334,7 +316,7 @@ private struct RowView: View {
         Button {
             state.rowClicked(target: row.target)
         } label: {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
                 // §4.5/M5 T9: the leading status symbol replaces the old
                 // row-right red dot — unreviewed now badges the symbol's
                 // top-right shoulder instead.

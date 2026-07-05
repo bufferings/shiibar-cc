@@ -5,10 +5,9 @@
 // two-layer idea as the tray's unreviewed dot) on the symbol's top-right
 // shoulder, REPLACING the old row-right red dot entirely.
 //
-// Unlike the tray (`TrayIconRenderer`), SwiftUI shapes render correctly
-// inside the dropdown's own window — see `WindowGlyphView`'s header comment
-// for why the tray alone needs the NSImage-compositing workaround. This
-// view mirrors that same "renders fine here" precedent.
+// Unlike the tray (`TrayIconRenderer`, which needs NSImage compositing
+// because the MenuBarExtra label drops SwiftUI shapes), SwiftUI shapes
+// render correctly inside the dropdown's own window.
 //
 // `AgentStatus -> RowSymbolKind` selection is the pure, tested part
 // (`RowSymbol` in ShiibarCcCore); this view is purely the drawing.
@@ -51,23 +50,24 @@ struct RowSymbolView: View {
             }
         case .working:
             SpinnerGlyph(lineWidth: size * 0.095)
-                .rotationEffect(spinAngle)
+                .rotationEffect(.degrees(isRotating ? 360 : 0))
                 .animation(
-                    spinning ? .linear(duration: 1.7).repeatForever(autoreverses: false) : .default,
-                    value: spinning
+                    isRotating ? .linear(duration: 1.7).repeatForever(autoreverses: false) : .default,
+                    value: isRotating
                 )
+                // A freshly-created view (e.g. after a sort-mode switch
+                // rebuilds the list) starts with `isRotating == false`, so
+                // the rotation re-arms in onAppear instead of relying on a
+                // `spinning` CHANGE that never comes for the new identity.
+                .onAppear { isRotating = spinning }
+                .onChange(of: spinning) { isRotating = $0 }
         }
     }
 
-    /// `rotationEffect` needs a changing value to animate toward; toggling
-    /// between 0 and a full turn with a linear repeat-forever animation
-    /// (keyed on `spinning` above) reads as continuous rotation while
-    /// `spinning` is true, and freezes in place the instant it flips false
-    /// (no half-finished spin — matches "animates only while the dropdown
-    /// is open").
-    private var spinAngle: Angle {
-        spinning ? .degrees(360) : .degrees(0)
-    }
+    /// Animation driver; `true` while this concrete view instance should
+    /// rotate. Re-derived from `spinning` on appear so the repeat-forever
+    /// animation restarts for every new view identity.
+    @State private var isRotating = false
 
     private var badge: some View {
         ZStack {

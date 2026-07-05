@@ -374,7 +374,7 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
      セッションが生きている限り行の位置が動かない(状態変化は記号だけが差し替わる)
   2. **Recent activity**: 最後の hook report(`last_report_at`)の新しい順。並びの確定は
      **開いた時点**(開いている最中に行を動かさない — 経過時間の固定と同じ流儀)
-  3. **Grouped**: グループ見出し **Waiting / Working / Idle**(トレイと同形の窓アイコン付き。
+  3. **Grouped**: グループ見出し **Waiting / Working / Idle**(太字テキストのみ。
      空グループは非表示)+ グループごとのカード。並びは waiting → working → idle、
      unreviewed を各グループ内で上に
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
@@ -437,6 +437,10 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   通知バナーやシステム設定の一覧に出る名前)は `Shiibar CC`。bundle identifier は `cc.shiibar.menubar`
   (通知・Automation の許可はこの ID に紐づく)。Swift Package 内部の
   モジュール・型のプレフィックスは `ShiibarCc`(CLI・バイナリ名は `shiibar-cc` 系)
+- **アプリアイコン**(Finder・通知バナー・⌘Tab に出る角丸タイル): 黒塗りのタイル自体を「窓」と
+  読ませ、左上に大きな ✳(タイルの 1/4 級)、右に状態記号 3 つ(◯+`!` に赤バッジ / 開いた円弧 / 空◯)を
+  縦積み。32px 以下は ✳ のみの簡略版。install スクリプトが生成スクリプトから `.icns` を作って同梱する
+  (`CFBundleIconFile`)。ジオメトリの正は生成スクリプト(リポジトリ内)
 - **同梱**: `shiibar-ccd` / `shiibar-cc` は .app の `Contents/Helpers/` に同梱する。アプリは同梱バイナリを
   絶対パスで呼ぶ(PATH 非依存)。install スクリプトが `~/.local/bin/shiibar-cc` → 同梱バイナリへの
   シンボリックリンクを張り、hooks や手動 CLI は PATH 経由で同じ実体を使う(**アプリを入れれば全部入る**)
