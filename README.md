@@ -18,8 +18,8 @@ Claude Code hooks report each session's state to a small local daemon that
 feeds the menu bar app. The tray icon shows a roll-up of every session at
 a glance:
 
-- **working** — an agent is actively running a tool or generating a response
 - **waiting** — an agent is blocked on you (a permission prompt, a question)
+- **working** — an agent is actively running a tool or generating a response
 - **idle** — an agent has nothing pending (just started, or finished its work)
 - **unreviewed** — a badge that stays lit until you've actually looked at a
   session that finished or started waiting
