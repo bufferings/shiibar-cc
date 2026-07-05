@@ -187,6 +187,11 @@ private struct TopBar: View {
             at: NSPoint(x: screenRect.minX, y: screenRect.minY - 4),
             in: nil
         )
+        // popUp is synchronous (returns when the menu closes). Opening the
+        // menu made the dropdown panel resign key, which flips
+        // `isDropdownOpen` false and pauses the row spinners; hand key
+        // status back so they resume (e.g. right after switching Sort by).
+        window.makeKey()
     }
 
     private func makeItem(_ title: String, action: Selector) -> NSMenuItem {
