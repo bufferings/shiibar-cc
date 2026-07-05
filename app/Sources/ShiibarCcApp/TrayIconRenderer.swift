@@ -26,10 +26,10 @@
 // presentation (trailing U+FE0E) so it never renders as a colored emoji
 // glyph — it must not be reshaped toward the Anthropic sunburst logo
 // either. All geometry lives in `TrayIconMetrics` below — single place to
-// tweak after looking at the real menu bar (M5.md T8: stroke weights,
-// animation cadence (400-800ms) and faint-dot opacity (25-40%) are subject
-// to on-device tuning; the values here are M5.md's specified starting
-// point, not yet on-device-confirmed).
+// tweak after looking at the real menu bar (M5.md T8). Emblem size, badge
+// size/position and the row-symbol proportions were settled in the
+// 2026-07-05 on-device round; menubar-design.html carries the same final
+// values.
 //
 // Coordinates are y-up (CoreGraphics/AppKit convention, `flipped: false`
 // below) — menubar-design.html's SVG mock shows the same shape y-flipped
@@ -39,7 +39,7 @@ import AppKit
 import ShiibarCcCore
 
 /// Every tunable constant for the tray drawing, in points, on a y-up canvas.
-/// Values are M5.md T8's exact starting geometry for the final (✳ emblem +
+/// Values are M5.md T8's final geometry for the final (✳ emblem +
 /// frame) design.
 enum TrayIconMetrics {
     static let canvasWidth: CGFloat = 20
