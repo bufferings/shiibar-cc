@@ -25,6 +25,9 @@ final class AppState: ObservableObject {
     /// lose the whole backstop).
     @Published var tccWarning = false
     @Published var muted: Bool
+    /// "Mute Banners" (§4.5/§8.14 2026-07-05 addendum) — independent from
+    /// `muted` ("Mute Sound"); see `NotificationDeliveryPolicy`.
+    @Published var bannersMuted: Bool
     /// Transient topbar text for a manually-triggered Rescan (§4.5/§9:
     /// "Rescanning…" while in flight, then "✓ Rescan done" / "Rescan failed"
     /// for `RescanFeedback.displaySeconds` before it clears). `nil` = show
@@ -83,6 +86,7 @@ final class AppState: ObservableObject {
         let notificationManager = NotificationManager()
         self.notificationManager = notificationManager
         self.muted = notificationManager.isMuted
+        self.bannersMuted = notificationManager.isBannersMuted
         let storedSortMode = UserDefaults.standard.string(forKey: Self.sortModeKey).flatMap(SortMode.init(rawValue:))
         self.sortMode = storedSortMode ?? .newestSession
 
@@ -430,6 +434,13 @@ final class AppState: ObservableObject {
     func toggleMute() {
         muted.toggle()
         notificationManager.isMuted = muted
+    }
+
+    /// ⌄ menu "Mute Banners" toggle (UserDefaults, §4.5/§8.14 2026-07-05
+    /// addendum) — independent from `toggleMute` above.
+    func toggleMuteBanners() {
+        bannersMuted.toggle()
+        notificationManager.isBannersMuted = bannersMuted
     }
 
     /// ⌄ menu "Start at Login" checkmark (§4.5, M5 T3): read live, never

@@ -1,6 +1,6 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5): ⌄ menu (Rescan / Start at Login / Sort by / Mute Sound /
-// Quit), warning rows (disconnected / notification permission denied /
+// DESIGN.md §4.5): ⌄ menu (Rescan / Sort by / Settings [Start at Login /
+// Mute Banners / Mute Sound] / Setup Check… / Quit), warning rows (disconnected / notification permission denied /
 // focus TCC error), a flat list with a leading status symbol (default) or
 // grouped cards (Waiting / Working / Idle, empty groups hidden) depending
 // on the "Sort by" selection, two-line rows with unreviewed bolding + a
@@ -164,15 +164,21 @@ private struct TopBar: View {
         menu.addItem(sort)
 
         // Rarely-touched switches live one level down (§4.5: Settings
-        // submenu below Sort by). "Start at Login" reads
-        // `SMAppService.mainApp.status` live via `state.loginItemEnabled`
-        // at menu-build time, so it can't drift from System Settings.
+        // submenu below Sort by), ordered Start at Login / Mute Banners /
+        // Mute Sound. "Start at Login" reads `SMAppService.mainApp.status`
+        // live via `state.loginItemEnabled` at menu-build time, so it can't
+        // drift from System Settings. The two mute checkmarks are read live
+        // from `state` the same way — independent switches (§4.5/§8.14
+        // 2026-07-05 addendum), checkmark = muted.
         let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
         let login = makeItem("Start at Login", action: #selector(VMenuHandler.toggleLogin))
         login.state = state.loginItemEnabled ? .on : .off
         settingsMenu.addItem(login)
+        let muteBanners = makeItem("Mute Banners", action: #selector(VMenuHandler.toggleMuteBanners))
+        muteBanners.state = state.bannersMuted ? .on : .off
+        settingsMenu.addItem(muteBanners)
         let mute = makeItem("Mute Sound", action: #selector(VMenuHandler.toggleMute))
         mute.state = state.muted ? .on : .off
         settingsMenu.addItem(mute)
@@ -228,6 +234,7 @@ private final class VMenuHandler: NSObject {
         state?.setSortMode(mode)
     }
     @objc func toggleLogin(_ sender: Any?) { state?.toggleLoginItem() }
+    @objc func toggleMuteBanners(_ sender: Any?) { state?.toggleMuteBanners() }
     @objc func toggleMute(_ sender: Any?) { state?.toggleMute() }
     @objc func openSetupCheck(_ sender: Any?) {
         // NSApp.activate happens again in SetupCheckView.onAppear — doing

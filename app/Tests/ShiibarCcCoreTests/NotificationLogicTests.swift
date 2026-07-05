@@ -120,6 +120,37 @@ final class NotificationLogicTests: XCTestCase {
         XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: false))
     }
 
+    // ---- Mute delivery decision (§4.5/§8.14 2026-07-05: independent Mute
+    // Banners / Mute Sound switches, all four combinations valid) ----
+
+    func testNeitherMutedDeliversBannerWithAttachedSound() {
+        let decision = NotificationDeliveryPolicy.decide(muteBanners: false, muteSound: false)
+        XCTAssertTrue(decision.deliverBanner)
+        XCTAssertTrue(decision.attachBannerSound)
+        XCTAssertFalse(decision.playStandaloneSound)
+    }
+
+    func testMuteSoundOnlyDeliversBannerWithoutSound() {
+        let decision = NotificationDeliveryPolicy.decide(muteBanners: false, muteSound: true)
+        XCTAssertTrue(decision.deliverBanner)
+        XCTAssertFalse(decision.attachBannerSound)
+        XCTAssertFalse(decision.playStandaloneSound)
+    }
+
+    func testMuteBannersOnlyIsSoundOnlyModeWithNoBanner() {
+        let decision = NotificationDeliveryPolicy.decide(muteBanners: true, muteSound: false)
+        XCTAssertFalse(decision.deliverBanner)
+        XCTAssertFalse(decision.attachBannerSound, "no banner is delivered, so there's nothing to attach a sound to")
+        XCTAssertTrue(decision.playStandaloneSound, "Mute Banners only plays the sound directly (§4.5 sound-only mode)")
+    }
+
+    func testBothMutedDeliversNothingAndPlaysNothing() {
+        let decision = NotificationDeliveryPolicy.decide(muteBanners: true, muteSound: true)
+        XCTAssertFalse(decision.deliverBanner)
+        XCTAssertFalse(decision.attachBannerSound)
+        XCTAssertFalse(decision.playStandaloneSound)
+    }
+
     // ---- Cleanup rule ----
 
     func testCleanupSweepsForEveryReasonExceptSessionEnd() {
