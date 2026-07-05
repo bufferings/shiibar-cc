@@ -18,7 +18,7 @@
 // closure would freeze the tray at its launch-time rendering (seen
 // on-device).
 
-import ShiibarCCCore
+import ShiibarCcCore
 import SwiftUI
 
 struct TrayIconView: View {

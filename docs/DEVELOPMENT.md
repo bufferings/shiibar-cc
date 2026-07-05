@@ -86,20 +86,20 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 ## ドッグフーディング運用
 
 - 日常のドッグフーディングはインストール済みの `.app` で行う(`scripts/install.sh` で
-  `~/Applications/shiibar-cc.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
+  `~/Applications/ShiibarCC.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
   停止はアプリが管理する。DESIGN.md §4.5 / §8.8。launchd には入れない、§8.8)
 - コード変更の反映は `scripts/dev-reload.sh`(下記「リリース・インストール」参照)
 - daemon 単体をログを見ながら動かしたいとき(daemon とアプリの連携をいじるときなど)は
   手動運用に切り替える: アプリを Quit してから iTerm2 の 1 タブで
   `SHIIBAR_CC_LOG=debug shiibar-ccd --foreground` を動かし、アプリは
-  `swift run --package-path app ShiibarCCApp` で起動する。アプリは起動時に既存 daemon に
+  `swift run --package-path app ShiibarCcApp` で起動する。アプリは起動時に既存 daemon に
   アタッチするので、手動 daemon と併用しても壊れない。ただしアプリを Quit すると
   daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
 
 ## リリース・インストール
 
-- `scripts/install.sh`: リリースビルドして `~/Applications/shiibar-cc.app`
+- `scripts/install.sh`: リリースビルドして `~/Applications/ShiibarCC.app`
   (`SHIIBAR_CC_APP_DIR` で上書き可)を組み立て、安定したローカル署名 ID で署名する
   (再ビルドで通知権限がリセットされないようにするため。DESIGN.md §4.5。ID が無ければ
   `scripts/lib/make-local-signing-identity.sh` で作成する)。`~/.local/bin/`

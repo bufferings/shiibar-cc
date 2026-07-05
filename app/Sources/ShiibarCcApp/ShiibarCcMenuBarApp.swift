@@ -10,7 +10,7 @@ import ServiceManagement
 import SwiftUI
 
 @main
-struct ShiibarCCAppApp: App {
+struct ShiibarCcMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

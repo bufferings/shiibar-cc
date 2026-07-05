@@ -2,7 +2,7 @@
 // status / fields must be ignored (forward compat), never fail the line.
 
 import XCTest
-@testable import ShiibarCCCore
+@testable import ShiibarCcCore
 
 final class WireDecodingTests: XCTestCase {
     private func decode(_ json: String) throws -> SubscribeEvent {

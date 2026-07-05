@@ -5,7 +5,7 @@
 // lifecycle is subordinate to the menu bar app, never launchd-resident).
 
 import Foundation
-import ShiibarCCCore
+import ShiibarCcCore
 
 @MainActor
 final class DaemonLifecycleManager {

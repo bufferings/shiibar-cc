@@ -4,7 +4,7 @@
 // grouped cards (Waiting / Working / Idle, empty groups hidden), two-line
 // rows with unreviewed bolding + red dot, row click -> focus.
 
-import ShiibarCCCore
+import ShiibarCcCore
 import SwiftUI
 
 struct DropdownView: View {

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Dogfooding helper (DESIGN.md §5): rebuild debug binaries + the menu bar
 # app. Two modes:
-#   - No installed shiibar-cc.app (scripts/install.sh not run yet, or
+#   - No installed ShiibarCC.app (scripts/install.sh not run yet, or
 #     removed): just rebuilds, and daemon lifecycle stays manual per §4.2 —
 #     run `shiibar-ccd --foreground` yourself, then `swift run` the app
 #     against it (it attaches instead of spawning, task brief M4 §1).
-#   - An installed shiibar-cc.app exists: quits it, makes sure its daemon is
+#   - An installed ShiibarCC.app exists: quits it, makes sure its daemon is
 #     really gone (see the comment at the quit block for why this script owns
 #     that), swaps in the freshly built binaries in place, re-signs with the
 #     stable local identity from the keychain (or falls back to ad-hoc),
@@ -16,7 +16,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="shiibar-cc.app"
+APP_NAME="ShiibarCC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 BUNDLE_ID="cc.shiibar.menubar"
 
@@ -34,7 +34,7 @@ echo
 echo "Built:"
 echo "  $ROOT/target/debug/shiibar-ccd"
 echo "  $ROOT/target/debug/shiibar-cc"
-echo "  $APP_BIN_DIR/ShiibarCCApp"
+echo "  $APP_BIN_DIR/ShiibarCcApp"
 
 if [ -d "$APP_PATH" ]; then
   echo
@@ -68,7 +68,7 @@ if [ -d "$APP_PATH" ]; then
   # state.json on every mutation, and on startup it handles a pre-existing
   # socket file (connect test -> no answer -> take over; both §4.2).
   osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
-  APP_EXE_PATTERN="$APP_PATH/Contents/MacOS/ShiibarCCApp"
+  APP_EXE_PATTERN="$APP_PATH/Contents/MacOS/ShiibarCcApp"
   if ! wait_for_gone "$APP_EXE_PATTERN" 25; then
     echo "warning: the app is still running 5s after the quit AppleEvent;" >&2
     echo "continuing anyway (the binary swap below does not need it gone," >&2
@@ -93,7 +93,7 @@ if [ -d "$APP_PATH" ]; then
     fi
   fi
 
-  install -m 755 "$APP_BIN_DIR/ShiibarCCApp" "$APP_PATH/Contents/MacOS/ShiibarCCApp"
+  install -m 755 "$APP_BIN_DIR/ShiibarCcApp" "$APP_PATH/Contents/MacOS/ShiibarCcApp"
   install -m 755 "$ROOT/target/debug/shiibar-ccd" "$APP_PATH/Contents/Helpers/shiibar-ccd"
   install -m 755 "$ROOT/target/debug/shiibar-cc" "$APP_PATH/Contents/Helpers/shiibar-cc"
 
@@ -149,5 +149,5 @@ else
   echo "No installed $APP_PATH (run scripts/install.sh, or dogfood without"
   echo "installing):"
   echo "  1. shiibar-ccd --foreground              # manual daemon, §4.2"
-  echo "  2. swift run --package-path app ShiibarCCApp   # attaches, doesn't spawn"
+  echo "  2. swift run --package-path app ShiibarCcApp   # attaches, doesn't spawn"
 fi

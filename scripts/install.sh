@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shiibar-cc install (M2 binaries+hooks, extended in M4 with .app bundling):
 # build the menu bar app + shiibar-ccd/shiibar-cc in release mode, bundle
-# them into shiibar-cc.app (Contents/Helpers/), ad-hoc sign with a stable
+# them into ShiibarCC.app (Contents/Helpers/), ad-hoc sign with a stable
 # local identity, symlink ~/.local/bin/shiibar-cc to the bundled binary,
 # register the app as a Login Item (by launching it once — it
 # self-registers via SMAppService, DESIGN.md §4.5), and print hooks
@@ -19,8 +19,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="shiibar-cc.app"
+APP_NAME="ShiibarCC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
+OLD_APP_PATH="$APP_DIR/shiibar-cc.app"
 BUNDLE_ID="cc.shiibar.menubar"
 
 # shellcheck source=scripts/lib/signing.sh
@@ -33,11 +34,16 @@ echo "==> Building the menu bar app (release)..."
 (cd "$ROOT/app" && swift build -c release)
 APP_BIN_DIR="$(cd "$ROOT/app" && swift build -c release --show-bin-path)"
 
+if [ -d "$OLD_APP_PATH" ]; then
+  echo "==> Removing stale $OLD_APP_PATH (pre-rename bundle, T1)"
+  rm -rf "$OLD_APP_PATH"
+fi
+
 echo "==> Assembling $APP_PATH"
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers"
 
-install -m 755 "$APP_BIN_DIR/ShiibarCCApp" "$APP_PATH/Contents/MacOS/ShiibarCCApp"
+install -m 755 "$APP_BIN_DIR/ShiibarCcApp" "$APP_PATH/Contents/MacOS/ShiibarCcApp"
 install -m 755 "$ROOT/target/release/shiibar-ccd" "$APP_PATH/Contents/Helpers/shiibar-ccd"
 install -m 755 "$ROOT/target/release/shiibar-cc" "$APP_PATH/Contents/Helpers/shiibar-cc"
 
@@ -47,13 +53,13 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>ShiibarCCApp</string>
+	<string>ShiibarCcApp</string>
 	<key>CFBundleIdentifier</key>
 	<string>$BUNDLE_ID</string>
 	<key>CFBundleName</key>
-	<string>shiibar-cc</string>
+	<string>Shiibar CC</string>
 	<key>CFBundleDisplayName</key>
-	<string>shiibar-cc</string>
+	<string>Shiibar CC</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>

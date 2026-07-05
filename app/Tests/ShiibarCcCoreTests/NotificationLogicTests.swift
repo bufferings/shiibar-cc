@@ -1,5 +1,5 @@
 import XCTest
-@testable import ShiibarCCCore
+@testable import ShiibarCcCore
 
 final class NotificationLogicTests: XCTestCase {
     private func agent(target: String, status: AgentStatus, unreviewed: Bool) -> Agent {

@@ -3,13 +3,13 @@
 // only for waiting (time-sensitive), threadIdentifier grouping per target,
 // a mute toggle (UserDefaults, sound only), and cleanup that skips
 // `session_end` removals. Rising-edge detection / de-dup / the delayed
-// decision / the cleanup rule are pure logic in ShiibarCCCore
+// decision / the cleanup rule are pure logic in ShiibarCcCore
 // (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
 // `NotificationCleanupRule`) — this type is the I/O wrapper around them.
 
 import Foundation
 import UserNotifications
-import ShiibarCCCore
+import ShiibarCcCore
 
 /// Delay before the re-check-and-maybe-fire (§4.5/§9: 3 seconds).
 private let delaySeconds: TimeInterval = 3

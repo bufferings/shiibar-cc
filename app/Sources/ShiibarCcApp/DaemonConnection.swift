@@ -1,12 +1,12 @@
 // Unix-domain-socket subscribe connection to shiibar-ccd (DESIGN.md §4.5):
 // `NWConnection` to the state dir's `shiibar-ccd.sock`, sending
 // `{"cmd":"subscribe"}` and reading NDJSON lines via `NDJSONLineBuffer`
-// (ShiibarCCCore). Reconnect backoff/spawn lifecycle lives in
+// (ShiibarCcCore). Reconnect backoff/spawn lifecycle lives in
 // `DaemonLifecycleManager`; this type is just the wire-level connection.
 
 import Foundation
 import Network
-import ShiibarCCCore
+import ShiibarCcCore
 
 /// Coarse connection lifecycle, enough for the lifecycle manager to decide
 /// whether to retry/backoff.

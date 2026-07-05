@@ -15,7 +15,7 @@
 
 import Foundation
 import os
-import ShiibarCCCore
+import ShiibarCcCore
 
 /// os_log sink for subprocess diagnostics. Subsystem = the bundle id
 /// (`cc.shiibar.menubar` in the installed .app; same literal as fallback in

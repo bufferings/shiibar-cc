@@ -1,5 +1,5 @@
 import XCTest
-@testable import ShiibarCCCore
+@testable import ShiibarCcCore
 
 final class GroupingTests: XCTestCase {
     private func agent(

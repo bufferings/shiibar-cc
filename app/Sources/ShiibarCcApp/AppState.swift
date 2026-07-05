@@ -6,7 +6,7 @@
 import AppKit
 import Combine
 import Foundation
-import ShiibarCCCore
+import ShiibarCcCore
 
 @MainActor
 final class AppState: ObservableObject {

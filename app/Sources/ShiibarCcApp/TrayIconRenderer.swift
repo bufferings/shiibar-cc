@@ -29,7 +29,7 @@
 // on-device).
 
 import AppKit
-import ShiibarCCCore
+import ShiibarCcCore
 
 /// Every tunable constant for the tray drawing, in points, on a y-up canvas.
 /// Derived from the mock's 16x16 viewBox (window rect (1.2,1.8) 13.6x12.4

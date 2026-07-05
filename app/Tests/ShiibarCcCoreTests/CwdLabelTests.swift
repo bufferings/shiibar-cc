@@ -2,7 +2,7 @@
 // agree exactly with the CLI's label formatting (DESIGN.md §4.5).
 
 import XCTest
-@testable import ShiibarCCCore
+@testable import ShiibarCcCore
 
 final class CwdLabelTests: XCTestCase {
     func testHomeRelativePathGetsTildeAndLastTwoComponents() {

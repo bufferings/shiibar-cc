@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Removes what scripts/install.sh placed: the shiibar-cc.app bundle, its
+# Removes what scripts/install.sh placed: the ShiibarCC.app bundle, its
 # Login Item registration, the ~/.local/bin symlinks/report.sh, and prints
 # guidance for removing the hooks block from ~/.claude/settings.json
 # (never edited automatically — see install.sh's comment for why).
@@ -8,7 +8,7 @@ set -euo pipefail
 
 BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
-APP_NAME="shiibar-cc.app"
+APP_NAME="ShiibarCC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 BUNDLE_ID="cc.shiibar.menubar"
 

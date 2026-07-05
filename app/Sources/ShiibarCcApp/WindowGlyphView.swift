@@ -12,7 +12,7 @@
 // logo). Exact stroke weights/spacing are subject to on-device (Retina)
 // tuning per the same notes.
 
-import ShiibarCCCore
+import ShiibarCcCore
 import SwiftUI
 
 struct WindowGlyphView: View {
