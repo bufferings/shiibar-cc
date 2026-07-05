@@ -27,12 +27,12 @@ session's iTerm2 tab.
 
 ## Permissions
 
-Installing and running shiibar-cc asks for the following. Each one maps to a
+Installing and running Shiibar CC asks for the following. Each one maps to a
 specific feature — nothing is requested speculatively.
 
 - **Automation (Apple Events) for iTerm2**: needed to find and select the
   right window/tab/session when you jump to an agent. This is the only
-  terminal app shiibar-cc drives.
+  terminal app Shiibar CC drives.
 - **Notifications**: needed to alert you when a session starts waiting on
   you, or finishes.
 - **Login Items**: the app registers itself to start at login automatically
@@ -43,7 +43,7 @@ specific feature — nothing is requested speculatively.
   with a stable identity created on first install (`security` /
   `codesign`), so that rebuilding it doesn't reset the notification
   permission macOS ties to the app's signature.
-- **Hooks added to `~/.claude/settings.json`**: shiibar-cc needs Claude Code
+- **Hooks added to `~/.claude/settings.json`**: Shiibar CC needs Claude Code
   to report session events to it. The installer **never edits this file
   automatically** — it prints a JSON snippet and you merge it in yourself,
   so your existing hooks and config are never at risk of being clobbered.
@@ -112,7 +112,7 @@ flowchart LR
   connected subscriber — the menu bar app and any CLI client using
   `shiibar-cc watch`/`wait`.
 - Jumping to a session ("focus") drives iTerm2 with AppleScript. iTerm2 is
-  the only terminal app shiibar-cc knows how to control, by design.
+  the only terminal app Shiibar CC knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, and on demand via the dropdown's Rescan action.

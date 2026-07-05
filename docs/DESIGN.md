@@ -398,7 +398,9 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   git/worktree の概念は持たない(文字列整形のみ。`repo/branch` に見えるのは worktree のディレクトリ名の偶然)
 - **デスクトップ通知**: `UNUserNotificationCenter`。**unreviewed フラグの立ち上がり**(false→true)で発火。
   クリックは delegate で受けて focus。「あなたの番になった」瞬間が通知の起点なので、状態レイヤーと一致する
-  - 発火は unreviewed の立ち上がりごとに 1 回(再接続 snapshot / reconcile 経由で気づいた unreviewed も含む。切断中の遷移を取りこぼさない)。同じ立ち上がりを二重に通知しないよう発火済みを記録する
+  - 発火は unreviewed の立ち上がりごとに 1 回(再接続 snapshot / reconcile 経由で気づいた unreviewed も含む。切断中の遷移を取りこぼさない)。同じ立ち上がりを二重に通知しないよう発火済みを記録する。
+    ただし**アプリ起動後の最初の snapshot は基準線**とし、そこに既に立っている unreviewed には通知しない
+    (起動時に過去の未読を再通知しない — 積み残しは赤バッジが示す。起動後の再接続 snapshot は発火対象のまま)
   - **トースト / 音(v1 デフォルト)**: `waiting` の立ち上がり = トースト + 音、interruption level は **time-sensitive**
     (Focus / おやすみモードでも出す。エージェントが止まって待っているのは実際 time-sensitive)。
     完了(idle+unreviewed)の立ち上がり = トースト + **音**(interruption level は active。§8.16)。
