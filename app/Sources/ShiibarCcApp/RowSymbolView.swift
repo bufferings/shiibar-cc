@@ -50,7 +50,7 @@ struct RowSymbolView: View {
                     .font(.system(size: size * 0.56, weight: .heavy, design: .rounded))
             }
         case .working:
-            SpinnerGlyph()
+            SpinnerGlyph(lineWidth: size * 0.095)
                 .rotationEffect(spinAngle)
                 .animation(
                     spinning ? .linear(duration: 1.7).repeatForever(autoreverses: false) : .default,
@@ -81,21 +81,22 @@ struct RowSymbolView: View {
 /// The working spinner glyph: an open arc rotating as one unit (the gap
 /// itself reads as motion; menubar-design.html).
 private struct SpinnerGlyph: View {
+    var lineWidth: CGFloat
     var body: some View {
-        SpinnerArc()
-            .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+        SpinnerArc(lineWidth: lineWidth)
+            .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             .foregroundStyle(.primary)
     }
 }
 
-/// ~250° open arc (the gap marks the leading end), normalized to a 17x17
-/// reference square like the mock's viewBox and scaled to the view's
-/// actual size.
+/// ~250° open arc (the gap marks the leading end). The stroke's OUTER edge
+/// fills the view frame, matching how the circle symbols use
+/// `strokeBorder` — all three symbols share the same outer diameter.
 private struct SpinnerArc: Shape {
+    var lineWidth: CGFloat
     func path(in rect: CGRect) -> Path {
-        let scale = min(rect.width, rect.height) / 17
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = 6.1 * scale
+        let radius = min(rect.width, rect.height) / 2 - lineWidth / 2
         var path = Path()
         path.addArc(center: center, radius: radius, startAngle: .degrees(-90), endAngle: .degrees(160), clockwise: false)
         return path
