@@ -390,13 +390,17 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 - 配布はしない(当面自分専用)。通知には bundle identifier 付きの .app が必要なため、
   Swift Package(executable)+ .app 化 & ad-hoc 署名のビルドスクリプトでローカルインストールする。
   ad-hoc 署名は再ビルドで通知権限がリセットされ得るため、install スクリプトで安定した署名 ID を使う
+- **命名**: .app のファイル名は `ShiibarCC.app`、表示名(CFBundleName / CFBundleDisplayName —
+  通知バナーやシステム設定の一覧に出る名前)は `Shiibar CC`。bundle identifier は `cc.shiibar.menubar`
+  (通知・Automation の許可はこの ID に紐づく)。Swift Package 内部の
+  モジュール・型のプレフィックスは `ShiibarCc`(CLI・バイナリ名は `shiibar-cc` 系)
 - **同梱**: `shiibar-ccd` / `shiibar-cc` は .app の `Contents/Helpers/` に同梱する。アプリは同梱バイナリを
   絶対パスで呼ぶ(PATH 非依存)。install スクリプトが `~/.local/bin/shiibar-cc` → 同梱バイナリへの
   シンボリックリンクを張り、hooks や手動 CLI は PATH 経由で同じ実体を使う(**アプリを入れれば全部入る**)
 
 ## 5. リポジトリ構成(monorepo)
 
-全マイルストーン完了時点の構成。`(未作成)` の項目はまだリポジトリに存在しない(`app/` の予定は §6、ライセンスと README は本節末尾)。
+全マイルストーン完了時点の構成。`(未作成)` の項目はまだリポジトリに存在しない(ライセンスと README は本節末尾)。
 
 ```
 shiibar/
@@ -406,7 +410,7 @@ shiibar/
 │   ├── shiibar-cc-client/
 │   ├── shiibar-ccd/
 │   └── shiibar-cc/
-├── app/                    # (未作成・M4)SwiftUI メニューバーアプリ(Swift Package + .app 化スクリプト)
+├── app/                    # SwiftUI メニューバーアプリ(Swift Package。install.sh が .app 化)
 ├── hooks/
 │   ├── report.sh
 │   └── settings-snippet.json
