@@ -24,6 +24,10 @@ APP_NAME="ShiibarCC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
 OLD_APP_PATH="$APP_DIR/shiibar-cc.app"
 BUNDLE_ID="cc.shiibar.menubar"
+# Fresh CFBundleVersion per install: icon/metadata caches (LaunchServices,
+# iconservices) key on bundle id + version, so a constant version can pin
+# stale state — e.g. the pre-icon registration — forever.
+BUILD_STAMP="$(date +%Y%m%d%H%M%S)"
 
 # shellcheck source=scripts/lib/signing.sh
 source "$ROOT/scripts/lib/signing.sh"
@@ -64,7 +68,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$BUILD_STAMP</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleIconFile</key>
