@@ -6,7 +6,8 @@
 
 Claude Code のエージェント状態(working / waiting / idle と、未確認フラグ。§3)を macOS メニューバーで
 常時可視化し、通知やドロップダウンのクリックひとつで該当する iTerm2 のタブへジャンプできるようにする。
-併せて、状態変化をスクリプトから利用するための CLI(`wait` 等)を提供する。
+CLI(`shiibar-cc`)は hooks とアプリをつなぐ**裏方**(report / focus / reconcile / doctor)であり、
+利用者向けの表面はメニューバーと通知に集約する(`wait` / `watch` などのスクリプト利用も可能だが主役ではない)。
 
 ### 設計原則
 
@@ -385,6 +386,9 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(Start at Login・
   Mute Banners・Mute Sound — ミュート 2 つは ✓ = 止めている、の独立スイッチ。
   滅多に触らないスイッチ類の置き場)/ **Setup Check…** / **Quit**。
+  **チェック項目(Sort のラジオ・Settings のトグル)はクリックしてもメニューを閉じない**
+  (続けて複数のスイッチを操作できる。チェック表示はその場で更新)。
+  実行項目(Rescan / Setup Check… / Quit)はクリックで閉じる。
   UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
   結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて

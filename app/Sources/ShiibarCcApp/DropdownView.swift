@@ -142,6 +142,15 @@ private struct TopBar: View {
 
     /// Builds the ⌄ menu (Rescan / Sort by / Settings / Quit, §4.5) fresh
     /// on every click, so checkmarks always show the live state.
+    ///
+    /// The CHECK rows below (Sort by's 3 radio choices, Settings' 3
+    /// toggles) are `CheckMenuItemView`s, not plain `NSMenuItem`s with an
+    /// action — §4.5's uncommitted keep-open clause says clicking a CHECK
+    /// item must NOT close the menu, and a custom `view` is the only
+    /// supported way to get that: AppKit only auto-closes the menu for its
+    /// own action-dispatch path, never for a view that handles its own
+    /// mouse events. Action items (Rescan / Setup Check… / Quit) are
+    /// unchanged plain items via `makeItem`/`VMenuHandler`.
     private func presentMenu() {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
@@ -154,11 +163,30 @@ private struct TopBar: View {
         let sort = NSMenuItem(title: "Sort by", action: nil, keyEquivalent: "")
         let sortMenu = NSMenu()
         sortMenu.autoenablesItems = false
-        for mode in SortMode.allCases {
-            let item = makeItem(mode.menuTitle, action: #selector(VMenuHandler.selectSortMode(_:)))
-            item.representedObject = mode
-            item.state = state.sortMode == mode ? .on : .off
+        let sortModes = SortMode.allCases
+        let sortViews = sortModes.map { mode in
+            CheckMenuItemView(title: mode.menuTitle, isOn: state.sortMode == mode)
+        }
+        // Weak boxes, not the views themselves, are what each closure
+        // below captures — the views already form the strong-ownership
+        // chain menu -> sortMenu -> item -> view, and each view also
+        // retains its own `onSelect` closure; capturing the sibling views
+        // directly here would close a retain cycle that outlives the menu
+        // (this whole tree is rebuilt from scratch on every ⌄ click, so a
+        // cycle here would leak on every open).
+        let sortViewBoxes = sortViews.map(WeakBox.init)
+        for (mode, view) in zip(sortModes, sortViews) {
+            let item = NSMenuItem(title: mode.menuTitle, action: nil, keyEquivalent: "")
+            item.view = view
             sortMenu.addItem(item)
+            view.onSelect = { [weak state] in
+                state?.setSortMode(mode)
+                // Radio semantics: only one of the three can be on, so a
+                // click refreshes all three sibling checkmarks in place.
+                for (siblingMode, box) in zip(sortModes, sortViewBoxes) {
+                    box.value?.setOn(siblingMode == mode)
+                }
+            }
         }
         sort.submenu = sortMenu
         menu.addItem(sort)
@@ -169,19 +197,40 @@ private struct TopBar: View {
         // live via `state.loginItemEnabled` at menu-build time, so it can't
         // drift from System Settings. The two mute checkmarks are read live
         // from `state` the same way — independent switches (§4.5/§8.14
-        // 2026-07-05 addendum), checkmark = muted.
+        // 2026-07-05 addendum), checkmark = muted. Each is its own
+        // independent toggle (not a radio group), so a click only ever
+        // refreshes its own checkmark.
         let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
-        let login = makeItem("Start at Login", action: #selector(VMenuHandler.toggleLogin))
-        login.state = state.loginItemEnabled ? .on : .off
-        settingsMenu.addItem(login)
-        let muteBanners = makeItem("Mute Banners", action: #selector(VMenuHandler.toggleMuteBanners))
-        muteBanners.state = state.bannersMuted ? .on : .off
-        settingsMenu.addItem(muteBanners)
-        let mute = makeItem("Mute Sound", action: #selector(VMenuHandler.toggleMute))
-        mute.state = state.muted ? .on : .off
-        settingsMenu.addItem(mute)
+
+        let loginItem = NSMenuItem(title: "Start at Login", action: nil, keyEquivalent: "")
+        let loginView = CheckMenuItemView(title: "Start at Login", isOn: state.loginItemEnabled)
+        loginItem.view = loginView
+        settingsMenu.addItem(loginItem)
+        loginView.onSelect = { [weak state, weak loginView] in
+            state?.toggleLoginItem()
+            loginView?.setOn(state?.loginItemEnabled ?? false)
+        }
+
+        let muteBannersItem = NSMenuItem(title: "Mute Banners", action: nil, keyEquivalent: "")
+        let muteBannersView = CheckMenuItemView(title: "Mute Banners", isOn: state.bannersMuted)
+        muteBannersItem.view = muteBannersView
+        settingsMenu.addItem(muteBannersItem)
+        muteBannersView.onSelect = { [weak state, weak muteBannersView] in
+            state?.toggleMuteBanners()
+            muteBannersView?.setOn(state?.bannersMuted ?? false)
+        }
+
+        let muteItem = NSMenuItem(title: "Mute Sound", action: nil, keyEquivalent: "")
+        let muteView = CheckMenuItemView(title: "Mute Sound", isOn: state.muted)
+        muteItem.view = muteView
+        settingsMenu.addItem(muteItem)
+        muteView.onSelect = { [weak state, weak muteView] in
+            state?.toggleMute()
+            muteView?.setOn(state?.muted ?? false)
+        }
+
         settings.submenu = settingsMenu
         menu.addItem(settings)
 
@@ -229,13 +278,6 @@ private final class VMenuHandler: NSObject {
     var openWindow: OpenWindowAction?
 
     @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
-    @objc func selectSortMode(_ sender: NSMenuItem) {
-        guard let mode = sender.representedObject as? SortMode else { return }
-        state?.setSortMode(mode)
-    }
-    @objc func toggleLogin(_ sender: Any?) { state?.toggleLoginItem() }
-    @objc func toggleMuteBanners(_ sender: Any?) { state?.toggleMuteBanners() }
-    @objc func toggleMute(_ sender: Any?) { state?.toggleMute() }
     @objc func openSetupCheck(_ sender: Any?) {
         // NSApp.activate happens again in SetupCheckView.onAppear — doing
         // it here too covers the case where the window is already open
@@ -244,6 +286,150 @@ private final class VMenuHandler: NSObject {
         openWindow?(id: SetupCheckWindow.id)
     }
     @objc func quit(_ sender: Any?) { state?.quit() }
+}
+
+/// A non-retaining reference, used so a closure can hold onto a sibling
+/// `CheckMenuItemView` (to refresh its checkmark) without joining a retain
+/// cycle with that view's own `onSelect` closure.
+private final class WeakBox<T: AnyObject> {
+    weak var value: T?
+    init(_ value: T) { self.value = value }
+}
+
+/// A CHECK-style ⌄ submenu row (one of Sort by's 3 radio choices, or one
+/// of Settings' 3 toggles). This is an `NSMenuItem`'s custom `view`, not a
+/// plain item with a `target`/`action` — that's the load-bearing choice
+/// (§4.5's keep-open clause): AppKit only auto-closes an open menu when
+/// *it* dispatches an item's action; a view that handles its own mouse
+/// events owns tracking, and the menu stays open unless the view calls
+/// `NSMenu.cancelTracking()` — which `mouseUp` here never does.
+///
+/// Metrics mirror the native check-item look at `NSFont.menuFont(ofSize:
+/// 13)`: a leading checkmark column, then the label, in a row sized to
+/// match a native item at this font (so the "Sort by"/"Settings"
+/// submenus don't look like a foreign control next to the rest of the ⌄
+/// menu — tune `rowHeight` on-device if it doesn't line up).
+///
+/// Keyboard navigation of these rows is degraded: AppKit only drives
+/// arrow-key/Return highlighting for its own item cells, never for a
+/// custom `view`. Accepted trade-off for the keep-open behavior — mouse
+/// interaction (the only way these items are meant to be used, same as
+/// every other row in this dropdown) is unaffected.
+private final class CheckMenuItemView: NSView {
+    static let rowHeight: CGFloat = 22
+    static let checkColumnWidth: CGFloat = 20
+    private static let horizontalTrailingInset: CGFloat = 14
+    private static let highlightInsetX: CGFloat = 5
+    private static let highlightCornerRadius: CGFloat = 4
+
+    /// Set post-init (not an init parameter) so callers can build every
+    /// sibling row first and only then wire closures that reference each
+    /// other (the sort radio group's "refresh all three" needs the full
+    /// sibling list to exist before any of them can be clicked).
+    var onSelect: () -> Void = {}
+
+    private let checkLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var isHighlighted = false {
+        didSet { updateColors() }
+    }
+
+    init(title: String, isOn: Bool) {
+        let font = NSFont.menuFont(ofSize: 13)
+        let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+        let width = Self.checkColumnWidth + ceil(titleWidth) + Self.horizontalTrailingInset
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
+
+        checkLabel.font = font
+        checkLabel.alignment = .center
+        titleLabel.font = font
+        titleLabel.stringValue = title
+        for label in [checkLabel, titleLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.backgroundColor = .clear
+            addSubview(label)
+        }
+        NSLayoutConstraint.activate([
+            checkLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            checkLabel.widthAnchor.constraint(equalToConstant: Self.checkColumnWidth - 4),
+            checkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.checkColumnWidth),
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -Self.horizontalTrailingInset
+            ),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(title)
+
+        setOn(isOn)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Repaints just the checkmark glyph — called at build time and again
+    /// right after a click, so the row reflects the new state without
+    /// rebuilding the whole menu (rebuilding only happens on the NEXT ⌄
+    /// open, so the menu can stay open per §4.5).
+    func setOn(_ isOn: Bool) {
+        checkLabel.stringValue = isOn ? "✓" : ""
+        setAccessibilityValue(isOn ? "on" : "off")
+    }
+
+    private func updateColors() {
+        let color: NSColor = isHighlighted ? .white : .labelColor
+        checkLabel.textColor = color
+        titleLabel.textColor = color
+        needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        trackingArea = area
+        addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHighlighted = true
+    }
+
+    /// This also covers the "clear on menu close" requirement in practice:
+    /// the whole ⌄ menu (and every view in it) is discarded and rebuilt
+    /// fresh on each `presentMenu()` call, so there's no cross-open
+    /// highlight state to leak — only the within-one-open hover case
+    /// (handled here) is real.
+    override func mouseExited(with event: NSEvent) {
+        isHighlighted = false
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onSelect()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard isHighlighted else { return }
+        let rect = bounds.insetBy(dx: Self.highlightInsetX, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: Self.highlightCornerRadius, yRadius: Self.highlightCornerRadius)
+        NSColor.selectedContentBackgroundColor.setFill()
+        path.fill()
+    }
 }
 
 /// The ⌄ chip's persistent background (T2 follow-up, M5) — never the
