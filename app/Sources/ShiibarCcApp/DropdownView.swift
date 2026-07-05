@@ -323,7 +323,7 @@ private final class CheckMenuItemView: NSView {
     static let checkColumnWidth: CGFloat = 20
     private static let horizontalTrailingInset: CGFloat = 14
     private static let highlightInsetX: CGFloat = 5
-    private static let highlightCornerRadius: CGFloat = 4
+    fileprivate static let highlightCornerRadius: CGFloat = 4
 
     /// Set post-init (not an init parameter) so callers can build every
     /// sibling row first and only then wire closures that reference each
@@ -333,6 +333,24 @@ private final class CheckMenuItemView: NSView {
 
     private let checkLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
+    /// Native menus draw their selection as a vibrancy MATERIAL, not a
+    /// flat color fill — a solid selectedContentBackgroundColor visibly
+    /// mismatches the neighboring native items' blue. NSVisualEffectView
+    /// with the .selection material (emphasized) is the same mechanism the
+    /// system uses, so mixed native/custom rows highlight identically.
+    private let highlightView: NSVisualEffectView = {
+        let view = NSVisualEffectView()
+        view.material = .selection
+        view.state = .active
+        view.isEmphasized = true
+        view.blendingMode = .behindWindow
+        view.wantsLayer = true
+        view.layer?.cornerRadius = CheckMenuItemView.highlightCornerRadius
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = true
+        view.isHidden = true
+        return view
+    }()
     private var trackingArea: NSTrackingArea?
     private var isHighlighted = false {
         didSet { updateColors() }
@@ -343,6 +361,15 @@ private final class CheckMenuItemView: NSView {
         let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
         let width = Self.checkColumnWidth + ceil(titleWidth) + Self.horizontalTrailingInset
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
+
+        highlightView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(highlightView)
+        NSLayoutConstraint.activate([
+            highlightView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.highlightInsetX),
+            highlightView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.highlightInsetX),
+            highlightView.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            highlightView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+        ])
 
         checkLabel.font = font
         checkLabel.alignment = .center
@@ -386,10 +413,10 @@ private final class CheckMenuItemView: NSView {
     }
 
     private func updateColors() {
-        let color: NSColor = isHighlighted ? .white : .labelColor
+        highlightView.isHidden = !isHighlighted
+        let color: NSColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
         checkLabel.textColor = color
         titleLabel.textColor = color
-        needsDisplay = true
     }
 
     override func updateTrackingAreas() {
@@ -425,14 +452,6 @@ private final class CheckMenuItemView: NSView {
         onSelect()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard isHighlighted else { return }
-        let rect = bounds.insetBy(dx: Self.highlightInsetX, dy: 1)
-        let path = NSBezierPath(roundedRect: rect, xRadius: Self.highlightCornerRadius, yRadius: Self.highlightCornerRadius)
-        NSColor.selectedContentBackgroundColor.setFill()
-        path.fill()
-    }
 }
 
 /// The ⌄ chip's persistent background (T2 follow-up, M5) — never the
