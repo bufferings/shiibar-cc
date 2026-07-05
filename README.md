@@ -111,8 +111,9 @@ flowchart LR
   Unix domain socket.
 - The daemon holds all session state in memory (and persists it to
   `~/.local/state/shiibar-cc/state.json`) and pushes changes to every
-  connected subscriber — the menu bar app and any CLI client using
-  `shiibar-cc watch`/`wait`.
+  connected subscriber — the menu bar app and the `shiibar-cc` CLI
+  (`list` / `watch` / `wait` for scripting, `doctor` for diagnosis;
+  run it without arguments for the full list).
 - Jumping to a session ("focus") drives iTerm2 with AppleScript. iTerm2 is
   the only terminal app Shiibar CC knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
@@ -120,17 +121,3 @@ flowchart LR
   on daemon reconnect, and on demand via the dropdown's Rescan action.
 - All local state — the daemon's socket, its persisted session state, and
   its log — lives under `~/.local/state/shiibar-cc/`.
-
-### CLI
-
-```
-shiibar-cc report <event>    # hooks-only: reads a hook payload from stdin and forwards it to the daemon
-shiibar-cc list [--json]     # current agents: status, label, elapsed time, target
-shiibar-cc wait <selector>   # block until a session reaches a given status
-shiibar-cc watch             # stream state-change events as line-delimited JSON
-shiibar-cc focus <selector>  # jump to a session's iTerm2 tab
-shiibar-cc focused           # print the target of the frontmost iTerm2 session, if any
-shiibar-cc reconcile         # self-repair: sync state against `claude agents`
-shiibar-cc remove <selector> # manually remove a stale entry
-shiibar-cc doctor [--json]   # diagnose the install (socket, hooks config, PATH, Automation permission)
-```
