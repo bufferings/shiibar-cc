@@ -395,7 +395,7 @@ private struct RowView: View {
             // than the 12pt symbol-to-text gap reads as centered.
             .padding(.leading, 10)
             .padding(.trailing, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(HighlightButtonStyle(isHovering: showsHighlight))

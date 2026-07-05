@@ -344,7 +344,9 @@ shiibar-cc doctor             # 診断(下記)
 - **doctor**: 以下を順に検査して人間向けに報告する —
   socket 疎通(`info` の応答)/ daemon の version・last_report_at / hooks 設定の有無
   (`~/.claude/settings.json` に report.sh が含まれるか)/ `shiibar-cc` が PATH にあるか /
-  osascript の TCC 権限(無害な iTerm2 走査を 1 回試す)。「通知が来ない」の切り分けはまずこれを実行する
+  osascript の TCC 権限(無害な iTerm2 走査を 1 回試す)。「通知が来ない」の切り分けはまずこれを実行する。
+  **`--json`** で同じ検査結果を `{"checks":[{"id","status"("ok"|"warn"|"fail"),"summary","hint"}]}` として
+  出力する(アプリの Setup Check が読む。exit code の意味は人間向けと同じ。判定ロジックは CLI 側が正)
 
 ### 4.5 メニューバーアプリ(`app/`)
 
@@ -380,8 +382,13 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
 - 最上部の **⌄ メニュー**の構成: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
   並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(ログイン時起動 = Start at Login・
-  音のミュート = Mute Sound。滅多に触らないスイッチ類の置き場)/ **Quit**。UI 文言は英語。
-  Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
+  音のミュート = Mute Sound。滅多に触らないスイッチ類の置き場)/ **Setup Check…** / **Quit**。
+  UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
+- **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
+  結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて
+  ✓/⚠/✗ で表示し、各行に対処のヒントを一言添える。Re-run ボタン付き。
+  LSUIElement アプリのため表示時に `NSApp.activate` が必要。
+  判定ロジックはアプリに複製しない(doctor が正)。将来のドロップ導入時のオンボーディングを兼ねる(§8.18)
 - **表示ラベル**: cwd をホーム配下なら `~` 起点にし、末尾 2 要素を表示(足りなければあるだけ)。
   ラベルの重複はそのまま表示する(並び順が安定していれば足りる。区別の工夫は §8.10)。
   git/worktree の概念は持たない(文字列整形のみ。`repo/branch` に見えるのは worktree のディレクトリ名の偶然)
@@ -700,7 +707,7 @@ resume は §8.15 のとおり実装後に削除した)。
   登録者の本名が入る点は了解済み
 - brew は cask(要・公証済みバイナリ)/ tap + formula(ソースビルド)の 2 形態がありうるが、
   需要が見えてから作る。v1 公開時の導入手順は clone + `scripts/install.sh` を README に書く
-- Setup Check(導入チェック一覧の画面 — docs/tasks/M5.md T5)は、将来のドロップ導入時に
+- Setup Check(導入チェック一覧の画面 — §4.5)は、将来のドロップ導入時に
   オンボーディング画面を兼ねられる構成にしておく
 
 ## 9. 定数表
