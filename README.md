@@ -1,4 +1,4 @@
-# shiibar-cc
+# Shiibar CC
 
 A macOS menu bar app + CLI that watches your Claude Code agent sessions
 running in iTerm2 and lets you jump straight to the right one.
