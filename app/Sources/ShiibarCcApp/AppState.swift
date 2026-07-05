@@ -69,7 +69,10 @@ final class AppState: ObservableObject {
 
     let notificationManager: NotificationManager
     private let lifecycle: DaemonLifecycleManager
-    private let helpersDirectory: URL?
+    /// Not `private`: the Setup Check window (§4.5, M5 T5) also needs it to
+    /// run `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /
+    /// `runReconcile` below.
+    let helpersDirectory: URL?
     private var dropdownOpenObserver: NSObjectProtocol?
     private var dropdownCloseObserver: NSObjectProtocol?
 

@@ -94,6 +94,12 @@ private struct TopBar: View {
     /// (NSMenuItem.target is weak, so someone must own the handler).
     @State private var menuHandler = VMenuHandler()
     @State private var menuAnchor: NSView?
+    /// Opens the Setup Check window (§4.5, M5 T5) — a SwiftUI `Window`
+    /// scene declared alongside `MenuBarExtra` in `ShiibarCcMenuBarApp`.
+    /// Only available as an `@Environment` value inside a View, so it's
+    /// captured here and handed to `menuHandler` at menu-build time (same
+    /// pattern as `state` below).
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack {
@@ -139,6 +145,7 @@ private struct TopBar: View {
     private func presentMenu() {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
+        menuHandler.openWindow = openWindow
 
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -171,6 +178,9 @@ private struct TopBar: View {
         settingsMenu.addItem(mute)
         settings.submenu = settingsMenu
         menu.addItem(settings)
+
+        // §4.5 ⌄ menu ordering: Rescan / Sort by / Settings / Setup Check… / Quit.
+        menu.addItem(makeItem("Setup Check…", action: #selector(VMenuHandler.openSetupCheck)))
 
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
@@ -207,6 +217,10 @@ private struct TopBar: View {
 @MainActor
 private final class VMenuHandler: NSObject {
     weak var state: AppState?
+    /// Set fresh on every `presentMenu()` call (`OpenWindowAction` is a
+    /// plain struct, not a class, so there's no lifetime/retain concern
+    /// with re-assigning it each time, unlike `state` above).
+    var openWindow: OpenWindowAction?
 
     @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
     @objc func selectSortMode(_ sender: NSMenuItem) {
@@ -215,6 +229,13 @@ private final class VMenuHandler: NSObject {
     }
     @objc func toggleLogin(_ sender: Any?) { state?.toggleLoginItem() }
     @objc func toggleMute(_ sender: Any?) { state?.toggleMute() }
+    @objc func openSetupCheck(_ sender: Any?) {
+        // NSApp.activate happens again in SetupCheckView.onAppear — doing
+        // it here too covers the case where the window is already open
+        // (onAppear won't refire) and just needs to come forward.
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow?(id: SetupCheckWindow.id)
+    }
     @objc func quit(_ sender: Any?) { state?.quit() }
 }
 

@@ -232,6 +232,7 @@ name = "shiibar-cc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
  "serde_json",
  "shiibar-cc-client",
  "shiibar-cc-proto",

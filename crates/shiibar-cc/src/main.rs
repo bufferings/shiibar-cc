@@ -177,20 +177,32 @@ fn cmd_remove(args: &[String]) -> i32 {
     code
 }
 
-fn cmd_doctor(_args: &[String]) -> i32 {
+fn cmd_doctor(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
     let runner = Osascript;
     let settings_path = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".claude/settings.json");
-    let report = shiibar_cc::doctor_cmd::run_doctor(
-        &shiibar_cc_client::resolve_socket_path(),
-        &settings_path,
-        std::env::var_os("PATH").as_deref(),
-        &runner,
-    );
-    for line in &report.lines {
-        println!("{line}");
+    if json {
+        let checks = shiibar_cc::doctor_cmd::run_doctor_checks(
+            &shiibar_cc_client::resolve_socket_path(),
+            &settings_path,
+            std::env::var_os("PATH").as_deref(),
+            &runner,
+        );
+        println!("{}", shiibar_cc::doctor_cmd::checks_to_json(&checks));
+        shiibar_cc::doctor_cmd::exit_code_for(&checks)
+    } else {
+        let report = shiibar_cc::doctor_cmd::run_doctor(
+            &shiibar_cc_client::resolve_socket_path(),
+            &settings_path,
+            std::env::var_os("PATH").as_deref(),
+            &runner,
+        );
+        for line in &report.lines {
+            println!("{line}");
+        }
+        report.exit_code
     }
-    report.exit_code
 }

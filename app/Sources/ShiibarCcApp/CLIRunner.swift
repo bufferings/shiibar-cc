@@ -149,4 +149,15 @@ enum CLIRunner {
     static func reconcile(helpersDirectory: URL?) -> CLIRunResult {
         run(["reconcile"], helpersDirectory: helpersDirectory)
     }
+
+    /// `shiibar-cc doctor --json` (⌄ menu "Setup Check…", §4.4/§4.5). Exit 1
+    /// (a check failed, e.g. the daemon isn't reachable) is an EXPECTED
+    /// outcome here, not a subprocess error — doctor's whole point is to
+    /// report problems, and it still prints valid `{"checks":[...]}` on exit
+    /// 1 (only `run`'s stdout/exit-code plumbing changes, never the JSON
+    /// shape). Only a genuine failure to even launch (empty stdout) should
+    /// surface as this call's own error.
+    static func doctorJSON(helpersDirectory: URL?) -> CLIRunResult {
+        run(["doctor", "--json"], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 1])
+    }
 }

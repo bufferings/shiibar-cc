@@ -28,7 +28,28 @@ struct ShiibarCcMenuBarApp: App {
             TrayIconView(state: appDelegate.state)
         }
         .menuBarExtraStyle(.window)
+
+        // Setup Check window (§4.5, M5 T5), opened via `openWindow(id:)`
+        // from the ⌄ menu (DropdownView.VMenuHandler.openSetupCheck). A
+        // plain `Window` scene (macOS 13+) works cleanly alongside
+        // MenuBarExtra — unlike the dropdown, this is a regular titled
+        // window, not a custom panel, so it needs none of the dropdown's
+        // hand-rolled open/close machinery.
+        Window("Setup Check", id: SetupCheckWindow.id) {
+            SetupCheckView(
+                helpersDirectory: appDelegate.state.helpersDirectory,
+                notificationManager: appDelegate.state.notificationManager,
+                loginItemEnabledProvider: { appDelegate.state.loginItemEnabled }
+            )
+        }
+        .windowResizability(.contentSize)
     }
+}
+
+/// The Setup Check `Window` scene's stable id, shared between the scene
+/// declaration above and `openWindow(id:)` call site in DropdownView.
+enum SetupCheckWindow {
+    static let id = "setup-check"
 }
 
 @MainActor

@@ -64,6 +64,36 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    /// Current notification authorization, reduced to `NotificationPermissionState`
+    /// for the Setup Check window's row (§4.5, M5 T5). `getNotificationSettings`'s
+    /// completion runs off the main actor, so it hops back before calling
+    /// `completion` (same pattern as `refreshPermissionStatus` above).
+    /// `.provisional`/`.ephemeral` (quiet delivery, still permitted) count as
+    /// `.authorized` — the row is asking "will anything ever show up", not
+    /// distinguishing delivery styles doctor/the row text don't cover.
+    func currentPermissionState(completion: @escaping (NotificationPermissionState) -> Void) {
+        guard let center else {
+            Task { @MainActor in completion(.notDetermined) }
+            return
+        }
+        center.getNotificationSettings { settings in
+            let state: NotificationPermissionState
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                state = .authorized
+            case .denied:
+                state = .denied
+            case .notDetermined:
+                state = .notDetermined
+            @unknown default:
+                state = .notDetermined
+            }
+            Task { @MainActor in
+                completion(state)
+            }
+        }
+    }
+
     /// Feed the latest known agents (from any source: snapshot,
     /// status_changed, or a post-reconcile refresh, §4.5) to detect rising
     /// edges and schedule their delayed notifications.
