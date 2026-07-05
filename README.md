@@ -10,6 +10,8 @@ running in iTerm2 and lets you jump straight to the right one.
 they never appear in the list, and there is nothing to jump to. If your
 Claude Code sessions don't live in iTerm2, this tool does nothing for you.
 
+<br clear="all">
+
 ## What it does
 
 Claude Code hooks report each session's state to a small local daemon that
@@ -130,3 +132,19 @@ flowchart LR
   on daemon reconnect, and on demand via the dropdown's Rescan action.
 - All local state — the daemon's socket, its persisted session state, and
   its log — lives under `~/.local/state/shiibar-cc/`.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions.
