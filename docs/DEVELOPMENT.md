@@ -97,6 +97,28 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
 
+## アイコンまわりの開発メモ
+
+利用者には関係ないが、アイコンを触るときに必要になる知識。
+
+- **トレイアイコン**: 描画は `app/Sources/ShiibarCcApp/TrayIconRenderer.swift`(数値は `TrayIconMetrics` に集約)。
+  見た目の正は `docs/menubar-design.html`。数値を変えたら menubar-design.html のモック SVG も同じ値に更新する
+- **アプリアイコン**: `scripts/generate-app-icon.swift` が唯一の原本。install.sh がこれを実行して
+  `.icns` を生成・同梱するので、リポジトリに `.icns` はコミットしない。
+  例外は README 用の `docs/assets/app-icon.png`(コミット済みの生成物)— デザインを変えたら
+  `swift scripts/generate-app-icon.swift <出力先>` で作り直して差し替えること
+- **アイコンが反映されないとき**(キャッシュの層が複数ある):
+  1. Info.plist の `CFBundleVersion` は install ごとにタイムスタンプが入る(LaunchServices /
+     iconservices のキャッシュが bundle ID + バージョンをキーにするため。固定値だと古い登録が勝ち続ける)
+  2. Finder のアイコン: `touch <app>` + `killall Finder`
+  3. LaunchServices の登録: `lsregister -f <app>`(パスは
+     `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`)
+  4. **通知バナーだけ汎用アイコンになる場合**: 通知システムは `~/Library/Preferences/com.apple.ncprefs.plist`
+     内のアプリ記録に**バンドルパス**を保持しており、.app をリネームするとこのパスが旧名を指したまま残る
+     (許可の照合は署名要件なので通知は届き続け、アイコンだけ壊れる。再起動でも直らない。実測 2026-07-05)。
+     対処: `defaults export com.apple.ncprefs` → 旧パスを新パスに置換 → `defaults import` →
+     `killall usernoted` → アプリ再起動。plist を直接編集しない(cfprefsd のキャッシュに負ける)
+
 ## リリース・インストール
 
 - `scripts/install.sh`: リリースビルドして `~/Applications/ShiibarCC.app`

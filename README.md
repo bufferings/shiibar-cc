@@ -2,7 +2,7 @@
 
 <img src="docs/assets/app-icon.png" width="120" alt="Shiibar CC app icon" align="left" hspace="16">
 
-A macOS menu bar app + CLI that watches your Claude Code agent sessions
+A macOS menu bar app that watches your Claude Code agent sessions
 running in iTerm2 and lets you jump straight to the right one.
 
 **iTerm2 only, by design.** Sessions running in any other terminal
@@ -12,9 +12,9 @@ Claude Code sessions don't live in iTerm2, this tool does nothing for you.
 
 ## What it does
 
-Claude Code hooks report each session's state to a small local daemon, which
-a menu bar app and a CLI both subscribe to. The tray icon shows a
-roll-up of every session at a glance:
+Claude Code hooks report each session's state to a small local daemon that
+feeds the menu bar app. The tray icon shows a roll-up of every session at
+a glance:
 
 - **working** — an agent is actively running a tool or generating a response
 - **waiting** — an agent is blocked on you (a permission prompt, a question)
@@ -111,9 +111,12 @@ flowchart LR
   Unix domain socket.
 - The daemon holds all session state in memory (and persists it to
   `~/.local/state/shiibar-cc/state.json`) and pushes changes to every
-  connected subscriber — the menu bar app and the `shiibar-cc` CLI
-  (`list` / `watch` / `wait` for scripting, `doctor` for diagnosis;
-  run it without arguments for the full list).
+  connected subscriber.
+- The `shiibar-cc` CLI is internal glue, not a user-facing surface:
+  hooks call `shiibar-cc report`, and the app shells out to it for
+  jumping (`focus`), self-repair (`reconcile`), and the Setup Check
+  (`doctor`). You never need to run it yourself except `doctor` when
+  troubleshooting.
 - Jumping to a session ("focus") drives iTerm2 with AppleScript. iTerm2 is
   the only terminal app Shiibar CC knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
