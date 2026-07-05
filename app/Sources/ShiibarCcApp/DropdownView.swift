@@ -248,7 +248,7 @@ private extension RescanFeedback {
 private struct NoAgentsRow: View {
     var body: some View {
         Text("No agents")
-            .font(.system(size: 12))
+            .font(.system(size: 13))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -263,7 +263,7 @@ private struct WarningRow: View {
             Text("⚠")
             Text(text)
         }
-        .font(.system(size: 11))
+        .font(.system(size: 12))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -356,14 +356,14 @@ private struct RowView: View {
                 .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.primaryLine)
-                        .font(.system(size: 12, weight: row.unreviewed ? .semibold : .regular))
+                        .font(.system(size: 13, weight: row.unreviewed ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         // menubar-design.html: hovered row text switches to
                         // the selection foreground (white in the mock).
                         .foregroundStyle(isHovering ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
                     Text("\(row.label) · \(ElapsedTime.format(seconds: row.elapsedSeconds))")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(isHovering ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(.secondary))
                 }
                 Spacer(minLength: 4)
