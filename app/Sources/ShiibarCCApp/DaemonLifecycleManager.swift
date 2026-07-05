@@ -93,6 +93,12 @@ final class DaemonLifecycleManager {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = []
+        // Same augmented PATH as every app-run subprocess (see
+        // SubprocessEnvironment): the daemon itself doesn't spawn
+        // PATH-resolved tools today, but inheriting launchd's minimal PATH
+        // is exactly the trap that silently degraded app-run reconciles —
+        // don't leave the same landmine armed here.
+        process.environment = SubprocessEnvironment.withAugmentedPath()
         // §4.2: an app-spawned daemon must not be log-less — redirect its
         // stderr (the daemon's only log stream) to <state dir>/
         // shiibar-ccd.log, overwriting the previous run's file. The state

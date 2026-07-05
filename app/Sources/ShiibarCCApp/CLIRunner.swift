@@ -30,6 +30,30 @@ private let subprocessLog = Logger(
 /// Bound on how much captured stderr goes into a log line.
 private let stderrLogLimitBytes = 500
 
+/// Environment for every subprocess the app runs (CLIRunner's helpers AND
+/// the spawned daemon): the inherited environment with an augmented PATH.
+///
+/// An app launched from Finder/Login Items inherits launchd's minimal PATH
+/// (`/usr/bin:/bin:/usr/sbin:/sbin`). The `shiibar-cc` helper itself is
+/// called by absolute path, but `shiibar-cc reconcile` internally spawns
+/// `claude` via PATH — and claude's native install location is
+/// `~/.local/bin`, which the minimal PATH lacks. On-device evidence: in
+/// that environment reconcile printed "scan was incomplete; sent
+/// complete:false" and exited 0, silently reducing every app-run reconcile
+/// to a no-op (the §3.5 degrade is correct CLI behavior; the app just has
+/// to provide a PATH where claude can be found). Homebrew's bin dirs are
+/// appended for good measure; duplicate entries are harmless.
+enum SubprocessEnvironment {
+    static func withAugmentedPath() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let home = NSHomeDirectory()
+        let extras = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+        let current = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["PATH"] = current + ":" + extras.joined(separator: ":")
+        return environment
+    }
+}
+
 struct CLIRunResult {
     let exitCode: Int32
     let stdout: String
@@ -68,6 +92,7 @@ enum CLIRunner {
         if process.arguments == nil {
             process.arguments = arguments
         }
+        process.environment = SubprocessEnvironment.withAugmentedPath()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
@@ -97,6 +122,16 @@ enum CLIRunner {
                     "\(commandLine, privacy: .public) exited \(exitCode): \(stderr, privacy: .public)"
                 )
             }
+        } else if !stderr.isEmpty {
+            // Success with a warning on stderr: notably `shiibar-cc
+            // reconcile` exits 0 but prints "scan was incomplete; sent
+            // complete:false" when the gather degraded (§3.5 — the CLI
+            // contract is correct, but a permanently degraded backstop must
+            // not be invisible). Info level: visible with `log show --info`,
+            // out of the error stream.
+            subprocessLog.info(
+                "\(commandLine, privacy: .public) succeeded with stderr output: \(stderr, privacy: .public)"
+            )
         }
         return CLIRunResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
