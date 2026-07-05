@@ -153,6 +153,12 @@ private struct TopBar: View {
                 Text("⌄")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.primary)
+                    // U+2304 sits low in its em box; nudge it up so it
+                    // reads centered in the chip (menubar-design.html's
+                    // .vbtn look: a rounded chip with the glyph centered).
+                    .offset(y: -1.5)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
             }
             // The macOS Menu draws its own pull-down disclosure indicator
             // next to the label, which stacked a second chevron under our ⌄
@@ -328,7 +334,7 @@ private struct RowView: View {
         Button {
             state.rowClicked(target: row.target)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 // §4.5/M5 T9: the leading status symbol replaces the old
                 // row-right red dot — unreviewed now badges the symbol's
                 // top-right shoulder instead.

@@ -52,8 +52,12 @@ enum TrayIconMetrics {
 
     // ✳ emblem, top-left (plain U+2733, forced text presentation).
     static let emblemText = "\u{2733}\u{FE0E}"
-    static let emblemCenter = NSPoint(x: 5.4, y: 11.4)
-    static let emblemFontSize: CGFloat = 9.5
+    static let emblemCenter = NSPoint(x: 6.4, y: 11.2)
+    // On-device round 2026-07-05: the U+2733 glyph fills well under its em
+    // box, so a 9.5pt em read as far less than the intended quarter-of-icon
+    // presence. 12pt puts the visible glyph at roughly half the frame's
+    // linear size (= ~1/4 of its area).
+    static let emblemFontSize: CGFloat = 12
 
     // Status indicator, bottom-right. `waiting` and the working dots share
     // the same horizontal center as the mock.
@@ -72,9 +76,12 @@ enum TrayIconMetrics {
 
     // Red unreviewed dot, overhanging the frame's top-right corner, with a
     // light halo ring always drawn (invisible on light bars by design).
-    static let dotCenter = NSPoint(x: 16.2, y: 15.2)
-    static let dotRadius: CGFloat = 2.2
-    static let haloLineWidth: CGFloat = 0.8
+    // On-device round 2026-07-05: r 2.2 was too small to register as a
+    // badge next to real menu bar neighbors; grown and pulled slightly
+    // inward so dot + halo still fit the 18pt canvas.
+    static let dotCenter = NSPoint(x: 16.0, y: 14.5)
+    static let dotRadius: CGFloat = 3.0
+    static let haloLineWidth: CGFloat = 0.9
     static let dotColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
     static let haloColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85)
 
