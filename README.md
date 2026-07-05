@@ -1,7 +1,12 @@
 # shiibar-cc
 
-A macOS menu bar app + CLI that watches your Claude Code agent sessions and
-lets you jump straight to the right one.
+A macOS menu bar app + CLI that watches your Claude Code agent sessions
+running in iTerm2 and lets you jump straight to the right one.
+
+**iTerm2 only, by design.** Sessions running in any other terminal
+(Terminal.app, VS Code's integrated terminal, SSH) are not tracked at all —
+they never appear in the list, and there is nothing to jump to. If your
+Claude Code sessions don't live in iTerm2, this tool does nothing for you.
 
 ## What it does
 
@@ -89,12 +94,14 @@ can revoke it.
 
 ## How it works
 
-```
-Claude Code hooks ──► hooks/report.sh ──► shiibar-cc report ──(Unix socket, NDJSON)──► shiibar-ccd
-                                                                                          │
-                                                                       ┌──────────────────┼──────────────────┐
-                                                                       ▼                  ▼                  ▼
-                                                                menu bar app        shiibar-cc CLI     (future subscribers)
+```mermaid
+flowchart LR
+    hooks[Claude Code hooks] --> report["hooks/report.sh<br>(shiibar-cc report)"]
+    report -- "Unix socket, NDJSON" --> daemon[shiibar-ccd daemon]
+    daemon --> app[menu bar app]
+    daemon --> cli[shiibar-cc CLI]
+    app -- "focus" --> cli
+    cli -- "AppleScript" --> iterm[iTerm2 tab]
 ```
 
 - Every Claude Code hook event runs `hooks/report.sh`, which shells out to
