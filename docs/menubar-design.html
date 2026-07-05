@@ -56,8 +56,12 @@
   .mi.strong .grow { font-weight:650; }
   .mi .sub { display:block; font-size:11px; color:var(--menu-text2); line-height:1.35; font-weight:400; margin-top:1px; }
   .mi.hover .sub { color:rgba(255,255,255,.75); }
-  .ucol { width:8px; flex:none; align-self:flex-start; margin-top:6px; }
-  .ucol .ud { display:block; width:8px; height:8px; border-radius:50%; background:var(--red); }
+  .sym { width:20px; height:20px; flex:none; color:var(--text); }
+  .sym svg { width:100%; height:100%; display:block; overflow:visible; }
+  .mi.hover .sym { color:#fff; }
+  .spin { animation:rot 1.7s linear infinite; transform-origin:50% 50%; }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+  @keyframes rot { to { transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -69,71 +73,87 @@
   <h2>デザイン原則</h2>
   <ul>
     <li><strong>色は赤ただひとつ = 「あなた宛の未読(unreviewed)」</strong>。通知の発火条件と 1:1。
-      status は色ではなく<strong>「状態文字」</strong>で表す — <code>!</code>(waiting・太)/ <code>✳</code>(working・細)/ <code>_</code>(idle・薄)</li>
-    <li><strong>ターミナルの語彙で貫く</strong>: トレイ = 角丸の窓 + プロンプト <code>❯</code> + 状態文字。
-      「ターミナルで Claude Code が動いている姿」(<code>❯</code> の下で ✳ が回るあの画面)をそのまま記号化したもの</li>
-    <li><strong>太さの階層が色の代役</strong>: <code>❯</code>・<code>!</code> は太く、<code>✳</code> は細く、<code>_</code> は薄く。
-      グレースケールだけで優先順位が読める(色覚特性にも強い)</li>
+      status は色ではなく<strong>記号と濃度</strong>で表す — <code>!</code>(waiting・太)/
+      点灯ドット(working・4 コマアニメ)/ 無印(idle・全体 0.8)</li>
+    <li><strong>Claude が居る窓</strong>: トレイ = フルハイトの角丸窓 + 左上の <code>✳</code> 紋章
+      (Claude Code のスピナー文字)+ 右下の状態表示。
+      「ターミナルで Claude Code が動いている姿」(✳ の下で <code>...</code> が進むあの画面)をそのまま記号化したもの</li>
+    <li><strong>太さと濃度の階層が色の代役</strong>: <code>!</code> は太く、点灯ドットは濃淡で動き、
+      idle・切断は全体の減光で沈む。グレースケールだけで優先順位が読める(色覚特性にも強い)</li>
     <li>アイコンは<strong>操作ボタンを描かず、状態そのものを描く</strong>(▶/⏸ のようなメディアボタン文法は逆読みされるため不採用)</li>
   </ul>
 
-  <h2>トレイ: 角丸の窓 + ❯ + 状態文字(ロールアップ・常に 1 枠)</h2>
+  <h2>トレイ: 角丸の窓 + ✳ 紋章 + 状態表示(ロールアップ・常に 1 枠)</h2>
   <table>
     <tr><th>状態(優先度順)</th><th>表示</th><th>意味</th></tr>
-    <tr><td>waiting が 1 台以上</td><td><code>❯ !</code></td><td>許可・入力待ちがいる(あなたの番)</td></tr>
-    <tr><td>working のみ</td><td><code>❯ ✳</code></td><td>実行中(8 本スポークの米印)</td></tr>
-    <tr><td>全員 idle</td><td><code>❯ _</code>(薄め)</td><td>プロンプトが返っている = 手空き</td></tr>
-    <tr><td>エージェントなし</td><td><code>❯</code> のみ・全体グレー</td><td>レイアウト不変のまま沈黙(❯ の位置は動かさない)</td></tr>
-    <tr><td>unreviewed が 1 台以上</td><td>右肩に<strong>赤ドット</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、ドットは対応するまで残る)</td></tr>
+    <tr><td>waiting が 1 台以上</td><td>✳ + <code>!</code></td><td>許可・入力待ちがいる(あなたの番)</td></tr>
+    <tr><td>working のみ</td><td>✳ + 点灯ドット(消灯 → <code>.</code> → <code>..</code> → <code>...</code> の 4 コマ・500ms)</td><td>実行中</td></tr>
+    <tr><td>全員 idle</td><td>✳ と枠のみ・全体 0.8</td><td>プロンプトが返っている = 手空き(窓は静か)</td></tr>
+    <tr><td>エージェントなし</td><td>✳ と枠のみ・全体 0.45</td><td>レイアウト不変のまま沈黙(✳ の位置は動かさない)</td></tr>
+    <tr><td>unreviewed が 1 台以上</td><td>右肩に<strong>赤バッジ</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、ドットは対応するまで残る)</td></tr>
   </table>
   <ul>
-    <li>ロールアップ優先度: <strong>waiting &gt; working &gt; idle</strong>。トレイはドロップダウン各行の「状態文字」の代表 1 文字</li>
+    <li>ロールアップ優先度: <strong>waiting &gt; working &gt; idle</strong>。トレイは全セッションの状態の代表 1 表示</li>
     <li><strong>テンプレートアイコン</strong>(モノクロ・メニューバーの文字色に自動追従)。暗い壁紙のバーでは白いグリフになる</li>
-    <li>太い ❯ は左枠に寄せる(ターミナルの行頭)。状態文字は ❯ 寄りに置き、右に余白を流す</li>
-    <li>赤ドットは窓の右肩に<strong>オーバーハング</strong>させ、<strong>細い明色フチ(ハロー)を常時描く</strong>
+    <li>✳ 紋章は左上(素の U+2733 のまま)。状態表示(<code>!</code> / 点灯ドット)は右下に置く。
+      点灯ドットは 3 つとも定位置・下揃えで、<strong>透明度の濃淡だけ</strong>で進む(薄 30% ⇄ 濃 100%)—
+      透明度しか変えないのでテンプレート画像のまま成立し、タイマーは working 表示のときだけ動かす</li>
+    <li>赤バッジは窓の右肩にさせ、<strong>細い明色フチ(ハロー)を常時描く</strong>
       (明色バーでは実質不可視。テンプレート画像はバー色を知れないので条件分岐はしない)</li>
-    <li>減光は 2 段階: <strong>idle = 全体 0.8 / エージェントなし = 0.45</strong>(値は実機調整)。
+    <li>減光は 2 段階: <strong>idle = 全体 0.8 / エージェントなし = 0.45</strong>(値は実機調整。
+      idle と切断の見分けはこの濃度差のみ)。
       <strong>daemon 切断中はトレイ全体をエージェントなしと同じ減光にする</strong>(古いロールアップを正常と誤認させない。DESIGN.md §4.5)</li>
   </ul>
   <div class="mock">
-    <div class="mock-label">左から: 待ち・未読 / 待ち・対応中 / 実行中・完了未読あり / 実行中のみ / 全員待機 / エージェントなし</div>
+    <div class="mock-label">左から: 待ち・未読 / 待ち・対応中 / 実行中・完了未読あり / 実行中のみ / 全員待機(0.8) / エージェントなし・切断(0.45)。実行中の点灯ドットは 4 コマアニメの 1 コマ(<code>..</code>)を静止で示す</div>
     <div class="mbar">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/><rect class="fl" x="9.7" y="4.9" width="1.35" height="3.9" rx=".68"/><circle class="fl" cx="10.4" cy="10.6" r=".95"/><circle cx="14.2" cy="2.3" r="2" fill="var(--red)"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/><rect class="fl" x="9.7" y="4.9" width="1.35" height="3.9" rx=".68"/><circle class="fl" cx="10.4" cy="10.6" r=".95"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/><g stroke="currentColor" stroke-width="1.05" stroke-linecap="round"><line x1="10.2" y1="5.3" x2="10.2" y2="10.7"/><line x1="7.5" y1="8" x2="12.9" y2="8"/><line x1="8.29" y1="6.09" x2="12.11" y2="9.91"/><line x1="12.11" y1="6.09" x2="8.29" y2="9.91"/></g><circle cx="14.2" cy="2.3" r="2" fill="var(--red)"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/><g stroke="currentColor" stroke-width="1.05" stroke-linecap="round"><line x1="10.2" y1="5.3" x2="10.2" y2="10.7"/><line x1="7.5" y1="8" x2="12.9" y2="8"/><line x1="8.29" y1="6.09" x2="12.11" y2="9.91"/><line x1="12.11" y1="6.09" x2="8.29" y2="9.91"/></g></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg" style="opacity:.8"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/><path class="ln" stroke-width="1.3" d="M8.4 10.4h3.6"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg" style="opacity:.45"><svg viewBox="0 0 16 16"><rect class="ln" x="1.2" y="1.8" width="13.6" height="12.4" rx="3"/><path class="ln" stroke-width="2" d="M3.1 5.5 5.7 8l-2.6 2.5"/></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="16.2" cy="2.8" r="2.2" fill="#f24d52"/><circle cx="16.2" cy="2.8" r="2.2" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".8"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">!</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="currentColor" fill-opacity="0.3"/><circle cx="16.2" cy="2.8" r="2.2" fill="#f24d52"/><circle cx="16.2" cy="2.8" r="2.2" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".8"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="currentColor" fill-opacity="0.3"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.45"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
       <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem" style="font-variant-numeric:tabular-nums">7月5日(日) 0:15</span>
     </div>
-    <div class="mock-label">暗色メニューバー(壁紙の色を拾った例)での見え方 — テンプレートの自動反転で白いグリフになる。赤ドットには明色フチ</div>
+    <div class="mock-label">暗色メニューバー(壁紙の色を拾った例)での見え方 — テンプレートの自動反転で白いグリフになる。赤バッジには明色フチ</div>
     <div class="mbar" style="background:#5c2018;color:#f4f0ee">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 16 16"><rect x="1.2" y="1.8" width="13.6" height="12.4" rx="3" fill="none" stroke="#f4f0ee" stroke-width="1.3" stroke-linejoin="round"/><path fill="none" stroke="#f4f0ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3.1 5.5 5.7 8l-2.6 2.5"/><rect fill="#f4f0ee" x="9.7" y="4.9" width="1.35" height="3.9" rx=".68"/><circle fill="#f4f0ee" cx="10.4" cy="10.6" r=".95"/><circle cx="14.2" cy="2.3" r="2.1" fill="#ff5257" stroke="rgba(255,255,255,.85)" stroke-width=".7"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 16 16"><rect x="1.2" y="1.8" width="13.6" height="12.4" rx="3" fill="none" stroke="#f4f0ee" stroke-width="1.3" stroke-linejoin="round"/><path fill="none" stroke="#f4f0ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3.1 5.5 5.7 8l-2.6 2.5"/><g stroke="#f4f0ee" stroke-width="1.05" stroke-linecap="round"><line x1="10.2" y1="5.3" x2="10.2" y2="10.7"/><line x1="7.5" y1="8" x2="12.9" y2="8"/><line x1="8.29" y1="6.09" x2="12.11" y2="9.91"/><line x1="12.11" y1="6.09" x2="8.29" y2="9.91"/></g><circle cx="14.2" cy="2.3" r="2.1" fill="#ff5257" stroke="rgba(255,255,255,.85)" stroke-width=".7"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg" style="opacity:.8"><svg viewBox="0 0 16 16"><rect x="1.2" y="1.8" width="13.6" height="12.4" rx="3" fill="none" stroke="#f4f0ee" stroke-width="1.3" stroke-linejoin="round"/><path fill="none" stroke="#f4f0ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3.1 5.5 5.7 8l-2.6 2.5"/><path fill="none" stroke="#f4f0ee" stroke-width="1.3" stroke-linecap="round" d="M8.4 10.4h3.6"/></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="#f4f0ee" stroke="none">!</text><circle cx="16.2" cy="2.8" r="2.2" fill="#f24d52"/><circle cx="16.2" cy="2.8" r="2.2" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".8"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="0.3"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="5.4" y="9.83" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
       <span class="mitem" style="font-variant-numeric:tabular-nums;color:#f4f0ee">0:15</span>
     </div>
   </div>
 
-  <h2>ドロップダウン: グルーピング一覧(カスタムビュー)</h2>
+  <h2>ドロップダウン: フラット一覧 + 行頭の状態記号(カスタムビュー)</h2>
   <ul>
     <li>最上部: <strong>⌄ ボタン</strong>(中に Rescan = <code>reconcile</code> /
-      Start at Login(有効中はチェックマーク)/ Mute Sound(ミュート中はチェックマーク)/ <strong>Quit</strong>)。
+      Start at Login(有効中はチェックマーク)/ <strong>Sort by</strong>(ラジオ 3 択:
+      Newest session ✓ / Recent activity / Grouped)/ Mute Sound(ミュート中はチェックマーク)/ <strong>Quit</strong>)。
       <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
     <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
       (一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
       クリック動作なし(切り分けは <code>doctor</code>)</li>
-    <li><strong>グループ見出し</strong>: トレイと同形の窓アイコン(線画・24px 相当)+ 太字ラベル
-      <strong>Waiting / Working / Idle</strong>(通常文字色)。空グループは見出しごと非表示</li>
-    <li>行はグループごとの<strong>薄い背景カード</strong>(inset grouped)でまとめる(字下げはしない)</li>
+    <li><strong>行頭の状態記号</strong>(20px 相当): <strong>空の ◯ = idle</strong>(線 55% 濃度)/
+      <strong>◯ に太い ! = waiting</strong> / <strong>回転スピナー = working</strong>
+      (円弧 + 矢頭、1.7 秒/周。ドロップダウンが開いている間だけ回す)</li>
     <li>行は 2 行: <strong>1 行目 = 作業内容</strong>(waiting は許可内容 = <code>message</code>、それ以外は最後のプロンプト先頭 = <code>task</code>。
       どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
-    <li><strong>未読(unreviewed)= 1 行目太字 + 右側・1 行目の高さに赤ドット</strong>。focus(seen)で両方消える</li>
-    <li>並び順: Waiting → Working → Idle、各グループ内は未読が上(開くたびに並びが安定)。行クリックで focus</li>
-    <li><strong>ホバー / プレス</strong>: ドロップダウン内の押せる要素すべて(セッション行・⌄ ボタン・⌄ メニュー項目)は
-      ホバーで<strong>選択色のハイライト</strong>(角丸 7px。モック値 <code>#3478f6</code>・白文字 — 実装はシステムの
-      選択色に追従させる)、プレス中は<strong>ハイライトを一段暗く</strong>(モック値 <code>#2b66d9</code> 相当)。
-      押せないもの(見出し・警告行)には付けない</li>
+    <li><strong>未読(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
+      トレイの「窓の右肩バッジ」と同じ文法。行の右端には何も置かない)。focus(seen)で両方消える</li>
+    <li><strong>並び替え(⌄ の Sort by)</strong>: <strong>Newest session(既定)</strong>=
+      登録時刻の新しい順(キー不変 = 行が動かない)/ <strong>Recent activity</strong> =
+      最後の hook report の新しい順(並びの確定は開いた時点)/ <strong>Grouped</strong> =
+      グループ見出し <strong>Waiting / Working / Idle</strong>(トレイと同形の窓アイコン・線画 24px 相当。
+      空グループは非表示)+ グループごとの<strong>薄い背景カード</strong>、各グループ内は未読が上。
+      フラットな 2 モードでは未読を上に寄せない(並びの安定を優先)。行クリックで focus</li>
+    <li><strong>ホバー / プレス</strong>: <strong>セッション行</strong>はホバーで<strong>選択色のハイライト</strong>
+      (角丸 7px。モック値 <code>#3478f6</code>・白文字 — 実装はシステムの選択色に追従させる)、
+      プレス中は<strong>一段暗く</strong>(モック値 <code>#2b66d9</code> 相当)。
+      <strong>⌄ ボタンは選択色を使わない</strong> — 常時グレーのチップ(上の <code>.vbtn</code> の見た目 =
+      <code>rgba(127,127,127,.14)</code>・角丸 7px)を敷き、ホバーで濃く(<code>.22</code> 相当)、
+      プレスでさらに濃く(<code>.30</code> 相当)。文字色は変えない。
+      ⌄ の中身(ネイティブメニュー項目)は OS 標準のハイライトのまま。
+      押せないもの(見出し・警告行)には何も付けない</li>
     <li><strong>Rescan のフィードバック</strong>: topbar の ⌄ の右(v1 では空いている領域)に一時テキストを出す —
       実行中 <code>Rescanning…</code> / 正常終了後 <code>✓ Rescan done</code>(表示 2 秒 → 自然消滅。DESIGN.md §9)/
       失敗(TCC 以外)<code>Rescan failed</code>(同じく 2 秒)。セカンダリ色 12px・クリック不可。
@@ -141,24 +161,27 @@
     <li>UI 文言は英語。行の中身(プロンプト・許可内容)はユーザー入力そのまま。1 行目は末尾省略(ellipsis)、
       行数が多いときは縦スクロール(最大高は実機調整)</li>
     <li>エージェントゼロのときは topbar + 「No agents」の一行のみ</li>
-    <li>状態文字の凡例は UI に置かない(グループ見出し = 実質の凡例。配布しない個人ツールの割り切り)</li>
+    <li>状態記号の凡例は UI に置かない(空◯ / ! / スピナーは一般的な文法で読める、の割り切り)</li>
   </ul>
   <div class="mock">
+    <div class="mock-label">既定(Newest session): フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例</div>
     <div class="menu">
       <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
-      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.15" x="1" y="1.6" width="14" height="12.8" rx="3.2"/><path class="ln" stroke-width="1.95" d="M3 5.4 5.7 8l-2.7 2.6"/><rect class="fl" x="9.75" y="4.7" width="1.4" height="4.1" rx=".7"/><circle class="fl" cx="10.45" cy="10.8" r="1"/></svg></span>Waiting</div>
+      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 0.9 L11.1 2.4 L8.5 3.9 Z" fill="currentColor"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
+    </div>
+    <div class="mock-label">Grouped モード(Sort by で選択。見出し + カード、未読が各グループの上)</div>
+    <div class="menu">
+      <div class="topbar"><span class="vbtn">⌄</span></div>
+      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.2" x="1" y="1" width="14" height="14" rx="3"/><text x="4.6" y="7.4" font-size="7" text-anchor="middle" fill="currentColor">&#x2733;&#xFE0E;</text><text x="10.6" y="12.6" font-size="8.5" font-weight="700" text-anchor="middle" fill="currentColor">!</text></svg></span>Waiting</div>
       <div class="gcard">
-      <div class="mi hover strong"><span class="grow">Bash: cargo test --workspace<span class="sub">shiibar/main · 2m</span></span><span class="ucol"><span class="ud"></span></span></div>
-      <div class="mi"><span class="grow">Write: draft.md<span class="sub">blog/draft-post · 8m</span></span><span class="ucol"></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
       </div>
-      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.15" x="1" y="1.6" width="14" height="12.8" rx="3.2"/><path class="ln" stroke-width="1.95" d="M3 5.4 5.7 8l-2.7 2.6"/><g stroke="currentColor" stroke-width="1.05" stroke-linecap="round"><line x1="10.3" y1="5.2" x2="10.3" y2="10.8"/><line x1="7.5" y1="8" x2="13.1" y2="8"/><line x1="8.32" y1="6.02" x2="12.28" y2="9.98"/><line x1="12.28" y1="6.02" x2="8.32" y2="9.98"/></g></svg></span>Working</div>
+      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.2" x="1" y="1" width="14" height="14" rx="3"/><text x="4.6" y="7.4" font-size="7" text-anchor="middle" fill="currentColor">&#x2733;&#xFE0E;</text><circle cx="8.2" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="10.799999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="1"/><circle cx="13.399999999999999" cy="11.6" r="0.95" fill="currentColor" fill-opacity="0.35"/></svg></span>Working</div>
       <div class="gcard">
-      <div class="mi"><span class="grow">focus の AppleScript を実装して<span class="sub">shiibar/wt-focus · 12m</span></span><span class="ucol"></span></div>
-      </div>
-      <div class="ghdr"><span class="gic2"><svg viewBox="0 0 16 16"><rect class="ln" stroke-width="1.15" x="1" y="1.6" width="14" height="12.8" rx="3.2"/><path class="ln" stroke-width="1.95" d="M3 5.4 5.7 8l-2.7 2.6"/><path class="ln" stroke-width="1.35" d="M8.4 10.5h3.8"/></svg></span>Idle</div>
-      <div class="gcard">
-      <div class="mi strong"><span class="grow">hook ペイロードのログ採取を試す<span class="sub">sandbox/experiment · 5m</span></span><span class="ucol"><span class="ud"></span></span></div>
-      <div class="mi"><span class="grow">dotfiles<span class="sub">1h</span></span><span class="ucol"></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 0.9 L11.1 2.4 L8.5 3.9 Z" fill="currentColor"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       </div>
     </div>
     <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
@@ -177,17 +200,17 @@
 
   <h2>実装ノート</h2>
   <ul>
-    <li>トレイは<strong>二層合成</strong>: 窓 + ❯ + 状態文字の<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
+    <li>トレイは<strong>二層合成</strong>: 窓 + ✳ + 状態表示の<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
       <strong>赤ドットを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
       一次案 = `MenuBarExtra` の label で ZStack(テンプレート NSImage + 赤 Circle オーバーレイ)、
       不可なら effectiveAppearance 監視の非テンプレート合成にフォールバック。
-      状態文字は自前描画または<strong>文字グリフ(attributed string)</strong> — フォントの美しい ✳ を使えるので実機で両方式を比較する</li>
+      ✳ 紋章と <code>!</code> は文字グリフ(attributed string)、点灯ドットとバッジは自前描画</li>
     <li><strong>✳ は 8 本スポークの単純な米印(U+2733 系の文字記号)に留め、Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
     <li>ドロップダウンは標準 NSMenu ではなく<strong>カスタムビュー(SwiftUI `MenuBarExtra` の window スタイル)</strong>。
       ホバー・クリック・警告行は自前実装になる(M4 の工数に織り込む)</li>
     <li>見出しラベルはアイコンの縦センター基準 + <strong>わずかに下げる光学調整</strong>(モックでは 1.5px 相当)</li>
     <li>線の太さ・間隔・光学調整はすべて<strong>実機(Retina レンダリング)で最終決定</strong>。実機確認項目:
-      ❯ と枠の間隔が融合して見えないか / ✳ が 21px 前後で潰れないか / 見出し窓アイコン 24px の可読性 /
+      ✳ と枠の間隔が融合して見えないか / 点灯ドットの濃淡差が小サイズで読めるか / 見出し窓アイコン 24px の可読性(Grouped モード)/
       赤ドットのハローが各種メニューバー色で機能するか</li>
     <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は 1 クリックで見える)</li>
   </ul>
