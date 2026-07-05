@@ -27,7 +27,17 @@ a glance:
 Click a session in the dropdown (or a notification) and it jumps to that
 session's iTerm2 tab.
 
-<!-- TODO: screenshot -->
+<img src="docs/assets/menubar-dropdown.png" width="500"
+     alt="The Shiibar CC dropdown, grouped by status: two sessions waiting
+          on permission (one unreviewed, with a red badge), one working,
+          one idle">
+
+Notifications carry the outcome, not just an alert — which session
+finished, and what its agent last said:
+
+<img src="docs/assets/notification-banner.png" width="450"
+     alt="A macOS notification: 'Done — demo/blog', with the agent's final
+          message about the completed link check">
 
 ## Permissions
 
