@@ -130,6 +130,14 @@
       どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
     <li><strong>未読(unreviewed)= 1 行目太字 + 右側・1 行目の高さに赤ドット</strong>。focus(seen)で両方消える</li>
     <li>並び順: Waiting → Working → Idle、各グループ内は未読が上(開くたびに並びが安定)。行クリックで focus</li>
+    <li><strong>ホバー / プレス</strong>: ドロップダウン内の押せる要素すべて(セッション行・⌄ ボタン・⌄ メニュー項目)は
+      ホバーで<strong>選択色のハイライト</strong>(角丸 7px。モック値 <code>#3478f6</code>・白文字 — 実装はシステムの
+      選択色に追従させる)、プレス中は<strong>ハイライトを一段暗く</strong>(モック値 <code>#2b66d9</code> 相当)。
+      押せないもの(見出し・警告行)には付けない</li>
+    <li><strong>Rescan のフィードバック</strong>: topbar の ⌄ の右(v1 では空いている領域)に一時テキストを出す —
+      実行中 <code>Rescanning…</code> / 正常終了後 <code>✓ Rescan done</code>(表示 2 秒 → 自然消滅。DESIGN.md §9)/
+      失敗(TCC 以外)<code>Rescan failed</code>(同じく 2 秒)。セカンダリ色 12px・クリック不可。
+      件数は出さない。TCC エラー(exit 3)は上記の警告行の扱い</li>
     <li>UI 文言は英語。行の中身(プロンプト・許可内容)はユーザー入力そのまま。1 行目は末尾省略(ellipsis)、
       行数が多いときは縦スクロール(最大高は実機調整)</li>
     <li>エージェントゼロのときは topbar + 「No agents」の一行のみ</li>
@@ -157,6 +165,13 @@
     <div class="menu" style="width:380px">
       <div class="topbar"><span class="vbtn">⌄</span></div>
       <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;color:var(--menu-text2);font-size:12px">⚠ Disconnected from daemon — reconnecting…</div>
+    </div>
+    <div class="mock-label">Rescan フィードバックの 2 状態(topbar の ⌄ 右に一時表示。完了表示は 2 秒で消える)</div>
+    <div class="menu" style="width:380px">
+      <div class="topbar"><span class="vbtn">⌄</span><span style="color:var(--menu-text2);font-size:12px;padding:4px 2px">Rescanning…</span></div>
+    </div>
+    <div class="menu" style="width:380px;margin-top:8px">
+      <div class="topbar"><span class="vbtn">⌄</span><span style="color:var(--menu-text2);font-size:12px;padding:4px 2px">✓ Rescan done</span></div>
     </div>
   </div>
 
