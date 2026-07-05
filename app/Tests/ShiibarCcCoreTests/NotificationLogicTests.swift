@@ -105,6 +105,55 @@ final class NotificationLogicTests: XCTestCase {
         XCTAssertEqual(edges, [UnreviewedEdge(target: "t", status: .idle)])
     }
 
+    // ---- Baseline (first-snapshot) seeding (§4.5 2026-07-05 addendum) ----
+
+    func testBaselineSnapshotWithPreExistingUnreviewedFiresNoEdges() {
+        let tracker = UnreviewedEdgeTracker()
+        let edges = tracker.observe(
+            agents: [agent(target: "t", status: .waiting, unreviewed: true)],
+            baseline: true
+        )
+        XCTAssertTrue(edges.isEmpty, "the launch baseline must not re-notify a pre-existing unreviewed entry")
+        XCTAssertEqual(tracker.trackedTargets, ["t"], "baseline still seeds the tracked set, just without firing")
+    }
+
+    func testBaselineSeededEntryDroppingThenRisingAgainLaterFires() {
+        let tracker = UnreviewedEdgeTracker()
+        _ = tracker.observe(
+            agents: [agent(target: "t", status: .waiting, unreviewed: true)],
+            baseline: true
+        )
+        _ = tracker.observe(agents: [agent(target: "t", status: .working, unreviewed: false)])
+        let edges = tracker.observe(agents: [agent(target: "t", status: .idle, unreviewed: true)])
+        XCTAssertEqual(edges, [UnreviewedEdge(target: "t", status: .idle)])
+    }
+
+    func testSecondSnapshotAfterBaselineFiresForANewUnreviewedEntry() {
+        // A reconnect snapshot is not the launch baseline, so it must keep
+        // the ordinary rising-edge behavior (DESIGN.md §4.5: "reconnect
+        // snapshot / reconcile" edges still fire).
+        let tracker = UnreviewedEdgeTracker()
+        _ = tracker.observe(
+            agents: [agent(target: "t", status: .waiting, unreviewed: true)],
+            baseline: true
+        )
+        let edges = tracker.observe(agents: [
+            agent(target: "t", status: .waiting, unreviewed: true),
+            agent(target: "u", status: .idle, unreviewed: true),
+        ])
+        XCTAssertEqual(edges, [UnreviewedEdge(target: "u", status: .idle)])
+    }
+
+    func testLiveEventRisingEdgeAfterBaselineFires() {
+        let tracker = UnreviewedEdgeTracker()
+        _ = tracker.observe(
+            agents: [agent(target: "t", status: .working, unreviewed: false)],
+            baseline: true
+        )
+        let edges = tracker.observe(agents: [agent(target: "t", status: .waiting, unreviewed: true)])
+        XCTAssertEqual(edges, [UnreviewedEdge(target: "t", status: .waiting)])
+    }
+
     func testForgetAllowsTheSameTargetToRiseAgainAsANewEdge() {
         let tracker = UnreviewedEdgeTracker()
         _ = tracker.observe(agents: [agent(target: "t", status: .waiting, unreviewed: true)])

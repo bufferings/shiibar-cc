@@ -40,13 +40,22 @@ public final class UnreviewedEdgeTracker {
 
     /// Feed the latest known set of agents (however it was learned) and get
     /// back every target that just transitioned into unreviewed this call.
+    ///
+    /// `baseline: true` (DESIGN.md §4.5 addendum: "the first snapshot after
+    /// app launch is a baseline") records the current unreviewed set without
+    /// reporting any edges for it — used exactly once, for the very first
+    /// snapshot an app process receives, so pre-existing unreviewed entries
+    /// at launch don't re-notify (the red badge already shows the backlog).
+    /// Every later observation (reconnect snapshots included, and any
+    /// `status_changed` / reconcile update) must pass `baseline: false` so
+    /// rising edges are reported as usual.
     @discardableResult
-    public func observe(agents: [Agent]) -> [UnreviewedEdge] {
+    public func observe(agents: [Agent], baseline: Bool = false) -> [UnreviewedEdge] {
         var edges: [UnreviewedEdge] = []
         var next: Set<String> = []
         for agent in agents where agent.unreviewed {
             next.insert(agent.target)
-            if !currentlyUnreviewed.contains(agent.target) {
+            if !baseline && !currentlyUnreviewed.contains(agent.target) {
                 edges.append(UnreviewedEdge(target: agent.target, status: agent.status))
             }
         }

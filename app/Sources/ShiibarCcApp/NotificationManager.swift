@@ -4,12 +4,14 @@
 // sound for both waiting (time-sensitive) and done (active), threadIdentifier
 // grouping per target, two independent mute toggles (UserDefaults: Mute
 // Banners / Mute Sound, §4.5/§8.14 2026-07-05 addendum), and cleanup that
-// skips `session_end` removals. Rising-edge detection / de-dup / the delayed
-// decision / content building / the mute delivery decision / the cleanup
-// rule are pure logic in ShiibarCcCore (`UnreviewedEdgeTracker`,
-// `DelayedNotificationDecision`, `NotificationContentBuilder`,
-// `NotificationDeliveryPolicy`, `NotificationCleanupRule`) — this type is the
-// I/O wrapper around them.
+// skips `session_end` removals. The first `.snapshot` this process receives
+// is a baseline: pre-existing unreviewed entries in it don't notify (§4.5
+// 2026-07-05 addendum) — see `observeSnapshot`. Rising-edge detection /
+// de-dup / baseline seeding / the delayed decision / content building / the
+// mute delivery decision / the cleanup rule are pure logic in ShiibarCcCore
+// (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
+// `NotificationContentBuilder`, `NotificationDeliveryPolicy`,
+// `NotificationCleanupRule`) — this type is the I/O wrapper around them.
 
 import AppKit
 import Foundation
@@ -106,11 +108,28 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    /// Whether this app process has consumed its first `.snapshot` event yet
+    /// (DESIGN.md §4.5 addendum). Not persisted — a fresh launch always gets
+    /// a fresh baseline, per process, as designed.
+    private var hasConsumedFirstSnapshot = false
+
     /// Feed the latest known agents (from any source: snapshot,
     /// status_changed, or a post-reconcile refresh, §4.5) to detect rising
     /// edges and schedule their delayed notifications.
     func observe(agents: [Agent]) {
         for edge in edgeTracker.observe(agents: agents) {
+            scheduleDelayedNotification(for: edge)
+        }
+    }
+
+    /// Feed a `.snapshot` event specifically. The app layer's only
+    /// responsibility for the baseline rule (DESIGN.md §4.5 addendum) is
+    /// knowing *which* snapshot is first per process — the decision to
+    /// suppress edges for it is pure logic in `UnreviewedEdgeTracker`.
+    func observeSnapshot(agents: [Agent]) {
+        let isBaseline = !hasConsumedFirstSnapshot
+        hasConsumedFirstSnapshot = true
+        for edge in edgeTracker.observe(agents: agents, baseline: isBaseline) {
             scheduleDelayedNotification(for: edge)
         }
     }

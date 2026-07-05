@@ -196,7 +196,7 @@ final class AppState: ObservableObject {
         switch event {
         case .snapshot(let snapshotAgents):
             agents = snapshotAgents
-            notificationManager.observe(agents: agents)
+            notificationManager.observeSnapshot(agents: agents)
         case .statusChanged(let agent):
             if let index = agents.firstIndex(where: { $0.target == agent.target }) {
                 agents[index] = agent
