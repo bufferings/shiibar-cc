@@ -109,7 +109,7 @@ pub fn checks_to_json(checks: &[CheckRecord]) -> String {
 /// records (DESIGN.md §4.4's common table: 1 = "connection / internal
 /// error, including daemon absent"). Every other check is advisory: doctor's
 /// job is to show every problem in one pass, not to gate on all of them.
-/// `--json` uses the same rule (§4.4: "exit code の意味は人間向けと同じ").
+/// `--json` uses the same rule (§4.4: "exit codes mean the same as in the human-facing output").
 pub fn exit_code_for(checks: &[CheckRecord]) -> i32 {
     let daemon_unreachable = checks
         .iter()

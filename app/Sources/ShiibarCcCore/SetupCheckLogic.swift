@@ -50,7 +50,7 @@ public struct SetupCheckRow: Equatable, Sendable, Identifiable {
     public let status: SetupCheckStatus
     public let summary: String
     /// Secondary-text pointer to how to fix the problem, if there's
-    /// something actionable to say (§4.5: "各行に対処のヒントを一言").
+    /// something actionable to say (§4.5: "one remedy hint per row").
     public let hint: String?
 
     public init(id: String, status: SetupCheckStatus, summary: String, hint: String?) {

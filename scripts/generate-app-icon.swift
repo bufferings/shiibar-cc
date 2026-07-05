@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // Generates the ShiibarCC app icon iconset (docs/tasks/M5.md T10;
-// DESIGN.md §4.5 "アプリアイコン"). Standalone script, run with the CLT's
+// DESIGN.md §4.5 "app icon"). Standalone script, run with the CLT's
 // `swift`:
 //
 //   swift scripts/generate-app-icon.swift <output-dir>
@@ -12,7 +12,7 @@
 //
 // Geometry is expressed in a 100-unit logical space, y-down, scaled to each
 // target pixel size (docs/tasks/M5.md T10). This file is the geometry's
-// source of truth (DESIGN.md §4.5: "ジオメトリの正は生成スクリプト").
+// source of truth (DESIGN.md §4.5: "the generator script is the source of truth for geometry").
 //
 // Any failure here exits non-zero with a message on stderr — no silent
 // fallback. The caller (install.sh) is expected to treat that as a hard
@@ -71,12 +71,12 @@ let entries: [IconEntry] = [
 ]
 
 // Sizes at or below this many pixels use the simplified tile+asterisk-only
-// variant (M5.md T10: "32px 以下は ✳ のみの簡略版") — the state-symbol column
+// variant (M5.md T10: "at 32px and below, the simplified ✳-only variant") — the state-symbol column
 // and badge are too fine to read at that resolution.
 let simplifiedThreshold = 32
 
 // U+2733 EIGHT SPOKED ASTERISK with VS15 (U+FE0E) to force the text
-// presentation (M5.md T10: "素の U+2733(text presentation)") instead of a
+// presentation (M5.md T10: "bare U+2733 (text presentation)") instead of a
 // possible color-emoji glyph.
 let asterisk = "\u{2733}\u{FE0E}"
 
