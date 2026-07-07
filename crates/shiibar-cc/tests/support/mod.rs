@@ -54,7 +54,10 @@ pub struct TestDaemon {
 
 impl TestDaemon {
     /// Spawn the real `shiibar-ccd --foreground` binary against a fresh temp
-    /// dir, and wait for its socket to appear.
+    /// dir, and wait until its socket accepts a connection. Checking that
+    /// the socket file merely exists is not enough: the file appears at
+    /// bind(2), but connects are refused until listen(2) — a real race seen
+    /// as a CI flake (connect panicking right after startup).
     pub fn start(state_dir: &Path) -> Self {
         let child = Command::new(shiibar_ccd_bin_path())
             .arg("--foreground")
@@ -67,10 +70,14 @@ impl TestDaemon {
 
         let sock_path = state_dir.join("shiibar-ccd.sock");
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !sock_path.exists() {
+        // A successful probe connect (dropped immediately — the daemon
+        // treats a zero-byte connection as a benign disconnect) proves the
+        // daemon is accepting; every later connect in the harness can then
+        // expect success.
+        while UnixStream::connect(&sock_path).is_err() {
             assert!(
                 Instant::now() < deadline,
-                "shiibar-ccd never created its socket"
+                "shiibar-ccd never accepted a connection on its socket"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
