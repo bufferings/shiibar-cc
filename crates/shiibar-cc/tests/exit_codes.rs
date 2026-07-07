@@ -44,6 +44,13 @@ fn remove_exits_1_when_daemon_absent() {
 }
 
 #[test]
+fn seen_exits_1_when_daemon_absent() {
+    let dir = tempdir();
+    let out = shiibar_cc(dir.path(), &["seen", "some-target"]);
+    assert_eq!(out.code, 1);
+}
+
+#[test]
 fn wait_exits_1_when_daemon_absent() {
     let dir = tempdir();
     let out = shiibar_cc(
@@ -212,6 +219,27 @@ fn dot_selector_is_exit_1_when_ambiguous() {
         .status()
         .unwrap();
     assert_eq!(output.code(), Some(1));
+}
+
+#[test]
+fn seen_exits_2_when_selector_matches_nothing() {
+    let dir = tempdir();
+    let daemon = TestDaemon::start(dir.path());
+    let out = shiibar_cc(&daemon.state_dir, &["seen", "no-such-target"]);
+    assert_eq!(out.code, 2);
+}
+
+#[test]
+fn seen_succeeds_with_an_exact_target_selector() {
+    let dir = tempdir();
+    let daemon = TestDaemon::start(dir.path());
+    let mut payload = report_payload(HookEvent::SessionStart, "t-seen", "/proj/f", 1);
+    payload.source = Some(SessionStartSource::Startup);
+    daemon.report(payload);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let out = shiibar_cc(&daemon.state_dir, &["seen", "t-seen"]);
+    assert_eq!(out.code, 0, "stderr={}", out.stderr);
 }
 
 // ---- list ----

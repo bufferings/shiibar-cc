@@ -32,6 +32,7 @@ fn main() {
         Some("focused") => cmd_focused(&rest),
         Some("reconcile") => cmd_reconcile(&rest),
         Some("remove") => cmd_remove(&rest),
+        Some("seen") => cmd_seen(&rest),
         Some("doctor") => cmd_doctor(&rest),
         _ => {
             print_usage();
@@ -43,7 +44,7 @@ fn main() {
 
 fn print_usage() {
     eprintln!(
-        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|doctor> ..."
+        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|seen|doctor> ..."
     );
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
@@ -167,6 +168,22 @@ fn cmd_remove(args: &[String]) -> i32 {
         return 1;
     };
     let (code, err) = shiibar_cc::remove_cmd::run_remove(
+        &shiibar_cc_client::resolve_socket_path(),
+        selector,
+        current_dir_or_dot(),
+    );
+    if let Some(e) = err {
+        eprintln!("{e}");
+    }
+    code
+}
+
+fn cmd_seen(args: &[String]) -> i32 {
+    let Some(selector) = args.first() else {
+        eprintln!("usage: shiibar-cc seen <selector>");
+        return 1;
+    };
+    let (code, err) = shiibar_cc::seen_cmd::run_seen(
         &shiibar_cc_client::resolve_socket_path(),
         selector,
         current_dir_or_dot(),

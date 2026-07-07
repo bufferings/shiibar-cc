@@ -150,6 +150,18 @@ enum CLIRunner {
         run(["reconcile"], helpersDirectory: helpersDirectory)
     }
 
+    /// `shiibar-cc seen <target>` (⌄ menu "Clear badges", §4.4/§4.5/§8.24):
+    /// clears one target's unreviewed flag. Exit 2 ("no match") is an
+    /// expected outcome, same reasoning as `focus` above — the target can
+    /// disappear (session ends) between the click capturing the unreviewed
+    /// target list and this call running for it. `@discardableResult`: its
+    /// only caller (`AppState.clearBadges`) doesn't need the outcome — the
+    /// badge disappearing via the subscribe stream IS the feedback (§4.5).
+    @discardableResult
+    static func seen(target: String, helpersDirectory: URL?) -> CLIRunResult {
+        run(["seen", target], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
+    }
+
     /// `shiibar-cc doctor --json` (⌄ menu "Setup Check…", §4.4/§4.5). Exit 1
     /// (a check failed, e.g. the daemon isn't reachable) is an EXPECTED
     /// outcome here, not a subprocess error — doctor's whole point is to

@@ -1,6 +1,7 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5): ⌄ menu (Rescan / Sort by / Settings [Start at Login /
-// Mute Banners / Mute Sound] / Setup Check… / Quit), warning rows (disconnected / notification permission denied /
+// DESIGN.md §4.5/§8.24): ⌄ menu (Rescan / Clear badges / Sort by / Settings
+// [Start at Login / Mute Banners / Mute Sound] / About Shiibar CC / Setup
+// Check… / Quit), warning rows (disconnected / notification permission denied /
 // focus TCC error), a flat list with a leading status symbol (default) or
 // grouped cards (Waiting / Working / Idle, empty groups hidden) depending
 // on the "Sort by" selection, two-line rows with unreviewed bolding + a
@@ -140,8 +141,10 @@ private struct TopBar: View {
         .padding(.top, 2)
     }
 
-    /// Builds the ⌄ menu (Rescan / Sort by / Settings / Quit, §4.5) fresh
-    /// on every click, so checkmarks always show the live state.
+    /// Builds the ⌄ menu (Rescan / Clear badges / Sort by / Settings / About
+    /// Shiibar CC / Setup Check… / Quit, §4.5/§8.24) fresh on every click, so
+    /// checkmarks and Clear badges' enabled state always show the live
+    /// state.
     ///
     /// The CHECK rows below (Sort by's 3 radio choices, Settings' 3
     /// toggles) are `CheckMenuItemView`s, not plain `NSMenuItem`s with an
@@ -149,8 +152,9 @@ private struct TopBar: View {
     /// item must NOT close the menu, and a custom `view` is the only
     /// supported way to get that: AppKit only auto-closes the menu for its
     /// own action-dispatch path, never for a view that handles its own
-    /// mouse events. Action items (Rescan / Setup Check… / Quit) are
-    /// unchanged plain items via `makeItem`/`VMenuHandler`.
+    /// mouse events. Action items (Rescan / Clear badges / About Shiibar CC /
+    /// Setup Check… / Quit) are unchanged plain items via
+    /// `makeItem`/`VMenuHandler`.
     private func presentMenu() {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
@@ -159,6 +163,15 @@ private struct TopBar: View {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(makeItem("Rescan", action: #selector(VMenuHandler.rescan)))
+        // §4.5/§8.24: disabled when nothing is unreviewed — clicking it
+        // would otherwise be a silent no-op.
+        menu.addItem(
+            makeItem(
+                "Clear badges",
+                action: #selector(VMenuHandler.clearBadges),
+                isEnabled: state.hasUnreviewed
+            )
+        )
 
         let sort = NSMenuItem(title: "Sort by", action: nil, keyEquivalent: "")
         let sortMenu = NSMenu()
@@ -234,7 +247,9 @@ private struct TopBar: View {
         settings.submenu = settingsMenu
         menu.addItem(settings)
 
-        // §4.5 ⌄ menu ordering: Rescan / Sort by / Settings / Setup Check… / Quit.
+        // §4.5/§8.24 ⌄ menu ordering: Rescan / Clear badges / Sort by /
+        // Settings / About Shiibar CC / Setup Check… / Quit.
+        menu.addItem(makeItem("About Shiibar CC", action: #selector(VMenuHandler.showAbout)))
         menu.addItem(makeItem("Setup Check…", action: #selector(VMenuHandler.openSetupCheck)))
 
         menu.addItem(.separator())
@@ -259,9 +274,10 @@ private struct TopBar: View {
         window.makeKey()
     }
 
-    private func makeItem(_ title: String, action: Selector) -> NSMenuItem {
+    private func makeItem(_ title: String, action: Selector, isEnabled: Bool = true) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = menuHandler
+        item.isEnabled = isEnabled
         return item
     }
 }
@@ -278,6 +294,14 @@ private final class VMenuHandler: NSObject {
     var openWindow: OpenWindowAction?
 
     @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
+    @objc func clearBadges(_ sender: Any?) { state?.clearBadges() }
+    /// §4.5/§8.24: `NSApp.activate` before the standard About panel, same
+    /// LSUIElement requirement as `openSetupCheck` below (an LSUIElement
+    /// app doesn't automatically come forward when it shows a window).
+    @objc func showAbout(_ sender: Any?) {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(sender)
+    }
     @objc func openSetupCheck(_ sender: Any?) {
         // Moving to a real window: the dropdown's job is done, close it
         // (same as a row click does).

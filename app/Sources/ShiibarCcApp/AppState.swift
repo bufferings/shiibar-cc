@@ -260,6 +260,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Derived display state
 
+    /// ⌄ menu "Clear badges" enabled state (§4.5/§8.24): disabled when no
+    /// agent currently carries the unreviewed flag.
+    var hasUnreviewed: Bool {
+        agents.contains { $0.unreviewed }
+    }
+
     var trayIcon: TrayIconState {
         Rollup.icon(
             statuses: agents.map(\.status),
@@ -416,6 +422,23 @@ final class AppState: ObservableObject {
             let result = CLIRunner.focus(target: target, helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
+            }
+        }
+    }
+
+    /// ⌄ menu "Clear badges" (§4.5/§8.24): calls `shiibar-cc seen <target>`
+    /// for every currently-unreviewed target. No feedback UI on success —
+    /// the badges disappearing (via the subscribe stream's `status_changed`
+    /// events, same path as any other state change) IS the feedback. Only
+    /// the unreviewed flag is touched; delivered Notification Center
+    /// notifications are left alone (§8.24 — the user clears those
+    /// themselves).
+    func clearBadges() {
+        let targets = agents.filter(\.unreviewed).map(\.target)
+        guard !targets.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
+            for target in targets {
+                CLIRunner.seen(target: target, helpersDirectory: helpersDirectory)
             }
         }
     }

@@ -13,5 +13,6 @@ pub mod list_cmd;
 pub mod reconcile_cmd;
 pub mod remove_cmd;
 pub mod report_cmd;
+pub mod seen_cmd;
 pub mod wait_cmd;
 pub mod watch_cmd;
