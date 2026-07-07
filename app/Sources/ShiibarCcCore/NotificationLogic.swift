@@ -5,8 +5,10 @@
 //     later reconcile both reporting the same still-true state).
 //  2. The delayed (3s) re-check decision (no foreground suppression, §8.16).
 //  3. Notification content (title/subtitle/body) for a waiting or done edge.
-//  4. The banner/sound delivery decision for the two independent mute
-//     switches (Mute Banners / Mute Sound, §4.5/§8.14 2026-07-05 addendum).
+//  4. The sound attached to the banner (§4.5/§8.26/§8.27): the banner is
+//     always delivered — Mute Banners was removed (§8.27), so there is only
+//     one mute switch (Mute Sound) left, and one choice left to make (which
+//     of the Waiting/Done sounds to attach, or none if muted).
 //  5. Which notification-cleanup path is allowed to sweep delivered
 //     notifications for a removed target.
 
@@ -125,56 +127,23 @@ public enum NotificationContentBuilder {
     }
 }
 
-/// Delivery decision for the two independent mute switches (DESIGN.md §4.5,
-/// §8.14 2026-07-05 addendum: "Mute Banners" and "Mute Sound" are orthogonal,
-/// so all four combinations are valid). Computed at the same delayed (3s)
-/// re-check moment as `DelayedNotificationDecision`, so a toggle flipped
-/// during the delay is respected.
-public struct NotificationDeliveryDecision: Equatable, Sendable {
-    /// Whether to deliver a `UNNotificationRequest` banner at all.
-    public let deliverBanner: Bool
-    /// If `deliverBanner`, whether to attach `UNNotificationSound` to it.
-    public let attachBannerSound: Bool
-    /// Mute Banners only ("sound-only mode", §4.5): no banner is delivered,
-    /// but the app plays the system alert sound directly instead of relying
-    /// on `UNNotificationSound`. This path intentionally does NOT follow
-    /// Focus/Do Not Disturb (§4.5) — only a banner's attached sound does.
-    public let playStandaloneSound: Bool
-
-    public init(deliverBanner: Bool, attachBannerSound: Bool, playStandaloneSound: Bool) {
-        self.deliverBanner = deliverBanner
-        self.attachBannerSound = attachBannerSound
-        self.playStandaloneSound = playStandaloneSound
-    }
-}
-
-/// Decides banner/sound delivery from the two independent mute switches
-/// (DESIGN.md §4.5):
-///  - neither muted: banner + attached sound (current behavior).
-///  - Mute Sound only: banner, no sound.
-///  - Mute Banners only: no banner, standalone (app-played) sound instead —
-///    "sound-only mode".
-///  - both muted: nothing.
-public enum NotificationDeliveryPolicy {
-    public static func decide(muteBanners: Bool, muteSound: Bool) -> NotificationDeliveryDecision {
-        switch (muteBanners, muteSound) {
-        case (false, false):
-            return NotificationDeliveryDecision(
-                deliverBanner: true, attachBannerSound: true, playStandaloneSound: false
-            )
-        case (false, true):
-            return NotificationDeliveryDecision(
-                deliverBanner: true, attachBannerSound: false, playStandaloneSound: false
-            )
-        case (true, false):
-            return NotificationDeliveryDecision(
-                deliverBanner: false, attachBannerSound: false, playStandaloneSound: true
-            )
-        case (true, true):
-            return NotificationDeliveryDecision(
-                deliverBanner: false, attachBannerSound: false, playStandaloneSound: false
-            )
-        }
+/// The sound name attached to a notification banner (DESIGN.md §4.5/§8.26/
+/// §8.27): the banner itself is always delivered now that Mute Banners is
+/// gone (§8.27) — this only decides whether a sound accompanies it (`nil`
+/// when Mute Sound is on, per §4.5: when Mute sound is ON, content.sound =
+/// nil), and which of the Settings window's per-event choices to use
+/// (Waiting vs Done, §8.26). Computed at the same delayed (3s) re-check
+/// moment as `DelayedNotificationDecision`, so a Settings change made during
+/// the delay is respected.
+public enum NotificationSoundPolicy {
+    public static func soundName(
+        status: AgentStatus,
+        waitingSoundName: String,
+        doneSoundName: String,
+        muted: Bool
+    ) -> String? {
+        guard !muted else { return nil }
+        return status == .waiting ? waitingSoundName : doneSoundName
     }
 }
 

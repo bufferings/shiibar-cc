@@ -1,16 +1,16 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5/§8.25): ⌄ menu (Rescan / Clear badges / Sort by / Settings
-// [Start at Login / Mute Banners / Mute Sound] / Setup Check… / About
-// Shiibar CC / Quit, grouped into three sections by two separators), warning
-// rows (disconnected / notification permission denied /
-// focus TCC error), a flat list with a leading status symbol (default) or
-// grouped cards (Waiting / Working / Idle, empty groups hidden) depending
-// on the "Sort by" selection, two-line rows with unreviewed bolding + a
-// symbol-shoulder badge, row click -> focus. Every clickable element (rows,
-// the ⌄ chip) gets a hover/press highlight (menubar-design.html's
-// hover/press section — session rows use the selection color, the ⌄ chip
-// uses a persistent gray, M5 T2 follow-up); non-interactive elements (group
-// headers, warning rows) get none.
+// DESIGN.md §4.5/§8.25): ⌄ menu (Rescan / Clear badges / Sort by / Settings…
+// / Setup Check… / About Shiibar CC / Quit, grouped into three sections by
+// two separators — Settings… opens the independent Settings window, M14 T1;
+// it replaced the old Settings submenu), warning rows (disconnected /
+// notification permission denied / focus TCC error), a flat list with a
+// leading status symbol (default) or grouped cards (Waiting / Working /
+// Idle, empty groups hidden) depending on the "Sort by" selection, two-line
+// rows with unreviewed bolding + a symbol-shoulder badge, row click -> focus.
+// Every clickable element (rows, the ⌄ chip) gets a hover/press highlight
+// (menubar-design.html's hover/press section — session rows use the
+// selection color, the ⌄ chip uses a persistent gray, M5 T2 follow-up);
+// non-interactive elements (group headers, warning rows) get none.
 
 import ShiibarCcCore
 import SwiftUI
@@ -142,20 +142,21 @@ private struct TopBar: View {
         .padding(.top, 2)
     }
 
-    /// Builds the ⌄ menu (Rescan / Clear badges / Sort by / Settings / Setup
-    /// Check… / About Shiibar CC / Quit, §4.5/§8.25) fresh on every click, so
-    /// checkmarks and Clear badges' enabled state always show the live
-    /// state.
+    /// Builds the ⌄ menu (Rescan / Clear badges / Sort by / Settings… /
+    /// Setup Check… / About Shiibar CC / Quit, §4.5/§8.25) fresh on every
+    /// click, so checkmarks and Clear badges' enabled state always show the
+    /// live state.
     ///
-    /// The CHECK rows below (Sort by's 3 radio choices, Settings' 3
-    /// toggles) are `CheckMenuItemView`s, not plain `NSMenuItem`s with an
-    /// action — §4.5's uncommitted keep-open clause says clicking a CHECK
-    /// item must NOT close the menu, and a custom `view` is the only
-    /// supported way to get that: AppKit only auto-closes the menu for its
-    /// own action-dispatch path, never for a view that handles its own
-    /// mouse events. Action items (Rescan / Clear badges / About Shiibar CC /
-    /// Setup Check… / Quit) are unchanged plain items via
-    /// `makeItem`/`VMenuHandler`.
+    /// The CHECK rows below (Sort by's 3 radio choices) are
+    /// `CheckMenuItemView`s, not plain `NSMenuItem`s with an action — §4.5's
+    /// uncommitted keep-open clause says clicking a CHECK item must NOT
+    /// close the menu, and a custom `view` is the only supported way to get
+    /// that: AppKit only auto-closes the menu for its own action-dispatch
+    /// path, never for a view that handles its own mouse events. Action
+    /// items (Rescan / Clear badges / Settings… / About Shiibar CC / Setup
+    /// Check… / Quit) are unchanged plain items via `makeItem`/`VMenuHandler`
+    /// — Settings… (M14 T1) opens the independent Settings window instead of
+    /// the old inline submenu of toggles.
     private func presentMenu() {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
@@ -210,52 +211,15 @@ private struct TopBar: View {
         sort.submenu = sortMenu
         menu.addItem(sort)
 
-        // Rarely-touched switches live one level down (§4.5: Settings
-        // submenu below Sort by), ordered Start at Login / Mute Banners /
-        // Mute Sound. "Start at Login" reads `SMAppService.mainApp.status`
-        // live via `state.loginItemEnabled` at menu-build time, so it can't
-        // drift from System Settings. The two mute checkmarks are read live
-        // from `state` the same way — independent switches (§4.5/§8.14
-        // 2026-07-05 addendum), checkmark = muted. Each is its own
-        // independent toggle (not a radio group), so a click only ever
-        // refreshes its own checkmark.
-        let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
-        let settingsMenu = NSMenu()
-        settingsMenu.autoenablesItems = false
-
-        let loginItem = NSMenuItem(title: "Start at Login", action: nil, keyEquivalent: "")
-        let loginView = CheckMenuItemView(title: "Start at Login", isOn: state.loginItemEnabled)
-        loginItem.view = loginView
-        settingsMenu.addItem(loginItem)
-        loginView.onSelect = { [weak state, weak loginView] in
-            state?.toggleLoginItem()
-            loginView?.setOn(state?.loginItemEnabled ?? false)
-        }
-
-        let muteBannersItem = NSMenuItem(title: "Mute Banners", action: nil, keyEquivalent: "")
-        let muteBannersView = CheckMenuItemView(title: "Mute Banners", isOn: state.bannersMuted)
-        muteBannersItem.view = muteBannersView
-        settingsMenu.addItem(muteBannersItem)
-        muteBannersView.onSelect = { [weak state, weak muteBannersView] in
-            state?.toggleMuteBanners()
-            muteBannersView?.setOn(state?.bannersMuted ?? false)
-        }
-
-        let muteItem = NSMenuItem(title: "Mute Sound", action: nil, keyEquivalent: "")
-        let muteView = CheckMenuItemView(title: "Mute Sound", isOn: state.muted)
-        muteItem.view = muteView
-        settingsMenu.addItem(muteItem)
-        muteView.onSelect = { [weak state, weak muteView] in
-            state?.toggleMute()
-            muteView?.setOn(state?.muted ?? false)
-        }
-
-        settings.submenu = settingsMenu
-        menu.addItem(settings)
+        // Settings… (§4.5/§8.26, M14 T1): a plain action item that opens the
+        // independent Settings window, replacing the old inline submenu of
+        // toggles (Start at Login / Mute Banners / Mute Sound all moved into
+        // that window — Mute Banners itself was removed entirely, §8.27).
+        menu.addItem(makeItem("Settings…", action: #selector(VMenuHandler.openSettings)))
         menu.addItem(makeItem("Setup Check…", action: #selector(VMenuHandler.openSetupCheck)))
 
         // §4.5/§8.25 ⌄ menu ordering: Rescan / Clear badges / Sort by /
-        // Settings / Setup Check… / About Shiibar CC / Quit, grouped into
+        // Settings… / Setup Check… / About Shiibar CC / Quit, grouped into
         // three sections by two separators (Operations / Display & Settings
         // / App itself — About moved to sit directly above Quit, matching
         // the macOS convention of About-then-Quit at the bottom).
@@ -320,6 +284,13 @@ private final class VMenuHandler: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: SetupCheckWindow.id)
     }
+    /// Settings… (§4.5/§8.26, M14 T1): same pattern as `openSetupCheck`
+    /// above.
+    @objc func openSettings(_ sender: Any?) {
+        state?.dismissDropdown()
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow?(id: SettingsWindow.id)
+    }
     @objc func quit(_ sender: Any?) { state?.quit() }
 }
 
@@ -331,19 +302,19 @@ private final class WeakBox<T: AnyObject> {
     init(_ value: T) { self.value = value }
 }
 
-/// A CHECK-style ⌄ submenu row (one of Sort by's 3 radio choices, or one
-/// of Settings' 3 toggles). This is an `NSMenuItem`'s custom `view`, not a
-/// plain item with a `target`/`action` — that's the load-bearing choice
-/// (§4.5's keep-open clause): AppKit only auto-closes an open menu when
-/// *it* dispatches an item's action; a view that handles its own mouse
-/// events owns tracking, and the menu stays open unless the view calls
-/// `NSMenu.cancelTracking()` — which `mouseUp` here never does.
+/// A CHECK-style ⌄ submenu row (one of Sort by's 3 radio choices). This is
+/// an `NSMenuItem`'s custom `view`, not a plain item with a `target`/
+/// `action` — that's the load-bearing choice (§4.5's keep-open clause):
+/// AppKit only auto-closes an open menu when *it* dispatches an item's
+/// action; a view that handles its own mouse events owns tracking, and the
+/// menu stays open unless the view calls `NSMenu.cancelTracking()` — which
+/// `mouseUp` here never does.
 ///
 /// Metrics mirror the native check-item look at `NSFont.menuFont(ofSize:
 /// 13)`: a leading checkmark column, then the label, in a row sized to
-/// match a native item at this font (so the "Sort by"/"Settings"
-/// submenus don't look like a foreign control next to the rest of the ⌄
-/// menu — tune `rowHeight` on-device if it doesn't line up).
+/// match a native item at this font (so the "Sort by" submenu doesn't look
+/// like a foreign control next to the rest of the ⌄ menu — tune `rowHeight`
+/// on-device if it doesn't line up).
 ///
 /// Keyboard navigation of these rows is degraded: AppKit only drives
 /// arrow-key/Return highlighting for its own item cells, never for a

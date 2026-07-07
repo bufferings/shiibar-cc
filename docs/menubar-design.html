@@ -129,12 +129,19 @@
       <strong>Clear badges</strong>(全セッションの unreviewed フラグを一括で消す。未読が 1 つも無ければ disabled。
       通知センターの配信済み通知は触らない)/ ─── /
       <strong>表示と設定</strong>: <strong>Sort by</strong>(サブメニュー・ラジオ 3 択: Grouped ✓ / Newest session / Recent activity)/
-      <strong>Settings</strong>(サブメニュー: Start at Login・Mute Banners・Mute Sound — ✓ = 止めている、の独立スイッチ)/
+      <strong>Settings…</strong>(実行項目。クリックで独立した Settings ウィンドウを開く)/
       <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ)/ ─── /
       <strong>アプリ自身</strong>: <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/
-      <strong>Quit</strong>。チェック項目(ラジオ・トグル)はクリックしてもメニューを閉じず、
+      <strong>Quit</strong>。チェック項目(Sort by のラジオ)はクリックしてもメニューを閉じず、
       チェック表示がその場で切り替わる。実行項目は閉じる。
       <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
+    <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
+      閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
+      2 グループ — <strong>General</strong>: Start at Login(トグル)/ <strong>Sounds</strong>: Mute sound
+      (トグル。hint「Notifications arrive silently」)/ <strong>Waiting sound</strong>・<strong>Done sound</strong>
+      (ポップアップ 2 つ、Waiting が上。候補は <code>/System/Library/Sounds</code> の標準サウンドを実行時に列挙、
+      拡張子抜きの名前をソートして表示。既定はどちらも Glass)。Mute sound が ON の間、音種 2 つは disabled。
+      音種を選んだ瞬間にその音を 1 回プレビュー再生する</li>
     <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
       (一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
       クリック動作なし(切り分けは <code>doctor</code>)</li>

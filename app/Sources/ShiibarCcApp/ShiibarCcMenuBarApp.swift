@@ -43,6 +43,19 @@ struct ShiibarCcMenuBarApp: App {
             )
         }
         .windowResizability(.contentSize)
+
+        // Settings window (§4.5/§8.26, M14 T2), opened the same way as
+        // Setup Check above (DropdownView.VMenuHandler.openSettings). It
+        // replaced the ⌄ menu's old Settings submenu (Start at Login / Mute
+        // Banners / Mute Sound) with this one action item.
+        Window("Settings", id: SettingsWindow.id) {
+            SettingsView(
+                notificationManager: appDelegate.state.notificationManager,
+                loginItemEnabledProvider: { appDelegate.state.loginItemEnabled },
+                toggleLoginItem: { appDelegate.state.toggleLoginItem() }
+            )
+        }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -50,6 +63,12 @@ struct ShiibarCcMenuBarApp: App {
 /// declaration above and `openWindow(id:)` call site in DropdownView.
 enum SetupCheckWindow {
     static let id = "setup-check"
+}
+
+/// The Settings `Window` scene's stable id (M14 T2), shared between the
+/// scene declaration above and `openWindow(id:)` call site in DropdownView.
+enum SettingsWindow {
+    static let id = "settings"
 }
 
 @MainActor

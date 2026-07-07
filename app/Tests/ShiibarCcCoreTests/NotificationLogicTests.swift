@@ -169,35 +169,31 @@ final class NotificationLogicTests: XCTestCase {
         XCTAssertFalse(DelayedNotificationDecision.shouldNotify(currentlyUnreviewed: false))
     }
 
-    // ---- Mute delivery decision (§4.5/§8.14 2026-07-05: independent Mute
-    // Banners / Mute Sound switches, all four combinations valid) ----
+    // ---- Notification sound policy (§4.5/§8.26/§8.27: Mute Banners is
+    // gone, the banner always delivers — only the attached sound is gated by
+    // Mute Sound and the event's own Waiting/Done sound choice) ----
 
-    func testNeitherMutedDeliversBannerWithAttachedSound() {
-        let decision = NotificationDeliveryPolicy.decide(muteBanners: false, muteSound: false)
-        XCTAssertTrue(decision.deliverBanner)
-        XCTAssertTrue(decision.attachBannerSound)
-        XCTAssertFalse(decision.playStandaloneSound)
+    func testWaitingEdgeUsesWaitingSoundWhenNotMuted() {
+        let name = NotificationSoundPolicy.soundName(
+            status: .waiting, waitingSoundName: "Ping", doneSoundName: "Glass", muted: false
+        )
+        XCTAssertEqual(name, "Ping")
     }
 
-    func testMuteSoundOnlyDeliversBannerWithoutSound() {
-        let decision = NotificationDeliveryPolicy.decide(muteBanners: false, muteSound: true)
-        XCTAssertTrue(decision.deliverBanner)
-        XCTAssertFalse(decision.attachBannerSound)
-        XCTAssertFalse(decision.playStandaloneSound)
+    func testDoneEdgeUsesDoneSoundWhenNotMuted() {
+        let name = NotificationSoundPolicy.soundName(
+            status: .idle, waitingSoundName: "Ping", doneSoundName: "Glass", muted: false
+        )
+        XCTAssertEqual(name, "Glass")
     }
 
-    func testMuteBannersOnlyIsSoundOnlyModeWithNoBanner() {
-        let decision = NotificationDeliveryPolicy.decide(muteBanners: true, muteSound: false)
-        XCTAssertFalse(decision.deliverBanner)
-        XCTAssertFalse(decision.attachBannerSound, "no banner is delivered, so there's nothing to attach a sound to")
-        XCTAssertTrue(decision.playStandaloneSound, "Mute Banners only plays the sound directly (§4.5 sound-only mode)")
-    }
-
-    func testBothMutedDeliversNothingAndPlaysNothing() {
-        let decision = NotificationDeliveryPolicy.decide(muteBanners: true, muteSound: true)
-        XCTAssertFalse(decision.deliverBanner)
-        XCTAssertFalse(decision.attachBannerSound)
-        XCTAssertFalse(decision.playStandaloneSound)
+    func testMutedSuppressesTheSoundRegardlessOfStatus() {
+        XCTAssertNil(NotificationSoundPolicy.soundName(
+            status: .waiting, waitingSoundName: "Ping", doneSoundName: "Glass", muted: true
+        ))
+        XCTAssertNil(NotificationSoundPolicy.soundName(
+            status: .idle, waitingSoundName: "Ping", doneSoundName: "Glass", muted: true
+        ))
     }
 
     // ---- Cleanup rule ----

@@ -1,19 +1,19 @@
-// Desktop notifications (DESIGN.md §4.5/§8.16): UNUserNotificationCenter,
-// fired on the unreviewed rising edge, delayed 3s with an unreviewed-only
-// re-check (no foreground suppression — dropped in M5, §8.16), the standard
-// sound for both waiting (time-sensitive) and done (active), threadIdentifier
-// grouping per target, two independent mute toggles (UserDefaults: Mute
-// Banners / Mute Sound, §4.5/§8.14 2026-07-05 addendum), and cleanup that
-// skips `session_end` removals. The first `.snapshot` this process receives
-// is a baseline: pre-existing unreviewed entries in it don't notify (§4.5
-// 2026-07-05 addendum) — see `observeSnapshot`. Rising-edge detection /
-// de-dup / baseline seeding / the delayed decision / content building / the
-// mute delivery decision / the cleanup rule are pure logic in ShiibarCcCore
-// (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
-// `NotificationContentBuilder`, `NotificationDeliveryPolicy`,
+// Desktop notifications (DESIGN.md §4.5/§8.16/§8.26/§8.27): UNUserNotification-
+// Center, fired on the unreviewed rising edge, delayed 3s with an
+// unreviewed-only re-check (no foreground suppression — dropped in M5,
+// §8.16), a per-event (Waiting/Done) standard sound chosen in the Settings
+// window and attached via `UNNotificationSound(named:)` so playback follows
+// Focus/DND (§8.27), threadIdentifier grouping per target, one mute toggle
+// (UserDefaults: Mute Sound — Mute Banners was removed in M14, §8.27), and
+// cleanup that skips `session_end` removals. The first `.snapshot` this
+// process receives is a baseline: pre-existing unreviewed entries in it
+// don't notify (§4.5 2026-07-05 addendum) — see `observeSnapshot`.
+// Rising-edge detection / de-dup / baseline seeding / the delayed decision /
+// content building / the sound-name decision / the cleanup rule are pure
+// logic in ShiibarCcCore (`UnreviewedEdgeTracker`, `DelayedNotificationDecision`,
+// `NotificationContentBuilder`, `NotificationSoundPolicy`,
 // `NotificationCleanupRule`) — this type is the I/O wrapper around them.
 
-import AppKit
 import Foundation
 import UserNotifications
 import ShiibarCcCore
@@ -29,19 +29,29 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Reflects the current authorization status for the "denied" warning row (§4.5).
     @Published private(set) var permissionDenied = false
 
+    /// "Mute Sound" (§4.5/§8.27): the key predates the Settings window (M5
+    /// §8.14 2026-07-05 addendum) — kept unchanged for compatibility (M14
+    /// task brief) so an existing installation's choice carries over.
     private static let muteKey = "cc.shiibar.muteSound"
     var isMuted: Bool {
         get { UserDefaults.standard.bool(forKey: Self.muteKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.muteKey) }
     }
 
-    /// "Mute Banners" (§4.5/§8.14 2026-07-05 addendum): independent from
-    /// `isMuted` ("Mute Sound") — all four combinations are valid, see
-    /// `NotificationDeliveryPolicy`.
-    private static let muteBannersKey = "cc.shiibar.muteBanners"
-    var isBannersMuted: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.muteBannersKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.muteBannersKey) }
+    /// Settings window's "Waiting sound" / "Done sound" pickers (§4.5/§8.26):
+    /// the macOS standard sound name (extension-stripped, `SoundCatalog`) to
+    /// attach to a waiting / done notification's banner. Defaults to
+    /// `SoundCatalog.defaultSoundName` ("Glass") for both, unchanged from
+    /// the pre-M14 behavior, until the owner picks something else.
+    private static let waitingSoundNameKey = "cc.shiibar.waitingSoundName"
+    private static let doneSoundNameKey = "cc.shiibar.doneSoundName"
+    var waitingSoundName: String {
+        get { UserDefaults.standard.string(forKey: Self.waitingSoundNameKey) ?? SoundCatalog.defaultSoundName }
+        set { UserDefaults.standard.set(newValue, forKey: Self.waitingSoundNameKey) }
+    }
+    var doneSoundName: String {
+        get { UserDefaults.standard.string(forKey: Self.doneSoundNameKey) ?? SoundCatalog.defaultSoundName }
+        set { UserDefaults.standard.set(newValue, forKey: Self.doneSoundNameKey) }
     }
 
     /// `UNUserNotificationCenter.current()` aborts the process
@@ -167,18 +177,6 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     var homeProvider: () -> String? = { nil }
 
     private func deliver(edge: UnreviewedEdge, agent: Agent) {
-        // Re-read both mute switches at the delayed re-check moment (same as
-        // the unreviewed re-check above) so a toggle flipped during the 3s
-        // delay is respected (§4.5/§8.14 2026-07-05 addendum).
-        let decision = NotificationDeliveryPolicy.decide(muteBanners: isBannersMuted, muteSound: isMuted)
-
-        guard decision.deliverBanner else {
-            if decision.playStandaloneSound {
-                playStandaloneAlertSound()
-            }
-            return
-        }
-
         let label = CwdLabel.format(cwd: agent.cwd, home: homeProvider())
         let built = NotificationContentBuilder.build(
             status: edge.status,
@@ -199,9 +197,23 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         if #available(macOS 12.0, *) {
             content.interruptionLevel = edge.status == .waiting ? .timeSensitive : .active
         }
-        // Both waiting and done play the same standard sound (§4.5/§8.16).
-        if decision.attachBannerSound {
-            content.sound = .default
+        // Mute Banners is gone (§8.27): the banner is always delivered now,
+        // so only the attached sound is decided here — re-read at the
+        // delayed re-check moment (same as the unreviewed re-check above) so
+        // a Settings change made during the 3s delay is respected.
+        if let soundName = NotificationSoundPolicy.soundName(
+            status: edge.status,
+            waitingSoundName: waitingSoundName,
+            doneSoundName: doneSoundName,
+            muted: isMuted
+        ) {
+            // `<name>.aiff` resolves macOS standard sounds even though the
+            // SDK header (UserNotifications/UNNotificationSound.h) only
+            // documents the app container / bundle lookup and never mentions
+            // /System/Library/Sounds — verified on a real install: a
+            // notification delivered with "Submarine.aiff" audibly played
+            // Submarine (DESIGN.md §4.5).
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("\(soundName).aiff"))
         }
         let request = UNNotificationRequest(
             identifier: "\(edge.target)-\(Date().timeIntervalSince1970)",
@@ -209,30 +221,6 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             trigger: nil
         )
         center?.add(request)
-    }
-
-    /// "Mute Banners only" ("sound-only mode", §4.5/§8.14 2026-07-05
-    /// addendum): no `UNNotification` is delivered, so the app plays the
-    /// system alert sound directly via `NSSound` instead. This intentionally
-    /// does NOT follow Focus/Do Not Disturb — only a banner's attached
-    /// `UNNotificationSound` respects that (§4.5). The user's configured
-    /// alert sound is read the same way the system itself plays it: the
-    /// `com.apple.sound.beep.sound` global-domain preference (confirmed on
-    /// this machine via `defaults read -g com.apple.sound.beep.sound`,
-    /// which returned a `/System/Library/Sounds/*.aiff` path). AppKit's
-    /// `NSBeep()` would also play that same sound, but the SDK's
-    /// AppKit.apinotes hides it from Swift (`SwiftPrivate: true` for the
-    /// free-function form — checked in the installed Xcode SDK), so the
-    /// fallback (only reached if the preference can't be resolved) plays a
-    /// bundled system sound (`/System/Library/Sounds/Glass.aiff`) directly
-    /// instead.
-    private func playStandaloneAlertSound() {
-        if let path = UserDefaults.standard.string(forKey: "com.apple.sound.beep.sound"),
-           let sound = NSSound(contentsOfFile: path, byReference: true) {
-            sound.play()
-        } else {
-            NSSound(named: "Glass")?.play()
-        }
     }
 
     /// Sweep delivered notifications for `target`, unless the reason forbids
