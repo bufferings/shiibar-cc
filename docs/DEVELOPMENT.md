@@ -47,11 +47,18 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 - push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
   cargo test / clippy(いずれも `--locked`)と swift build / swift test、Linux ジョブで
   cargo-deny(設定は `deny.toml`))
-- **push 後の結果確認は、必ずコミット SHA で run を特定する**:
+- **push 後の結果確認は、必ずコミット SHA で run を特定する**。SHA は**フル(40 桁)が必須** —
+  `--commit` に短縮 SHA を渡すとエラーにならず黙って 0 件が返り、「run が無い」と誤診する
+  (2026-07-08 実例)。run の登録は push から数秒〜十数秒遅れるので、登録待ちと完了待ちを分ける:
 
   ```sh
-  gh run list --commit <sha> --json databaseId --jq '.[0].databaseId'  # run の登録まで数秒かかる。空なら待って再試行
-  gh run watch <run-id> --exit-status
+  sha=$(git rev-parse HEAD)   # フル SHA を保証する(手打ちの短縮形を使わない)
+  for _ in $(seq 1 20); do    # 登録待ちは最大 5 分(15 秒 × 20)。無限に待たない
+    run_id=$(gh run list --commit "$sha" --json databaseId --jq '.[0].databaseId') && [ -n "$run_id" ] && break
+    sleep 15
+  done
+  [ -n "$run_id" ] || { echo "no CI run registered for $sha" >&2; exit 1; }
+  gh run watch "$run_id" --exit-status
   ```
 
   `gh run list --limit 1` で「最新の run」を摑む方法は**使わない**: push 直後は新しい run が
