@@ -57,9 +57,10 @@ final class AppState: ObservableObject {
     /// (status symbol, bold/badge, elapsed time) still reflects live
     /// updates — only the ordering is frozen.
     @Published private(set) var flatOrderSnapshot: [String] = []
-    /// ⌄ menu "Sort by" selection (§4.5, M5 T9): persisted in UserDefaults,
-    /// defaults to "Newest session". Changing it (a deliberate user action,
-    /// unlike the passive background updates the freeze-at-open rule guards
+    /// ⌄ menu "Sort by" selection (§4.5/§8.25, M5 T9): persisted in
+    /// UserDefaults, defaults to `SortMode.defaultMode` ("Grouped") when
+    /// nothing is stored yet. Changing it (a deliberate user action, unlike
+    /// the passive background updates the freeze-at-open rule guards
     /// against) re-settles `flatOrderSnapshot` immediately — see
     /// `setSortMode`.
     @Published private(set) var sortMode: SortMode
@@ -93,7 +94,7 @@ final class AppState: ObservableObject {
         self.muted = notificationManager.isMuted
         self.bannersMuted = notificationManager.isBannersMuted
         let storedSortMode = UserDefaults.standard.string(forKey: Self.sortModeKey).flatMap(SortMode.init(rawValue:))
-        self.sortMode = storedSortMode ?? .newestSession
+        self.sortMode = storedSortMode ?? SortMode.defaultMode
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
         self.lifecycle = DaemonLifecycleManager(

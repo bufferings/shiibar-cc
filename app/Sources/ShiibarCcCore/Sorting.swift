@@ -12,21 +12,30 @@
 
 import Foundation
 
-/// The three "Sort by" choices in the ⌄ menu (§4.5), in the order they're
-/// listed there. `newestSession` is the default (§4.5).
+/// The three "Sort by" choices in the ⌄ menu (§4.5/§8.25), in the order
+/// they're listed there (radio order is default-first). `grouped` is the
+/// default (§8.25) — see `defaultMode` below for the single source of truth
+/// `AppState` falls back to when no sort mode is stored yet.
 public enum SortMode: String, CaseIterable, Sendable {
+    case grouped
     case newestSession
     case recentActivity
-    case grouped
 
     /// Menu label (English UI text, §4.5).
     public var menuTitle: String {
         switch self {
+        case .grouped: return "Grouped"
         case .newestSession: return "Newest session"
         case .recentActivity: return "Recent activity"
-        case .grouped: return "Grouped"
         }
     }
+
+    /// Fallback used when no sort mode is stored yet (§8.25, 2026-07-08:
+    /// changed from `.newestSession`). `AppState.init` reads this instead of
+    /// hardcoding a case literal so the default has one place to change and
+    /// is covered by a `ShiibarCcCoreTests` test (AppState itself has no
+    /// test target — it lives in `ShiibarCcApp`, not `ShiibarCcCore`).
+    public static let defaultMode: SortMode = .grouped
 }
 
 public enum Sorting {
@@ -45,12 +54,12 @@ public enum Sorting {
     public static func flatOrder(agents: [Agent], mode: SortMode) -> [Agent] {
         let known = agents.filter { $0.status != .unknown }
         switch mode {
+        case .grouped:
+            return known
         case .newestSession:
             return known.sorted { $0.createdAt > $1.createdAt }
         case .recentActivity:
             return known.sorted { $0.lastReportAt > $1.lastReportAt }
-        case .grouped:
-            return known
         }
     }
 }

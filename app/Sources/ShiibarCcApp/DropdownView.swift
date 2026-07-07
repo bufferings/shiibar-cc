@@ -1,7 +1,8 @@
 // Dropdown custom view (the dropdown section of menubar-design.html,
-// DESIGN.md §4.5/§8.24): ⌄ menu (Rescan / Clear badges / Sort by / Settings
-// [Start at Login / Mute Banners / Mute Sound] / About Shiibar CC / Setup
-// Check… / Quit), warning rows (disconnected / notification permission denied /
+// DESIGN.md §4.5/§8.25): ⌄ menu (Rescan / Clear badges / Sort by / Settings
+// [Start at Login / Mute Banners / Mute Sound] / Setup Check… / About
+// Shiibar CC / Quit, grouped into three sections by two separators), warning
+// rows (disconnected / notification permission denied /
 // focus TCC error), a flat list with a leading status symbol (default) or
 // grouped cards (Waiting / Working / Idle, empty groups hidden) depending
 // on the "Sort by" selection, two-line rows with unreviewed bolding + a
@@ -141,8 +142,8 @@ private struct TopBar: View {
         .padding(.top, 2)
     }
 
-    /// Builds the ⌄ menu (Rescan / Clear badges / Sort by / Settings / About
-    /// Shiibar CC / Setup Check… / Quit, §4.5/§8.24) fresh on every click, so
+    /// Builds the ⌄ menu (Rescan / Clear badges / Sort by / Settings / Setup
+    /// Check… / About Shiibar CC / Quit, §4.5/§8.25) fresh on every click, so
     /// checkmarks and Clear badges' enabled state always show the live
     /// state.
     ///
@@ -172,6 +173,11 @@ private struct TopBar: View {
                 isEnabled: state.hasUnreviewed
             )
         )
+
+        // §4.5/§8.25 ⌄ menu grouping: Operations (above) / Display &
+        // Settings (below) / App itself (further below) — three groups,
+        // two separators.
+        menu.addItem(.separator())
 
         let sort = NSMenuItem(title: "Sort by", action: nil, keyEquivalent: "")
         let sortMenu = NSMenu()
@@ -246,13 +252,15 @@ private struct TopBar: View {
 
         settings.submenu = settingsMenu
         menu.addItem(settings)
-
-        // §4.5/§8.24 ⌄ menu ordering: Rescan / Clear badges / Sort by /
-        // Settings / About Shiibar CC / Setup Check… / Quit.
-        menu.addItem(makeItem("About Shiibar CC", action: #selector(VMenuHandler.showAbout)))
         menu.addItem(makeItem("Setup Check…", action: #selector(VMenuHandler.openSetupCheck)))
 
+        // §4.5/§8.25 ⌄ menu ordering: Rescan / Clear badges / Sort by /
+        // Settings / Setup Check… / About Shiibar CC / Quit, grouped into
+        // three sections by two separators (Operations / Display & Settings
+        // / App itself — About moved to sit directly above Quit, matching
+        // the macOS convention of About-then-Quit at the bottom).
         menu.addItem(.separator())
+        menu.addItem(makeItem("About Shiibar CC", action: #selector(VMenuHandler.showAbout)))
         menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
 
         // Position in SCREEN coordinates (in: nil) so the result doesn't

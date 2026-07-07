@@ -124,15 +124,15 @@
 
   <h2>ドロップダウン: フラット一覧 + 行頭の状態記号(カスタムビュー)</h2>
   <ul>
-    <li>最上部: <strong>⌄ ボタン</strong>(中に Rescan = <code>reconcile</code> /
+    <li>最上部: <strong>⌄ ボタン</strong>(セパレーターで 3 グループ。DESIGN.md §4.5/§8.25) —
+      <strong>操作</strong>: Rescan = <code>reconcile</code> /
       <strong>Clear badges</strong>(全セッションの unreviewed フラグを一括で消す。未読が 1 つも無ければ disabled。
-      通知センターの配信済み通知は触らない。DESIGN.md §4.5/§8.24)/
-      <strong>Sort by</strong>(サブメニュー・ラジオ 3 択: Newest session ✓ / Recent activity / Grouped)/
+      通知センターの配信済み通知は触らない)/ ─── /
+      <strong>表示と設定</strong>: <strong>Sort by</strong>(サブメニュー・ラジオ 3 択: Grouped ✓ / Newest session / Recent activity)/
       <strong>Settings</strong>(サブメニュー: Start at Login・Mute Banners・Mute Sound — ✓ = 止めている、の独立スイッチ)/
-      <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動。
-      DESIGN.md §4.5/§8.24)/
-      <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ。DESIGN.md §4.5)/
-      <strong>Quit</strong>)。チェック項目(ラジオ・トグル)はクリックしてもメニューを閉じず、
+      <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ)/ ─── /
+      <strong>アプリ自身</strong>: <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/
+      <strong>Quit</strong>。チェック項目(ラジオ・トグル)はクリックしてもメニューを閉じず、
       チェック表示がその場で切り替わる。実行項目は閉じる。
       <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
     <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
@@ -145,11 +145,11 @@
       どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
     <li><strong>未読(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
       トレイの「窓の右肩バッジ」と同じ文法。行の右端には何も置かない)。focus(seen)で両方消える</li>
-    <li><strong>並び替え(⌄ の Sort by)</strong>: <strong>Newest session(既定)</strong>=
-      登録時刻の新しい順(キー不変 = 行が動かない)/ <strong>Recent activity</strong> =
-      最後の hook report の新しい順(並びの確定は開いた時点)/ <strong>Grouped</strong> =
+    <li><strong>並び替え(⌄ の Sort by、ラジオの並びは既定を先頭に)</strong>: <strong>Grouped(既定)</strong> =
       グループ見出し <strong>Waiting / Working / Idle</strong>(太字テキストのみ。
-      空グループは非表示)+ グループごとの<strong>薄い背景カード</strong>、各グループ内は未読が上。
+      空グループは非表示)+ グループごとの<strong>薄い背景カード</strong>、各グループ内は未読が上 /
+      <strong>Newest session</strong> = 登録時刻の新しい順(キー不変 = 行が動かない)/
+      <strong>Recent activity</strong> = 最後の hook report の新しい順(並びの確定は開いた時点)。
       フラットな 2 モードでは未読を上に寄せない(並びの安定を優先)。行クリックで focus</li>
     <li><strong>ホバー / プレス</strong>: <strong>セッション行</strong>はホバーで<strong>選択色のハイライト</strong>
       (角丸 7px。モック値 <code>#3478f6</code>・白文字 — 実装はシステムの選択色に追従させる)、
@@ -169,15 +169,7 @@
     <li>状態記号の凡例は UI に置かない(空◯ / ! / スピナーは一般的な文法で読める、の割り切り)</li>
   </ul>
   <div class="mock">
-    <div class="mock-label">既定(Newest session): フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例</div>
-    <div class="menu">
-      <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
-      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
-      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
-    </div>
-    <div class="mock-label">Grouped モード(Sort by で選択。見出し + カード、未読が各グループの上)</div>
+    <div class="mock-label">既定(Grouped): 見出し + カード、未読が各グループの上</div>
     <div class="menu">
       <div class="topbar"><span class="vbtn">⌄</span></div>
       <div class="ghdr">Waiting</div>
@@ -188,6 +180,14 @@
       <div class="gcard">
       <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       </div>
+    </div>
+    <div class="mock-label">Newest session モード(Sort by で選択。フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例)</div>
+    <div class="menu">
+      <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
+      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
     </div>
     <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
     <div class="menu" style="width:380px">

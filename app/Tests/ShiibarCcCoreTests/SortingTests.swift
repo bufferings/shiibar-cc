@@ -75,14 +75,21 @@ final class SortingTests: XCTestCase {
     }
 
     func testAllCasesListsTheThreeModesInMenuOrder() {
-        // §4.5's "Sort by" radio order: Newest session / Recent activity /
-        // Grouped. `DropdownView`'s menu iterates `SortMode.allCases`.
-        XCTAssertEqual(SortMode.allCases, [.newestSession, .recentActivity, .grouped])
+        // §4.5/§8.25's "Sort by" radio order (default first): Grouped /
+        // Newest session / Recent activity. `DropdownView`'s menu iterates
+        // `SortMode.allCases`.
+        XCTAssertEqual(SortMode.allCases, [.grouped, .newestSession, .recentActivity])
     }
 
     func testMenuTitlesAreEnglishUIText() {
+        XCTAssertEqual(SortMode.grouped.menuTitle, "Grouped")
         XCTAssertEqual(SortMode.newestSession.menuTitle, "Newest session")
         XCTAssertEqual(SortMode.recentActivity.menuTitle, "Recent activity")
-        XCTAssertEqual(SortMode.grouped.menuTitle, "Grouped")
+    }
+
+    func testDefaultModeIsGrouped() {
+        // §8.25 (2026-07-08): the fallback `AppState.init` uses when no sort
+        // mode is stored yet changed from `.newestSession` to `.grouped`.
+        XCTAssertEqual(SortMode.defaultMode, .grouped)
     }
 }
