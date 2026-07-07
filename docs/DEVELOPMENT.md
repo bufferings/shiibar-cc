@@ -124,6 +124,9 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
      同一 bundle id の新バンドルを**新パスで**起動した場合は、通知システムが ncprefs のパスを
      自動で新パスに追従させることがあり、この手当てが不要なことも(実測 2026-07-05)。
      書き換え前に `defaults export com.apple.ncprefs - | grep -o 'shiibar[^<]*'` で現状を確認するとよい
+  5. **新規インストール直後に汎用アイコンのままになることがある**: `lsregister -f <app>`(上記 3)
+     または `killall Dock`(Dock プロセスもアイコンキャッシュを持つ)で反映された(実測 2026-07-07)。
+     どちらの層が効いたかは切り分けられていない — 再発したらまず 3 を試し、だめなら `killall Dock`
 
 ## リリース・インストール
 
