@@ -342,6 +342,7 @@ shiibar-cc focus <selector>   # ジャンプ。成功時: daemon に seen を送
 shiibar-cc focused            # 前面 iTerm2 セッションの target を出力(なければ exit 2)
 shiibar-cc reconcile          # claude agents + iterm_targets を gather → daemon に reconcile を送る(§3.5)。アプリが起動時・再接続時・定期(§4.5)・手動 Rescan で呼ぶ
 shiibar-cc remove <selector>  # 幽霊エントリの手動削除(通常は reconcile が自動で消す)
+shiibar-cc seen <selector>    # unreviewed フラグを消す(daemon に seen を送る。アプリの Clear badges が target ごとに呼ぶ。§4.5)
 shiibar-cc doctor             # 診断(下記)
 ```
 
@@ -404,12 +405,18 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
      unreviewed を各グループ内で上に
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
 - 最上部の **⌄ メニュー**の構成: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
+  **Clear badges**(全セッションの unreviewed フラグを消す。未読が 1 つも無ければ disabled。
+  通知センターの配信済み通知は**触らない**(§8.24 — 通知は利用者が自分で消す)。
+  実装は未読 target ごとに `shiibar-cc seen <target>` を呼ぶ)/
   並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(Start at Login・
   Mute Banners・Mute Sound — ミュート 2 つは ✓ = 止めている、の独立スイッチ。
-  滅多に触らないスイッチ類の置き場)/ **Setup Check…** / **Quit**。
+  滅多に触らないスイッチ類の置き場)/ **About Shiibar CC**(標準の About パネル =
+  `orderFrontStandardAboutPanel`。アイコン・名前・バージョンは bundle から自動。
+  LSUIElement アプリのため表示時に `NSApp.activate` が必要 — Setup Check と同じ)/
+  **Setup Check…** / **Quit**。
   **チェック項目(Sort のラジオ・Settings のトグル)はクリックしてもメニューを閉じない**
   (続けて複数のスイッチを操作できる。チェック表示はその場で更新)。
-  実行項目(Rescan / Setup Check… / Quit)はクリックで閉じる。
+  実行項目(Rescan / Clear badges / About / Setup Check… / Quit)はクリックで閉じる。
   UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
   結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて
@@ -821,6 +828,16 @@ resume は §8.15 のとおり実装後に削除した)。
 - hooks が費用情報を運ばないことを公式ドキュメントで再確認(2026-07-07。費用計測は OpenTelemetry 側の
   管轄で、hook payload には載せない意図的な分離)。transcript 解析をやらない判断(§8.17)も維持
 - **再検討の条件**: hook payload が費用情報を運ぶようになったとき
+
+### 8.24 ⌄ メニューに Clear badges と About を追加(§8.4 の例外を拡張)
+
+- 「メニューバーには focus 以外の動詞を置かない」(§8.4)の例外を 2 つ増やす(2026-07-07、所有者要望):
+  **Clear badges**(未読フラグの一括クリア。未読が溜まったとき 1 件ずつ focus して消すのは苦行)と
+  **About**(アプリ名・アイコン・バージョンの確認先が無かった)。どちらも破壊的でなく確認フロー不要
+- Clear badges は **unreviewed フラグだけ**を消し、通知センターの配信済み通知は触らない(所有者判断:
+  通知は利用者が自分で消す。行クリックの focus がそのセッションの通知を消す挙動は従来のまま = 非対称は許容)
+- CLI に `seen <selector>` を追加し、アプリは未読 target ごとにそれを呼ぶ(アプリの操作は CLI 経由、
+  の原則を維持。§4.4)
 
 ## 9. 定数表
 
