@@ -1,10 +1,11 @@
 //! `shiibar-cc doctor` (DESIGN.md §4.4): checks socket connectivity / hooks
-//! configuration / PATH / osascript TCC permission, and reports on all of
-//! them (rather than stopping at the first failure — the whole point is
-//! "which of these is broken?"). Every check target (socket path, the
-//! `settings.json` path, the `PATH` search list, the AppleScript runner) is
-//! an explicit parameter so this is fully unit-testable without touching
-//! the real environment.
+//! configuration / PATH / osascript TCC permission / the Space-switch-on-
+//! activate system setting, and reports on all of them (rather than
+//! stopping at the first failure — the whole point is "which of these is
+//! broken?"). Every check target (socket path, the `settings.json` path,
+//! the `PATH` search list, the AppleScript runner, the Space-setting
+//! reader) is an explicit parameter so this is fully unit-testable without
+//! touching the real environment.
 //!
 //! Each check produces a [`CheckRecord`]; the human-readable text form and
 //! `--json` (`{"checks":[...]}`, DESIGN.md §4.4 — read by the app's Setup
@@ -121,11 +122,46 @@ pub fn exit_code_for(checks: &[CheckRecord]) -> i32 {
     }
 }
 
+/// Reads the Space-switch-on-activate system setting. Injected (same shape
+/// as [`AppleScriptRunner`]) so the unit tests don't shell out to the real
+/// `defaults` command or depend on the developer's actual setting.
+///
+/// `None` covers every way the read can come back unusable: `defaults`
+/// isn't on PATH, it exits non-zero (key never set), or its stdout is
+/// empty. DESIGN.md §4.4/§7-1 treat all of those the same as an explicit
+/// `1` — the default is on, so doctor prefers a miss over a false alarm —
+/// so the trait doesn't need to distinguish them any further than `None`.
+pub trait SpacesSettingReader {
+    fn read(&self) -> Option<String>;
+}
+
+/// Real reader: `defaults read -g AppleSpacesSwitchOnActivate` (DESIGN.md
+/// §7-1, confirmed on real hardware: explicit off reads `0`, explicit on
+/// reads `1`, and a never-touched machine has no key at all — non-zero
+/// exit).
+pub struct Defaults;
+
+impl SpacesSettingReader for Defaults {
+    fn read(&self) -> Option<String> {
+        let output = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleSpacesSwitchOnActivate"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let trimmed = stdout.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+}
+
 pub fn run_doctor_checks(
     socket_path: &Path,
     settings_path: &Path,
     path_env: Option<&OsStr>,
     runner: &dyn AppleScriptRunner,
+    spaces_reader: &dyn SpacesSettingReader,
 ) -> Vec<CheckRecord> {
     let mut checks = Vec::new();
 
@@ -243,6 +279,29 @@ pub fn run_doctor_checks(
         )),
     }
 
+    match spaces_reader.read().as_deref() {
+        Some("0") => checks.push(CheckRecord::new(
+            "spaces",
+            CheckStatus::Warn,
+            "\"switch to a Space with open windows\" is off (AppleSpacesSwitchOnActivate = 0)"
+                .to_string(),
+            Some(
+                "System Settings > Desktop & Dock > turn on \"When switching to an \
+                 application, switch to a Space with open windows for the application\"",
+            ),
+        )),
+        // `1`, an unset key, and a failed read are all folded into ok: the
+        // system default is on, and DESIGN.md §4.4 prefers a miss over a
+        // false alarm here.
+        _ => checks.push(CheckRecord::new(
+            "spaces",
+            CheckStatus::Ok,
+            "\"switch to a Space with open windows\" is on (or unset, which defaults to on)"
+                .to_string(),
+            None,
+        )),
+    }
+
     checks
 }
 
@@ -251,8 +310,9 @@ pub fn run_doctor(
     settings_path: &Path,
     path_env: Option<&OsStr>,
     runner: &dyn AppleScriptRunner,
+    spaces_reader: &dyn SpacesSettingReader,
 ) -> DoctorReport {
-    let checks = run_doctor_checks(socket_path, settings_path, path_env, runner);
+    let checks = run_doctor_checks(socket_path, settings_path, path_env, runner, spaces_reader);
     let exit_code = exit_code_for(&checks);
     let lines = checks.iter().map(CheckRecord::line).collect();
     DoctorReport { lines, exit_code }
@@ -314,6 +374,25 @@ mod tests {
         }
     }
 
+    struct FakeSpacesReader {
+        value: Option<String>,
+    }
+
+    impl SpacesSettingReader for FakeSpacesReader {
+        fn read(&self) -> Option<String> {
+            self.value.clone()
+        }
+    }
+
+    /// Most tests in this file exercise something other than the spaces
+    /// check, so they use this reader (explicit `1`, which is `ok`) to stay
+    /// out of the way.
+    fn spaces_on() -> FakeSpacesReader {
+        FakeSpacesReader {
+            value: Some("1".to_string()),
+        }
+    }
+
     #[test]
     fn daemon_absent_is_the_only_thing_that_sets_exit_code_1() {
         let dir = tempfile::tempdir().unwrap();
@@ -325,6 +404,7 @@ mod tests {
             &dir.path().join("settings.json"),
             None,
             &runner,
+            &spaces_on(),
         );
         assert_eq!(report.exit_code, exitcode::ERROR);
         assert!(report.lines.iter().any(|l| l.starts_with("[fail]")));
@@ -418,6 +498,7 @@ mod tests {
             &dir.path().join("settings.json"),
             None,
             &runner,
+            &spaces_on(),
         );
         assert!(
             report
@@ -477,6 +558,7 @@ mod tests {
             &dir.path().join("settings.json"),
             None,
             &runner,
+            &spaces_on(),
         );
         let json = checks_to_json(&checks);
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -513,6 +595,7 @@ mod tests {
             &dir.path().join("settings.json"),
             None,
             &runner,
+            &spaces_on(),
         );
         assert_eq!(exit_code_for(&checks), exitcode::ERROR);
 
@@ -521,7 +604,81 @@ mod tests {
             &dir.path().join("settings.json"),
             None,
             &runner,
+            &spaces_on(),
         );
         assert_eq!(report.exit_code, exit_code_for(&checks));
+    }
+
+    // ---- spaces check (DESIGN.md §4.4 / §7-1) ----
+
+    #[test]
+    fn spaces_explicit_off_is_a_warning_with_a_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = FakeRunner {
+            output: out(true, "NOT_RUNNING\n", ""),
+        };
+        let reader = FakeSpacesReader {
+            value: Some("0".to_string()),
+        };
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &reader,
+        );
+        let spaces = checks
+            .iter()
+            .find(|c| c.id == "spaces")
+            .expect("spaces check present");
+        assert_eq!(spaces.status, CheckStatus::Warn);
+        assert!(spaces.hint.is_some());
+    }
+
+    #[test]
+    fn spaces_explicit_on_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = FakeRunner {
+            output: out(true, "NOT_RUNNING\n", ""),
+        };
+        let reader = FakeSpacesReader {
+            value: Some("1".to_string()),
+        };
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &reader,
+        );
+        let spaces = checks
+            .iter()
+            .find(|c| c.id == "spaces")
+            .expect("spaces check present");
+        assert_eq!(spaces.status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn spaces_unreadable_value_is_ok_not_a_false_alarm() {
+        // DESIGN.md §4.4: the system default is on, so a missing key, a
+        // failed `defaults` invocation, and a non-zero exit all fold into
+        // `ok` — doctor prefers a miss over a false alarm here.
+        let dir = tempfile::tempdir().unwrap();
+        let runner = FakeRunner {
+            output: out(true, "NOT_RUNNING\n", ""),
+        };
+        let reader = FakeSpacesReader { value: None };
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &reader,
+        );
+        let spaces = checks
+            .iter()
+            .find(|c| c.id == "spaces")
+            .expect("spaces check present");
+        assert_eq!(spaces.status, CheckStatus::Ok);
     }
 }

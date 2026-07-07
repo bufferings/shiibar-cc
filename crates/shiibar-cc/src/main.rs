@@ -180,6 +180,7 @@ fn cmd_remove(args: &[String]) -> i32 {
 fn cmd_doctor(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
     let runner = Osascript;
+    let spaces_reader = shiibar_cc::doctor_cmd::Defaults;
     let settings_path = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
@@ -190,6 +191,7 @@ fn cmd_doctor(args: &[String]) -> i32 {
             &settings_path,
             std::env::var_os("PATH").as_deref(),
             &runner,
+            &spaces_reader,
         );
         println!("{}", shiibar_cc::doctor_cmd::checks_to_json(&checks));
         shiibar_cc::doctor_cmd::exit_code_for(&checks)
@@ -199,6 +201,7 @@ fn cmd_doctor(args: &[String]) -> i32 {
             &settings_path,
             std::env::var_os("PATH").as_deref(),
             &runner,
+            &spaces_reader,
         );
         for line in &report.lines {
             println!("{line}");
