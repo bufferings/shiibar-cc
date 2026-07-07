@@ -395,28 +395,30 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   行の右端には何も置かない)。
   クリックで `shiibar-cc focus <target>` を subprocess 実行し、**ドロップダウンを閉じる**。
   `agent_removed` で行を消す
-- **並び替え**(⌄ メニューの「Sort by」ラジオ 3 択。UserDefaults 永続):
-  1. **Newest session(既定)**: 登録時刻(`created_at`)の新しい順。キーが不変なので、
-     セッションが生きている限り行の位置が動かない(状態変化は記号だけが差し替わる)
-  2. **Recent activity**: 最後の hook report(`last_report_at`)の新しい順。並びの確定は
-     **開いた時点**(開いている最中に行を動かさない — 経過時間の固定と同じ流儀)
-  3. **Grouped**: グループ見出し **Waiting / Working / Idle**(太字テキストのみ。
+- **並び替え**(⌄ メニューの「Sort by」ラジオ 3 択。UserDefaults 永続。
+  ラジオの並びは既定を先頭にこの順。§8.25):
+  1. **Grouped(既定)**: グループ見出し **Waiting / Working / Idle**(太字テキストのみ。
      空グループは非表示)+ グループごとのカード。並びは waiting → working → idle、
      unreviewed を各グループ内で上に
+  2. **Newest session**: 登録時刻(`created_at`)の新しい順。キーが不変なので、
+     セッションが生きている限り行の位置が動かない(状態変化は記号だけが差し替わる)
+  3. **Recent activity**: 最後の hook report(`last_report_at`)の新しい順。並びの確定は
+     **開いた時点**(開いている最中に行を動かさない — 経過時間の固定と同じ流儀)
   フラットな 2 モードでは unreviewed を上に寄せない(並びの安定を優先。未確認は太字 + バッジが示す)
-- 最上部の **⌄ メニュー**の構成: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
-  **Clear badges**(全セッションの unreviewed フラグを消す。未読が 1 つも無ければ disabled。
-  通知センターの配信済み通知は**触らない**(§8.24 — 通知は利用者が自分で消す)。
-  実装は未読 target ごとに `shiibar-cc seen <target>` を呼ぶ)/
-  並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(Start at Login・
-  Mute Banners・Mute Sound — ミュート 2 つは ✓ = 止めている、の独立スイッチ。
-  滅多に触らないスイッチ類の置き場)/ **About Shiibar CC**(標準の About パネル =
-  `orderFrontStandardAboutPanel`。アイコン・名前・バージョンは bundle から自動。
-  LSUIElement アプリのため表示時に `NSApp.activate` が必要 — Setup Check と同じ)/
-  **Setup Check…** / **Quit**。
+- 最上部の **⌄ メニュー**の構成(セパレーターで 3 グループ。§8.25):
+  - **操作**: 「再スキャン」(Rescan = `shiibar-cc reconcile`。手動リロード)/
+    **Clear badges**(全セッションの unreviewed フラグを消す。未読が 1 つも無ければ disabled。
+    通知センターの配信済み通知は**触らない**(§8.24 — 通知は利用者が自分で消す)。
+    実装は未読 target ごとに `shiibar-cc seen <target>` を呼ぶ)
+  - **表示と設定**: 並び替え(Sort by、サブメニュー)/ **Settings サブメニュー**(Start at Login・
+    Mute Banners・Mute Sound — ミュート 2 つは ✓ = 止めている、の独立スイッチ。
+    滅多に触らないスイッチ類の置き場)/ **Setup Check…**
+  - **アプリ自身**: **About Shiibar CC**(標準の About パネル = `orderFrontStandardAboutPanel`。
+    アイコン・名前・バージョンは bundle から自動。LSUIElement アプリのため表示時に
+    `NSApp.activate` が必要 — Setup Check と同じ)/ **Quit**
   **チェック項目(Sort のラジオ・Settings のトグル)はクリックしてもメニューを閉じない**
   (続けて複数のスイッチを操作できる。チェック表示はその場で更新)。
-  実行項目(Rescan / Clear badges / About / Setup Check… / Quit)はクリックで閉じる。
+  実行項目(Rescan / Clear badges / Setup Check… / About / Quit)はクリックで閉じる。
   UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
   結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて
@@ -838,6 +840,17 @@ resume は §8.15 のとおり実装後に削除した)。
   通知は利用者が自分で消す。行クリックの focus がそのセッションの通知を消す挙動は従来のまま = 非対称は許容)
 - CLI に `seen <selector>` を追加し、アプリは未読 target ごとにそれを呼ぶ(アプリの操作は CLI 経由、
   の原則を維持。§4.4)
+
+### 8.25 既定ソートを Grouped にし、⌄ メニューをセパレーターで 3 グループ化した
+
+- 既定の並びを Newest session から **Grouped** に変更(2026-07-08、所有者要望):
+  一目で知りたいのは「どれが waiting か」で、Grouped がそれを最短で示す(README のヒーロー画像も
+  Grouped)。Sort by ラジオの並びも既定を先頭に(Grouped / Newest session / Recent activity)。
+  保存済みの並び設定がある環境では挙動は変わらない(既定はフォールバック値)
+- ⌄ メニューをセパレーターで 3 グループに: **操作**(Rescan / Clear badges)/
+  **表示と設定**(Sort by / Settings / Setup Check…)/ **アプリ自身**(About / Quit)。
+  About は §8.24 時点では Settings の直後に置いたが、macOS の慣習(About は Quit と同じ最下段)に
+  合わせて移動した。7 項目にセパレーター 2 本 — 刻みすぎない 2/3/2
 
 ## 9. 定数表
 
