@@ -183,6 +183,16 @@ else
 fi
 
 echo
+echo "==> Re-registering with LaunchServices (icon cache, DEVELOPMENT.md's"
+echo "    icon notes item 5 — harmless no-op if lsregister isn't at this path)"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+  "$LSREGISTER" -f "$APP_PATH"
+else
+  echo "    $LSREGISTER not found — skipping (install continues)"
+fi
+
+echo
 echo "==> app / daemon"
 echo "Launching $APP_PATH once (registers it as a Login Item and starts the"
 echo "daemon, DESIGN.md §4.5/§8.8 — no more manual 'shiibar-ccd --foreground')."

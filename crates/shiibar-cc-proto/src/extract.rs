@@ -89,8 +89,10 @@ pub fn build_report(
         .get("background_tasks")
         .and_then(|v| v.as_array())
         .cloned();
+    // Markdown is stripped *before* the char truncation below (DESIGN.md
+    // §4.1) so the 200-char budget is spent on display text, not markup.
     let last_assistant_message = str_field(raw, "last_assistant_message")
-        .map(|m| truncate_chars(&m, LAST_ASSISTANT_MESSAGE_TRUNCATE_CHARS));
+        .map(|m| truncate_chars(&strip_markdown(&m), LAST_ASSISTANT_MESSAGE_TRUNCATE_CHARS));
 
     Ok(Some(ReportPayload {
         event,
@@ -146,6 +148,111 @@ fn parse_enum_field<T: serde::de::DeserializeOwned>(
 
 fn truncate_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
+}
+
+/// Strip lightweight Markdown markup from `last_assistant_message` (§4.1):
+/// the completion banner renders as raw text, so unstripped markup shows up
+/// verbatim (observed live: `` All four links still return **`200`** — no
+/// broken links ``).
+///
+/// Handled, content kept: backtick characters / `**` and `__` pairs / a
+/// line-leading run of `#` followed by a space / `[text](url)` -> `text`.
+/// Deliberately left alone: a solitary `*` or `_` (would misfire on
+/// `snake_case` identifiers and file paths) and an unclosed `**`/`__` (no
+/// closing pair to guess at, so it's left in place — §4.1: "leaving markup
+/// behind is fine, breaking the text is not").
+fn strip_markdown(s: &str) -> String {
+    let no_backticks: String = s.chars().filter(|&c| c != '`').collect();
+    let no_headings = strip_heading_markers(&no_backticks);
+    let no_bold = strip_paired_delimiter(&no_headings, "**");
+    let no_underline = strip_paired_delimiter(&no_bold, "__");
+    strip_links(&no_underline)
+}
+
+/// Remove a line-leading heading marker (a run of `#` immediately followed
+/// by a space) from every line, keeping any leading whitespace before the
+/// `#` run and everything after the marker's space untouched.
+fn strip_heading_markers(s: &str) -> String {
+    s.split('\n')
+        .map(strip_heading_marker_from_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn strip_heading_marker_from_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let leading_ws_len = line.len() - trimmed.len();
+    let hash_len = trimmed.chars().take_while(|&c| c == '#').count();
+    if hash_len == 0 {
+        return line.to_string();
+    }
+    match trimmed[hash_len..].strip_prefix(' ') {
+        Some(rest) => format!("{}{}", &line[..leading_ws_len], rest),
+        // A `#` run with no following space isn't a heading marker (e.g. a
+        // hashtag-like `#foo`) — leave the line untouched.
+        None => line.to_string(),
+    }
+}
+
+/// Remove matched pairs of `delim` (e.g. `**`), keeping the text between
+/// each pair. An occurrence with no later matching `delim` is a solitary,
+/// unclosed marker and is left untouched — along with everything after it,
+/// since there's nothing left to pair it with.
+fn strip_paired_delimiter(s: &str, delim: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut rest = s;
+    loop {
+        let Some(open_idx) = rest.find(delim) else {
+            result.push_str(rest);
+            return result;
+        };
+        let after_open = &rest[open_idx + delim.len()..];
+        let Some(close_idx) = after_open.find(delim) else {
+            // No closing delimiter anywhere in the remainder: leave this
+            // occurrence (and the rest of the string) as-is.
+            result.push_str(rest);
+            return result;
+        };
+        result.push_str(&rest[..open_idx]);
+        result.push_str(&after_open[..close_idx]);
+        rest = &after_open[close_idx + delim.len()..];
+    }
+}
+
+/// Rewrite `[text](url)` to `text`. A `[` that isn't part of a well-formed
+/// link (no matching `]`, or no `(url)` immediately after) is left in
+/// place, and scanning resumes right after it.
+fn strip_links(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut rest = s;
+    loop {
+        let Some(open_idx) = rest.find('[') else {
+            result.push_str(rest);
+            return result;
+        };
+        let after_open = &rest[open_idx + 1..];
+        let Some(text_end) = after_open.find(']') else {
+            result.push_str(rest);
+            return result;
+        };
+        let link_text = &after_open[..text_end];
+        let after_text = &after_open[text_end + 1..];
+        let Some(after_paren_open) = after_text.strip_prefix('(') else {
+            // "[...]" not followed by "(": not a link. Keep the "[" and
+            // resume scanning right after it.
+            result.push_str(&rest[..open_idx + 1]);
+            rest = after_open;
+            continue;
+        };
+        let Some(url_end) = after_paren_open.find(')') else {
+            result.push_str(&rest[..open_idx + 1]);
+            rest = after_open;
+            continue;
+        };
+        result.push_str(&rest[..open_idx]);
+        result.push_str(link_text);
+        rest = &after_paren_open[url_end + 1..];
+    }
 }
 
 #[cfg(test)]
@@ -328,5 +435,68 @@ mod tests {
             )
         );
         assert_eq!(r.background_tasks.as_ref().map(|v| v.is_empty()), Some(true));
+    }
+
+    // strip_markdown (§4.1) — pure-function unit tests.
+
+    #[test]
+    fn strip_markdown_removes_backticks_and_bold_around_the_observed_example() {
+        // Real dogfooding observation (DESIGN.md §4.1 / M10 brief): the
+        // banner renders raw text, so `**`/backticks showed through verbatim.
+        let input = "All four links still return **`200`** — no broken links";
+        assert_eq!(
+            strip_markdown(input),
+            "All four links still return 200 — no broken links"
+        );
+    }
+
+    #[test]
+    fn strip_markdown_removes_heading_markers_across_multiple_lines() {
+        let input = "# Summary\n\n## Details\nEverything passed.\n### Nested ### still trimmed only at line start";
+        assert_eq!(
+            strip_markdown(input),
+            "Summary\n\nDetails\nEverything passed.\nNested ### still trimmed only at line start"
+        );
+    }
+
+    #[test]
+    fn strip_markdown_rewrites_markdown_links_to_their_text() {
+        let input = "See [the docs](https://example.com/docs) for details.";
+        assert_eq!(strip_markdown(input), "See the docs for details.");
+    }
+
+    #[test]
+    fn strip_markdown_leaves_an_unclosed_bold_marker_untouched() {
+        // §4.1: a solitary, unclosed `**`/`__` is left as-is rather than guessed at.
+        let input = "Started **bold but never closed";
+        assert_eq!(strip_markdown(input), input);
+    }
+
+    #[test]
+    fn strip_markdown_does_not_touch_solitary_asterisks_or_underscores() {
+        // §4.1: single `*`/`_` must survive untouched — snake_case identifiers,
+        // paths, and single-star emphasis are not markup this function handles.
+        let input = "Renamed foo_bar_baz.rs and passed *args through the call";
+        assert_eq!(strip_markdown(input), input);
+    }
+
+    #[test]
+    fn strip_markdown_leaves_ordinary_text_with_no_markup_unchanged() {
+        let input = "Done. All 54 tests pass.";
+        assert_eq!(strip_markdown(input), input);
+    }
+
+    #[test]
+    fn last_assistant_message_markdown_is_stripped_before_the_200_char_truncation() {
+        // Build a message that is over the 200-char cap *with* its markup but
+        // exactly 200 chars once the `**` pair is stripped. If truncation ran
+        // first, the closing `**` would be cut off, leaving a stray, now-unclosed
+        // `**` prefix behind and only 198 of the 200 inner characters.
+        let raw_message = format!("**{}**", "a".repeat(200));
+        let raw = json!({"session_id": "s1", "cwd": "/c", "last_assistant_message": raw_message});
+        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.last_assistant_message.as_deref(), Some("a".repeat(200).as_str()));
     }
 }
