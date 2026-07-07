@@ -38,6 +38,21 @@ cargo run -p shiibar-cc -- watch
 SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ```
 
+## CI
+
+- push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
+  cargo test / clippy(いずれも `--locked`)と swift build / swift test、Linux ジョブで
+  cargo-deny(設定は `deny.toml`))
+- **push 後の結果確認は、必ずコミット SHA で run を特定する**:
+
+  ```sh
+  gh run list --commit <sha> --json databaseId --jq '.[0].databaseId'  # run の登録まで数秒かかる。空なら待って再試行
+  gh run watch <run-id> --exit-status
+  ```
+
+  `gh run list --limit 1` で「最新の run」を摑む方法は**使わない**: push 直後は新しい run が
+  まだ登録されておらず、直前の push の run を誤って摑む(それを緑と誤報した実例あり。2026-07-07)
+
 ## hooks の検証
 
 - hooks は Claude Code プラグイン(`plugin/`)として配布する(DESIGN.md §4.1/§8.19)。
