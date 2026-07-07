@@ -72,7 +72,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Personal tool, not distributed.</string>
+	<string>© 2026 Mitsuyuki Shiiba — MIT OR Apache-2.0</string>
 </dict>
 </plist>
 PLIST
