@@ -78,6 +78,11 @@ final class AppState: ObservableObject {
     let helpersDirectory: URL?
     private var dropdownOpenObserver: NSObjectProtocol?
     private var dropdownCloseObserver: NSObjectProtocol?
+    /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
+    /// invalidated in `deinit`. The interval/tolerance values live in
+    /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
+    /// AppKit-only and can't move there.
+    private var periodicReconcileScheduler: NSBackgroundActivityScheduler?
 
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
 
@@ -113,6 +118,7 @@ final class AppState: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         workingAnimationTimer?.invalidate()
+        periodicReconcileScheduler?.invalidate()
     }
 
     /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`/`flatOrderSnapshot`)
@@ -190,6 +196,42 @@ final class AppState: ObservableObject {
             self?.handle(event: event)
         }
         lifecycle.start()
+        schedulePeriodicReconcile()
+    }
+
+    /// Start the §4.5/§8.22 periodic reconcile: an `NSBackgroundActivityScheduler`
+    /// (interval/tolerance from `PeriodicReconcile`, ShiibarCcCore) that calls
+    /// `runReconcile(showFeedback: false)` on the cadence in DESIGN.md §9.
+    /// Started once here at app launch; the OS scheduler owns "don't run
+    /// while asleep" (§8.22 — no custom screen-state/sleep detection is
+    /// written here; the activity simply doesn't fire during sleep and
+    /// resumes naturally on wake).
+    ///
+    /// The scheduler's block runs on its own background queue (not the main
+    /// actor), so the reconcile call is hopped onto `@MainActor` the same
+    /// way every other AppState entry point is. `completionHandler` is
+    /// invoked only after the reconcile subprocess actually finishes
+    /// (`runReconcile`'s completion callback) — per `NSBackgroundActivityScheduler`
+    /// docs, failing to call it would stop the activity from ever
+    /// rescheduling, silently ending the repeats.
+    private func schedulePeriodicReconcile() {
+        let scheduler = NSBackgroundActivityScheduler(identifier: "cc.shiibar.menubar.reconcile")
+        scheduler.interval = PeriodicReconcile.intervalSeconds
+        scheduler.tolerance = PeriodicReconcile.toleranceSeconds
+        scheduler.repeats = true
+        scheduler.qualityOfService = .utility
+        scheduler.schedule { [weak self] completionHandler in
+            guard let self else {
+                completionHandler(.finished)
+                return
+            }
+            Task { @MainActor in
+                self.runReconcile(showFeedback: false) {
+                    completionHandler(.finished)
+                }
+            }
+        }
+        periodicReconcileScheduler = scheduler
     }
 
     func handle(event: SubscribeEvent) {
@@ -385,15 +427,23 @@ final class AppState: ObservableObject {
     ///
     /// `showFeedback`: only the manual ⌄-menu Rescan passes `true` — §4.5
     /// scopes the transient feedback to the manual trigger, so the
-    /// automatic startup/reconnect calls stay silent.
+    /// automatic startup/reconnect/periodic calls stay silent.
+    ///
+    /// `completion`: called after the subprocess finishes (any exit code),
+    /// on the main actor. Only the periodic reconcile scheduler
+    /// (`schedulePeriodicReconcile`) passes this — it needs to know when the
+    /// run is done to hand `NSBackgroundActivityScheduler` its completion
+    /// handler. `nil` for every other caller.
     ///
     /// Overlapping-run guard: a second manual Rescan while one is already
     /// running is ignored (simpler than cancelling the in-flight subprocess
     /// or restarting its feedback timer) — reconcile is idempotent, so a
     /// duplicate tap during an in-flight run loses nothing but an extra
     /// subprocess launch; the in-flight run still resyncs state and reports
-    /// its own feedback when it finishes.
-    func runReconcile(showFeedback: Bool = false) {
+    /// its own feedback when it finishes. The same idempotency is why the
+    /// periodic scheduler's own cadence needs no additional serialization
+    /// against these other triggers (§4.5 task brief).
+    func runReconcile(showFeedback: Bool = false, completion: (() -> Void)? = nil) {
         if showFeedback {
             guard rescanFeedback != .running else { return }
             showRescanFeedback(.running)
@@ -402,15 +452,18 @@ final class AppState: ObservableObject {
             let result = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
-                guard showFeedback else { return }
-                if let feedback = RescanFeedback.forFinishedExitCode(result.exitCode) {
-                    self?.showRescanFeedback(feedback)
-                } else {
-                    // Exit 3 (TCC): the warning row is already handling it
-                    // (via `noteExitCode` above) — clear "Rescanning…"
-                    // immediately rather than flashing transient text too.
-                    self?.rescanFeedback = nil
+                if showFeedback {
+                    if let feedback = RescanFeedback.forFinishedExitCode(result.exitCode) {
+                        self?.showRescanFeedback(feedback)
+                    } else {
+                        // Exit 3 (TCC): the warning row is already handling
+                        // it (via `noteExitCode` above) — clear
+                        // "Rescanning…" immediately rather than flashing
+                        // transient text too.
+                        self?.rescanFeedback = nil
+                    }
                 }
+                completion?()
             }
         }
     }
