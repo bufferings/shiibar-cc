@@ -978,10 +978,11 @@ resume は §8.15 のとおり実装後に削除した)。
 | working 点灯アニメの間隔     | 500ms(4 コマ循環)   | 固定(実機調整で確定)    |
 | wait の既定タイムアウト      | なし(無限待ち)       | `--timeout`              |
 
-## 10. サプライチェーン対策(保留)
+## 10. サプライチェーン対策
 
 依存は少数の主要クレート(serde / serde_json / tokio / anyhow / tempfile)のみ。現状は
-`Cargo.lock` をコミット済み。過剰にはせず、以下をシグナル待ちで段階導入する:
+`Cargo.lock` をコミット済み。過剰にはせず、**適用済み**と明記したもの以外は
+シグナル待ちで段階導入する:
 
 - **依存 cooldown(pnpm の minimum-release-age 相当)**: cargo 純正の `cargo-min-publish-age`
   (`~/.cargo/config.toml` の `[registry] global-min-publish-age` + `[resolver] incompatible-publish-age`。
@@ -993,3 +994,8 @@ resume は §8.15 のとおり実装後に削除した)。
   `owner/action@<40 桁 SHA> # vX`)。ci.yml / release.yml / bump-cask.yml の全 `uses:` に適用済み。
   release.yml のジョブは notarization の一時キーチェーンや .p8 鍵など secrets を扱う時間帯があり、
   そこで動く action がタグ参照だと上流の差し替えで任意コードが実行され得るため
+- **GitHub リポジトリ側の保護(適用済み)**: main への force-push・ブランチ削除の禁止
+  (shiibar-cc / homebrew-tap 両方)と、`v*` タグの削除・更新の禁止(§8.28 の「公開後のタグ
+  再利用禁止」のプラットフォーム側強制 — 公開済みリリース資産の差し替えを塞ぐ)。
+  Dependabot(alerts + security updates)と secret scanning + push protection も有効。
+  設定の一覧と運用(PAT の期限対応を含む)は DEVELOPMENT.md「リポジトリ設定と Secrets の運用」

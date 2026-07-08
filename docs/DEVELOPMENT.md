@@ -64,6 +64,32 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
   `gh run list --limit 1` で「最新の run」を摑む方法は**使わない**: push 直後は新しい run が
   まだ登録されておらず、直前の push の run を誤って摑む(それを緑と誤報した実例あり。2026-07-07)
 
+## リポジトリ設定と Secrets の運用
+
+リポジトリを clone しても見えない GitHub 側の設定の記録(方針は DESIGN.md §10)。
+
+- **ruleset `protect-main`**(shiibar-cc / homebrew-tap の両方): main への force-push と
+  ブランチ削除を禁止。バイパスなし(管理者にも適用)。本当に必要になったら
+  Settings → Rules で一時的に無効化する
+- **ruleset `protect-release-tags`**(shiibar-cc): `v*` タグの削除・付け替えを禁止
+  (DESIGN.md §8.28「公開後のタグ再利用禁止」の強制)。リリースに失敗したらタグを直すのではなく
+  次のパッチ番号で切り直す
+- **Dependabot**(shiibar-cc): alerts + security updates が有効。依存の脆弱性が公表されると
+  Security タブとメールで通知され、修正版があれば bump PR が自動で立つ(平時は無音)。
+  PR は CI(cargo test / clippy / cargo-deny)の緑を確認してマージする。
+  homebrew-tap は依存が無いので対象外。CI の cargo-deny は push 時にしか走らないので、
+  リリース間の無活動期間は Dependabot の常時監視が補完する
+- **secret scanning + push protection**: 両リポジトリで有効(public リポジトリの既定)。
+  既知パターンのトークンは push 時にブロックされる。ただし `.p12` などのバイナリや任意の
+  パスワードは検出できない — 鍵ファイルはリポジトリの外で扱い、使い終わったら消す運用が第一の防御
+- **GitHub Actions の Secrets**(shiibar-cc に 6 つ。名前と用途は release.yml / bump-cask.yml):
+  値と鍵ファイルの原本はすべて所有者の 1Password にあり、リポジトリにも会話ログにも置かない。
+  期限があるのは `TAP_PUSH_TOKEN` だけ(fine-grained PAT。対象 = homebrew-tap のみ・
+  権限 = contents: write・期限 1 年): **切れると release publish 後の bump-cask が認証エラーで落ちる**。
+  対処は GitHub で PAT を再発行 → `gh secret set TAP_PUSH_TOKEN -R bufferings/shiibar-cc`。
+  Developer ID 証明書は約 5 年で期限切れ(1Password のアイテムに期限を記録済み)。
+  App Store Connect API キーには期限を設定していない(失効は手動)
+
 ## hooks の検証
 
 - hooks は Claude Code プラグイン(`plugin/`)として配布する(DESIGN.md §4.1/§8.19)。
