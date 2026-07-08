@@ -34,8 +34,10 @@ struct ShiibarCcMenuBarApp: App {
         // plain `Window` scene (macOS 13+) works cleanly alongside
         // MenuBarExtra — unlike the dropdown, this is a regular titled
         // window, not a custom panel, so it needs none of the dropdown's
-        // hand-rolled open/close machinery.
-        Window("Setup Check", id: SetupCheckWindow.id) {
+        // hand-rolled open/close machinery (it does, however, need the same
+        // NSWindow-notification trick for re-running its checks on reopen —
+        // see `SetupCheckViewModel.observeWindowLifecycle`, M16).
+        Window(SetupCheckWindow.title, id: SetupCheckWindow.id) {
             SetupCheckView(
                 helpersDirectory: appDelegate.state.helpersDirectory,
                 notificationManager: appDelegate.state.notificationManager,
@@ -63,6 +65,12 @@ struct ShiibarCcMenuBarApp: App {
 /// declaration above and `openWindow(id:)` call site in DropdownView.
 enum SetupCheckWindow {
     static let id = "setup-check"
+    /// Must match the title passed to `Window(_:id:)` above — used by
+    /// `SetupCheckViewModel.observeWindowLifecycle` (M16) to filter the
+    /// global `NSWindow` open/close notifications down to just this window,
+    /// the same title-filter idea as `AppState.observeDropdownOpen`'s
+    /// class-name filter for the dropdown panel.
+    static let title = "Setup Check"
 }
 
 /// The Settings `Window` scene's stable id (M14 T2), shared between the

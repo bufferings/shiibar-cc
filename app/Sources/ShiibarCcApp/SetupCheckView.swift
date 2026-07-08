@@ -7,6 +7,7 @@
 // own checks, §4.5); this file is only the I/O (subprocess, UNUserNotification-
 // Center, SMAppService) and the SwiftUI Form, plus the Re-run button.
 
+import AppKit
 import ServiceManagement
 import ShiibarCcCore
 import SwiftUI
@@ -29,6 +30,12 @@ final class SetupCheckViewModel: ObservableObject {
     /// `AppState.loginItemEnabled`), injected so tests could stub it if
     /// this view model ever needs a fixture-driven test of its own.
     private let loginItemEnabledProvider: () -> Bool
+    /// Whether the Setup Check window is currently on screen: set when it
+    /// becomes key, cleared by `willCloseNotification` — lets
+    /// `noteWindowBecameKey` tell a genuine (re)open apart from a plain
+    /// refocus. See `observeWindowLifecycle`.
+    private var isWindowCurrentlyOpen = false
+    private var windowLifecycleObservers: [NSObjectProtocol] = []
 
     init(
         helpersDirectory: URL?,
@@ -38,6 +45,82 @@ final class SetupCheckViewModel: ObservableObject {
         self.helpersDirectory = helpersDirectory
         self.notificationManager = notificationManager
         self.loginItemEnabledProvider = loginItemEnabledProvider
+        observeWindowLifecycle()
+    }
+
+    deinit {
+        let observers = windowLifecycleObservers
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Triggers `runChecks()` on every genuine open of the Setup Check
+    /// window, including close-then-reopen (DESIGN.md §4.5: checks must not
+    /// show a stale previous run after the window was closed and reopened).
+    ///
+    /// `SetupCheckView.onAppear` cannot do this: verified on-device (a
+    /// throwaway SwiftUI `Window(id:)` harness, same toolchain) that a
+    /// `Window` scene's hosted view — and therefore its `@StateObject` —
+    /// survives close/reopen. `onAppear` fires exactly once per app run and
+    /// never again on reopen, the same "hosted view stays alive across
+    /// open/close" behavior already documented (and worked around the same
+    /// way) in `AppState.observeDropdownOpen` for the dropdown panel.
+    ///
+    /// `NSWindow.didBecomeKeyNotification` DOES fire reliably on reopen
+    /// (verified in both a plain harness and an accessory + MenuBarExtra
+    /// harness matching this app's shape), but it also fires on a plain
+    /// refocus (e.g. switching to another app and back) without the window
+    /// ever closing — so it can't be the sole trigger. The "window closed"
+    /// signal is `NSWindow.willCloseNotification`: it fires exactly on
+    /// genuine close (both the red button and the ⌘W/performClose route —
+    /// verified in the accessory harness) and never on refocus.
+    /// `didResignKeyNotification` is deliberately NOT used for this: in the
+    /// accessory configuration the window can resign key long before it is
+    /// closed (with `isVisible` still `true`), and if it is closed while no
+    /// longer key, no resign fires at close time at all — an
+    /// `isVisible`-at-resign heuristic left `isWindowCurrentlyOpen` stuck
+    /// `true` and permanently blocked re-runs (owner-observed on the real
+    /// app, then reproduced in the harness).
+    ///
+    /// So: `didBecomeKey` + "was not already open" = genuine (re)open →
+    /// `runChecks()`; refocus while open stays suppressed (§4.5 M16
+    /// constraint). The in-flight guard in `runChecks()` still applies on
+    /// top of this, so rapid close/reopen can't run two checks in parallel
+    /// either.
+    private func observeWindowLifecycle() {
+        let center = NotificationCenter.default
+        let becameKeyObserver = center.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title == SetupCheckWindow.title,
+                  let self else { return }
+            Task { @MainActor in
+                self.noteWindowBecameKey()
+            }
+        }
+        let willCloseObserver = center.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title == SetupCheckWindow.title,
+                  let self else { return }
+            Task { @MainActor in
+                self.isWindowCurrentlyOpen = false
+            }
+        }
+        windowLifecycleObservers = [becameKeyObserver, willCloseObserver]
+    }
+
+    private func noteWindowBecameKey() {
+        guard !isWindowCurrentlyOpen else { return } // still open — a refocus, not a (re)open
+        isWindowCurrentlyOpen = true
+        runChecks()
     }
 
     /// Runs every check (CLI + the two app-side ones) and republishes
@@ -142,9 +225,13 @@ struct SetupCheckView: View {
         .onAppear {
             // `NSApp.activate` is required in an LSUIElement (accessory)
             // app: without it the window can open behind other apps, or
-            // never gain key/focus at all (§4.5).
+            // never gain key/focus at all (§4.5). Running the checks
+            // themselves is NOT done here — `onAppear` only fires once per
+            // app run for this `Window` scene (M16, see
+            // `SetupCheckViewModel.observeWindowLifecycle`), so that's
+            // handled by the window becoming key instead, which fires on
+            // every open including close-then-reopen.
             NSApp.activate(ignoringOtherApps: true)
-            viewModel.runChecks()
         }
     }
 }
