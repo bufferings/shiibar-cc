@@ -25,10 +25,13 @@ jobs:
   release:
     runs-on: macos-15
     # The long pole is Apple's notarization queue: normally minutes, but a
-    # first-time submission has been observed to take an hour+ (2026-07-08).
-    # The notarytool --wait below gets its own 100m limit so its log-fetch
-    # error path still runs before this job-level cap kills the run.
-    timeout-minutes: 120
+    # first-time submission has been observed to exceed two hours
+    # (2026-07-08). This cap is a ceiling for hung runs, not an expected
+    # wait — progress stays visible in the log (the Notarize step tees its
+    # output). The notarytool --wait below gets its own slightly shorter
+    # limit so its log-fetch error path still runs before this job-level
+    # cap kills the run.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -105,7 +108,7 @@ jobs:
           xcrun notarytool submit dist/notarize.zip \
             --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
-            --wait --timeout 100m 2>&1 | tee "$RUNNER_TEMP/notarize.log"
+            --wait --timeout 220m 2>&1 | tee "$RUNNER_TEMP/notarize.log"
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then

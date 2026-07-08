@@ -673,10 +673,10 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
      マーケットプレイスのクローンを更新するだけでインストール済み plugin は変わらず、
      `claude plugin update <plugin>@<marketplace>` は手元のクローンからしか入れない →
      配達は `marketplace update` → `plugin update` の順で両方実行する(cask の postflight。§8.28)
-   - notarytool の公証待ち(`submit --wait`)は、新規アカウントの初回提出で 1 時間超かかることがある(実測)。
+   - notarytool の公証待ち(`submit --wait`)は、新規アカウントの初回提出で 2 時間超かかることがある(実測)。
      `--timeout` はこちらの待ちを打ち切るだけで Apple 側の処理は続く(実物 help に明記)—
      打ち切っても提出は無駄にならず、あとから `notarytool info <id>` で確認できる。
-     release.yml の上限(job 120 分・`--timeout 100m`)はこの実測に基づく
+     release.yml の待ち上限はこの実測を踏まえて余裕を取ってある(値は release.yml が正)
 
 ## 8. 決定の記録
 
