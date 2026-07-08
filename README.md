@@ -77,6 +77,7 @@ specific feature — nothing is requested speculatively.
 build below.
 
 ```sh
+brew trust bufferings/tap
 brew install --cask bufferings/tap/shiibar-cc
 ```
 

@@ -82,6 +82,16 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 - **secret scanning + push protection**: 両リポジトリで有効(public リポジトリの既定)。
   既知パターンのトークンは push 時にブロックされる。ただし `.p12` などのバイナリや任意の
   パスワードは検出できない — 鍵ファイルはリポジトリの外で扱い、使い終わったら消す運用が第一の防御
+- **tap リポジトリ(homebrew-tap)は最低 1 コミット必要**: 完全に空(ブランチなし)だと
+  bump-cask の checkout が `couldn't find remote ref refs/heads/main` で落ちる
+  (v0.1.0 publish 時に実例 — 初期 README コミットを作って再実行で解消。2026-07-09)
+- **利用者側の tap trust**: 現行の Homebrew は非公式 tap の信頼要求が**既定で有効**
+  (`HOMEBREW_REQUIRE_TAP_TRUST` の default = true。6.0.9 の env_config で確認)で、
+  未信頼の tap の cask は**ロード時点で**操作ごと拒否される。README の手順は
+  `brew trust bufferings/tap` を 1 行目に置いてある。
+  なお v0.1.0 移行時(2026-07-09)に「アプリだけ入って symlink・postflight が無い」
+  中途半端な状態を一度観測した(発生経路は未特定 — 現行実装のロード時拒否では説明がつかない)。
+  trust してからアプリを消して `brew install` し直すことで解消した
 - **GitHub Actions の Secrets**(shiibar-cc に 6 つ。名前と用途は release.yml / bump-cask.yml):
   値と鍵ファイルの原本はすべて所有者の 1Password にあり、リポジトリにも会話ログにも置かない。
   期限があるのは `TAP_PUSH_TOKEN` だけ(fine-grained PAT。対象 = homebrew-tap のみ・
@@ -179,6 +189,11 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   5. **新規インストール直後に汎用アイコンのままになることがある**: dev-install.sh が組み立て・署名の
      あと、起動前に `lsregister -f <app>`(上記 3)を自動で実行する。それでも直らない場合の
      手動フォールバックは `killall Dock`(Dock プロセスもアイコンキャッシュを持つ。実測 2026-07-07)
+  6. **リリース(brew)版はキャッシュバスターが無い**: dev 版と違い CFBundleVersion がバージョン固定
+     (スモークした物 = 公開する物 — 下記「リリース手順」参照)なので、アイコンを変えたリリースを同じマシンに入れると
+     旧アイコンのキャッシュが残ることがある。lsregister / `killall usernoted` / `killall Dock` で
+     落ちない場合、`brew uninstall` → `brew install` の入れ直し(登録の削除 → 再作成)で解決した
+     (通知バナーのアイコンで実測 2026-07-09)。新規マシンには旧キャッシュが無いので利用者影響はない
 
 ## リリース・インストール
 

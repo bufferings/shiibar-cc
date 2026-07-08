@@ -672,12 +672,18 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
    子が終了するとタブのエントリが消えたまま残り得る(復元の契機は起動時 / 再接続時 / 手動再スキャンのみ)。
 4. **同一 iTerm2 タブ内での Claude Code 再起動**: target は同一で session_id が変わる。
    target をプライマリキーにし、session_id は属性として上書きする(§3.6)
-5. **配布パイプラインの外部挙動** — ✅ 実測済み(2026-07-08):
+5. **配布パイプラインの外部挙動** — ✅ 実測済み(2026-07-08〜09):
    - claude CLI(2.1.204)の plugin 更新は 2 段必要: `claude plugin marketplace update <name>` は
      マーケットプレイスのクローンを更新するだけでインストール済み plugin は変わらず、
      `claude plugin update <plugin>@<marketplace>` は手元のクローンからしか入れない →
      配達は `marketplace update` → `plugin update` の順で両方実行する(cask の postflight。§8.28)
+   - **hardened runtime 下でも focus は動く(entitlement 不要と確定)**: 公証済みの v0.1.0(brew 版)の
+     実機で、アプリ発の focus と CLI の TCC プローブがともに成功(2026-07-09)。Apple Events を送るのは
+     子プロセスとして spawn した `/usr/bin/osascript` で、親が hardened runtime でも
+     `com.apple.security.automation.apple-events` entitlement なしで通る。
+     配布前は公式ドキュメントに規定が無く要実機検証としていたグレーゾーンの決着
    - notarytool の公証待ち(`submit --wait`)は、新規アカウントの初回提出で 2 時間超かかることがある(実測)。
+     同一アカウントの 2 回目の提出は即時に近い(タグの run が全体 79 秒で完走。2026-07-08 実測)。
      `--timeout` はこちらの待ちを打ち切るだけで Apple 側の処理は続く(実物 help に明記)—
      打ち切っても提出は無駄にならず、あとから `notarytool info <id>` で確認できる。
      release.yml の待ち上限はこの実測を踏まえて余裕を取ってある(値は release.yml が正)
