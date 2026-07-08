@@ -1,5 +1,5 @@
 # Single source of truth for assembling and signing "Shiibar CC.app".
-# Sourced (not executed) by scripts/install.sh, scripts/dev-reload.sh,
+# Sourced (not executed) by scripts/dev-install.sh, scripts/dev-reload.sh,
 # and scripts/release/build-release-app.sh so local install, dev-reload,
 # and the release build share one bundle layout and one signing order.
 #

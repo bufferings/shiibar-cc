@@ -37,6 +37,25 @@ jobs:
         run: swift test
         working-directory: app
 
+      - name: Cask template check (brew style --cask)
+        # Renders packaging/homebrew/shiibar-cc.rb with dummy placeholder
+        # values and runs it through `brew style --cask` so a Ruby syntax
+        # error in the template fails CI immediately, instead of only
+        # surfacing when bump-cask.yml renders it for real on a release
+        # (macos-15 runners ship Homebrew preinstalled). `brew style --cask`
+        # requires the cask to live inside a tap directory, so this renders
+        # into a throwaway one under Homebrew's own Taps directory.
+        run: |
+          tapdir="$(brew --repository)/Library/Taps/bufferings/homebrew-shiibar-cc-ci"
+          mkdir -p "$tapdir/Casks"
+          dummy_sha256="$(printf 'x%.0s' {1..64})"
+          sed \
+            -e "s/{{VERSION}}/0.0.0/g" \
+            -e "s/{{SHA256}}/$dummy_sha256/g" \
+            packaging/homebrew/shiibar-cc.rb \
+            > "$tapdir/Casks/shiibar-cc.rb"
+          brew style --cask "$tapdir/Casks/shiibar-cc.rb"
+
   deny:
     runs-on: ubuntu-latest
     steps:

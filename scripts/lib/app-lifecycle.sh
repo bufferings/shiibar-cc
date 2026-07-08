@@ -1,5 +1,5 @@
 # Stopping a running "Shiibar CC.app" (and its daemon) before replacing it.
-# Sourced by scripts/install.sh and scripts/dev-reload.sh. Expects BUNDLE_ID,
+# Sourced by scripts/dev-install.sh and scripts/dev-reload.sh. Expects BUNDLE_ID,
 # so source scripts/lib/bundle.sh first.
 #
 # Why this exists: quitting the app does NOT reliably stop its daemon.
@@ -10,7 +10,7 @@
 # row). A surviving daemon means a relaunched app ATTACHES to a process
 # still running the pre-replace binary image, and the update silently does
 # nothing for the daemon. The same applies to `open` at the end of
-# install.sh: with the old instance still running it only foregrounds it.
+# dev-install.sh: with the old instance still running it only foregrounds it.
 # So: quit the app, then make sure the daemon is really gone — graceful
 # socket shutdown ({"cmd":"shutdown"}, DESIGN.md §4.2) first, then SIGTERM,
 # then SIGKILL. Force-killing is safe: the daemon persists state.json on

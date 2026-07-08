@@ -7,7 +7,7 @@
 //
 // Writes <output-dir>/AppIcon.iconset/*.png (the standard 10-file iconset
 // naming: icon_{16,32,128,256,512}x{same}[@2x].png). The caller
-// (scripts/install.sh) runs `iconutil -c icns` on that directory to produce
+// (scripts/dev-install.sh) runs `iconutil -c icns` on that directory to produce
 // AppIcon.icns — this script does not shell out to iconutil itself.
 //
 // Geometry is expressed in a 100-unit logical space, y-down, scaled to each
@@ -15,7 +15,7 @@
 // source of truth (DESIGN.md §4.5: "the generator script is the source of truth for geometry").
 //
 // Any failure here exits non-zero with a message on stderr — no silent
-// fallback. The caller (install.sh) is expected to treat that as a hard
+// fallback. The caller (dev-install.sh) is expected to treat that as a hard
 // install failure.
 
 import AppKit

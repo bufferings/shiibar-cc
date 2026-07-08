@@ -13,7 +13,7 @@
    **先に spec と指示書だけから期待動作を導出**し、ブラックボックスで検証する
    (daemon を実際に起動して socket に生 NDJSON を打つ、再起動復元、exit code など)。
    実装コードを読むのは最後(テストの網羅漏れ探しのみ)
-4. **実機スモーク(所有者)**: dev-reload / install.sh で実機に反映し、目視・実操作で確認する。
+4. **実機スモーク(所有者)**: dev-reload / dev-install.sh で実機に反映し、目視・実操作で確認する。
    DESIGN.md §6 のとおり、これも完了条件の一部 — 自動テスト緑は完了ではない
 5. **push は 4 が終わってから**。push = 公開なので、受け入れが済んでいない変更を公開しない。
    例外は実機で確認するものが無い変更(docs のみ・CI 設定のみ等)だけ
@@ -45,8 +45,8 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ## CI
 
 - push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
-  cargo test / clippy(いずれも `--locked`)と swift build / swift test、Linux ジョブで
-  cargo-deny(設定は `deny.toml`))
+  cargo test / clippy(いずれも `--locked`)と swift build / swift test と cask テンプレートの
+  `brew style --cask` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
 - **push 後の結果確認は、必ずコミット SHA で run を特定する**。SHA は**フル(40 桁)が必須** —
   `--commit` に短縮 SHA を渡すとエラーにならず黙って 0 件が返り、「run が無い」と誤診する
   (2026-07-08 実例)。run の登録は push から数秒〜十数秒遅れるので、登録待ちと完了待ちを分ける:
@@ -82,12 +82,12 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
   誤って拒否した場合: システム設定 → プライバシーとセキュリティ → オートメーション から付け直す。
   ターミナルから実行する CLI と、メニューバーアプリからの実行では**許可が別々に**必要
 - **M4(アプリ初回起動時)**: 通知の許可ダイアログ。ad-hoc 署名は再ビルドで権限がリセットされることがある
-  (install.sh で安定した署名 ID を使う。DESIGN.md §4.5)
+  (dev-install.sh で安定した署名 ID を使う。DESIGN.md §4.5)
 - 「通知が来ない」等の切り分けは `shiibar-cc doctor`(M2 で実装)
 
 ## M2 実機スモーク(osascript 権限が要るため人間が行う)
 
-`scripts/install.sh` でバイナリ配置後、素の iTerm2 タブで試すこと
+`scripts/dev-install.sh` でバイナリ配置後、素の iTerm2 タブで試すこと
 (tmux は非スコープ。§8.1):
 
 > **フォルダを移動したら `cargo clean` を1回**。`env!("CARGO_MANIFEST_DIR")` がビルド時に
@@ -113,7 +113,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 ## ドッグフーディング運用
 
-- 日常のドッグフーディングはインストール済みの `.app` で行う(`scripts/install.sh` で
+- 日常のドッグフーディングはインストール済みの `.app` で行う(`scripts/dev-install.sh` で
   `~/Applications/Shiibar CC.app` を配置。Login Item として登録され、daemon の起動・アタッチ・
   停止はアプリが管理する。DESIGN.md §4.5 / §8.8。launchd には入れない、§8.8)
 - コード変更の反映は `scripts/dev-reload.sh`(下記「リリース・インストール」参照)
@@ -131,7 +131,7 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 - **トレイアイコン**: 描画は `app/Sources/ShiibarCcApp/TrayIconRenderer.swift`(数値は `TrayIconMetrics` に集約)。
   見た目の正は `docs/menubar-design.html`。数値を変えたら menubar-design.html のモック SVG も同じ値に更新する
-- **アプリアイコン**: `scripts/generate-app-icon.swift` が唯一の原本。install.sh がこれを実行して
+- **アプリアイコン**: `scripts/generate-app-icon.swift` が唯一の原本。dev-install.sh がこれを実行して
   `.icns` を生成・同梱するので、リポジトリに `.icns` はコミットしない。
   例外は README 用の `docs/assets/app-icon.png`(コミット済みの生成物)— デザインを変えたら
   `swift scripts/generate-app-icon.swift <出力先>` で作り直して差し替えること
@@ -150,13 +150,13 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
      同一 bundle id の新バンドルを**新パスで**起動した場合は、通知システムが ncprefs のパスを
      自動で新パスに追従させることがあり、この手当てが不要なことも(実測 2026-07-05)。
      書き換え前に `defaults export com.apple.ncprefs - | grep -o 'shiibar[^<]*'` で現状を確認するとよい
-  5. **新規インストール直後に汎用アイコンのままになることがある**: install.sh が組み立て・署名の
+  5. **新規インストール直後に汎用アイコンのままになることがある**: dev-install.sh が組み立て・署名の
      あと、起動前に `lsregister -f <app>`(上記 3)を自動で実行する。それでも直らない場合の
      手動フォールバックは `killall Dock`(Dock プロセスもアイコンキャッシュを持つ。実測 2026-07-07)
 
 ## リリース・インストール
 
-- `scripts/install.sh`: リリースビルドして `~/Applications/Shiibar CC.app`
+- `scripts/dev-install.sh`: リリースビルドして `~/Applications/Shiibar CC.app`
   (`SHIIBAR_CC_APP_DIR` で上書き可)を組み立て、安定したローカル署名 ID で署名する
   (再ビルドで通知権限がリセットされないようにするため。DESIGN.md §4.5。ID が無ければ
   `scripts/lib/make-local-signing-identity.sh` で作成する)。`~/.local/bin/`
@@ -164,23 +164,74 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   最後にアプリを 1 回起動する(Login Item として自己登録。§4.5)。hooks は Claude Code
   プラグインとして配布するため(§4.1/§8.19)、`~/.claude/settings.json` はこのスクリプトが
   一切触らない。`enabledPlugins` に `shiibar-cc@shiibar-cc: true` が無ければ
-  `/plugin marketplace add bufferings/shiibar-cc` → `/plugin install shiibar-cc@shiibar-cc`
+  `claude plugin marketplace add bufferings/shiibar-cc` → `claude plugin install shiibar-cc@shiibar-cc`
   の 2 コマンドを案内するだけ
-- `scripts/uninstall.sh`: 一段のみ(引数を取らない。DESIGN.md §8.20)。`.app`
+- `scripts/dev-uninstall.sh`: 一段のみ(引数を取らない。DESIGN.md §8.20)。`.app`
   (Login Item 登録ごと)・`~/.local/bin/` のシンボリックリンク・state dir
   (`SHIIBAR_CC_STATE_DIR` の既定パス)・`defaults delete cc.shiibar.menubar`・
   ローカル署名 ID(`shiibar-cc-local-signing`、`scripts/lib/signing.sh`)の
   `security delete-certificate`・`tccutil reset AppleEvents cc.shiibar.menubar` を
   常に実行する。hooks の撤去はプラグイン管轄なので `~/.claude/settings.json` は触らず、
-  `/plugin uninstall shiibar-cc` を案内するだけ。通知許可だけはプログラムから削除できない
+  `claude plugin uninstall shiibar-cc` を案内するだけ。通知許可だけはプログラムから削除できない
   ため、システム設定 → 通知 からの手動削除を案内して終わる
 - `scripts/dev-reload.sh`: 日常のホットスワップ。デバッグビルド(cargo + swift)を作り、
   インストール済みアプリを Quit し、daemon が確実に終了するのをスクリプト側で保証してから
   (Quit 経由の shutdown 送信は投げっぱなしでプロセス終了と競合して失われ得るため、
   socket への `{"cmd":"shutdown"}` → SIGTERM → SIGKILL の順に確認する)、bundle 内の
-  バイナリを差し替え、install.sh と同じ安定した署名 ID で再署名して(`scripts/lib/signing.sh`。
+  バイナリを差し替え、dev-install.sh と同じ安定した署名 ID で再署名して(`scripts/lib/signing.sh`。
   ID が keychain に無ければ警告付きで ad-hoc にフォールバック)、アプリを再起動する。
   署名 ID が安定しているので、通知権限はリロードをまたいで維持される(§4.5)。
   アプリ未インストールの環境ではビルドのみ行い、手動運用の手順
   (`shiibar-ccd --foreground` + `swift run`)を表示する
 - 動作確認は `shiibar-cc doctor`(daemon 疎通・hooks 設定・PATH・osascript 権限を順に表示)
+
+### 正式配布(brew cask)
+
+正式導入経路は `brew install --cask bufferings/tap/shiibar-cc`(arm64 のみ)。cask 定義の正はこの
+リポジトリの `packaging/homebrew/shiibar-cc.rb`(`{{VERSION}}` / `{{SHA256}}` プレースホルダ入りの
+テンプレート)。tap リポジトリ `bufferings/homebrew-tap` の `Casks/shiibar-cc.rb` へは、リリース publish
+時に `.github/workflows/bump-cask.yml` が生成コミットを push する — 手で編集しない。
+
+### リリース手順
+
+1. タグ `vX.Y.Z` を push する(タグは **`Cargo.toml` の `[workspace.package]` の version と一致必須**。
+   `.github/workflows/release.yml` の `check-version.sh` が検査し、不一致ならビルド前に失敗する)
+2. Actions が arm64 ビルド → Developer ID 署名(hardened runtime)→ 公証 → staple → zip を行い、
+   **draft** の GitHub Release を作る
+3. 所有者が draft の zip を実機スモークする
+4. スモーク OK なら draft を publish する(この操作が正式な公開)
+5. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
+   再計算して tap の cask を更新する
+6. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
+   bump してコミットする
+
+**公開後のタグは再利用禁止**。公開前に失敗した draft は、そのタグごと削除してよい。
+
+### バージョンの原則
+
+- リポジトリの `Cargo.toml` の version は常に「次に出す番号」を指す
+- dev ビルド(`scripts/dev-install.sh`)はそれに `-dev` サフィックスを付けて名乗る
+  (About パネルで見分けられる。DESIGN.md §4.5)
+- 機能が入るリリースは 0.x を上げる。修正だけのリリースは 0.x.y を上げる
+- publish 後はまず patch へ bump しておけばよい。次のリリースの内容が固まった時点で、
+  実態(minor か patch か)に合わせて上げ直してよい
+
+### リリースで使う secrets
+
+- `.github/workflows/release.yml`: `DEVELOPER_ID_CERT_P12` / `DEVELOPER_ID_CERT_PASSWORD`
+  (Developer ID Application 証明書)/ `APPLE_API_KEY_P8` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER_ID`
+  (公証用の App Store Connect API キー)
+- `.github/workflows/bump-cask.yml`: `TAP_PUSH_TOKEN`(tap リポジトリ `bufferings/homebrew-tap` への
+  push 権限)
+
+値の作り方はここには書かない(名前と用途のみ)。
+
+### dev 版と brew 版の切り替え
+
+同居させず、常にどちらか一方にする:
+
+- リリース検証・brew への移行: `./scripts/dev-uninstall.sh` → `brew install --cask bufferings/tap/shiibar-cc`
+- 開発に戻る: `brew uninstall --cask shiibar-cc` → `./scripts/dev-install.sh`
+
+署名方式が切り替わる(ローカル自己署名 ↔ Developer ID)ため、切り替えるたびに通知許可と iTerm2
+Automation 許可の再確認ダイアログが 1 回ずつ出るのは想定内(切り替えはリリース検証時だけなので頻度は低い)。

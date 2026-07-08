@@ -53,19 +53,71 @@ specific feature — nothing is requested speculatively.
   the first time you launch it. You can turn this off any time from the
   app's `⌄` menu (Settings → Start at Login); once you do, the app respects
   that choice and won't re-register itself.
-- **A self-signed certificate in your keychain**: the app is signed locally
-  with a stable identity created on first install (`security` /
-  `codesign`), so that rebuilding it doesn't reset the notification
-  permission macOS ties to the app's signature.
+- **Code signing**: the Homebrew cask ships a Developer ID–signed, notarized
+  `.app` — no local signing step. Building from source instead signs the
+  app locally with a stable self-signed identity created on first install
+  (`security` / `codesign`), so that rebuilding it doesn't reset the
+  notification permission macOS ties to the app's signature. This only
+  applies to the source-build path.
 - **Hooks, via a Claude Code plugin**: Shiibar CC needs Claude Code to report
   session events to it. This repository is itself a Claude Code plugin
-  marketplace, so the hooks are installed with two `/plugin` commands
-  (below) and coexist with whatever hooks you already have.
+  marketplace. The Homebrew cask installs the plugin automatically on first
+  install (below); either way it's two `claude plugin` commands and it
+  coexists with whatever hooks you already have.
 - **A state directory** (`~/.local/state/shiibar-cc/`): holds the daemon's
   Unix socket, its persisted session state, and its log file. Nothing here
   leaves your machine.
 
 ## Install / Uninstall
+
+### Homebrew (recommended)
+
+**Requirements**: macOS 13 (Ventura) or later, Apple Silicon, and
+[Homebrew](https://brew.sh). Intel Macs are not supported — see the source
+build below.
+
+```sh
+brew install --cask bufferings/tap/shiibar-cc
+```
+
+This installs `Shiibar CC.app` to `/Applications` and symlinks
+`shiibar-cc` / `shiibar-ccd` into Homebrew's `bin`. **It also automatically
+installs the hooks plugin** (skipped if it's already installed, disabled,
+or removed, or if it can't find the `claude` CLI). If it doesn't run,
+install the plugin yourself:
+
+```sh
+claude plugin marketplace add bufferings/shiibar-cc
+claude plugin install shiibar-cc@shiibar-cc
+```
+
+Then open Shiibar CC once (from Spotlight or `/Applications`) to grant the
+notification and iTerm2 Automation permissions — this also registers it as
+a Login Item. Verify everything end to end from the ⌄ menu's Setup Check,
+or from a terminal:
+
+```sh
+shiibar-cc doctor
+```
+
+To remove it:
+
+```sh
+brew uninstall --cask shiibar-cc   # add --zap to also remove the state
+                                    # directory, saved preferences, and
+                                    # saved app state
+claude plugin uninstall shiibar-cc
+```
+
+Either way, the notification permission itself can't be removed by a
+script — macOS ties it to the app, and only System Settings → Notifications
+can revoke it.
+
+### Source build (developers)
+
+Building from source is a development setup, not an Intel-Mac substitute
+for the Homebrew cask — there is no Intel build, and none is planned (there
+is no Intel Mac or CI runner to verify one on).
 
 **Requirements**: macOS 13 or later, a Rust toolchain via
 [rustup](https://rustup.rs) (the pinned version in `rust-toolchain.toml` is
@@ -76,34 +128,29 @@ required for normal use) needs the full Xcode.app, not just the CLT.
 ```sh
 git clone <this repo>
 cd shiibar-cc
-./scripts/install.sh
+./scripts/dev-install.sh
 ```
 
 This builds the daemon and CLI, builds and bundles the menu bar app as
-`Shiibar CC.app` (installed to `~/Applications` by default), code-signs it,
-symlinks `shiibar-cc` / `shiibar-ccd` onto `~/.local/bin`, and launches the
-app once (which registers it as a Login Item and starts the daemon). It
-then prints the two commands to install the hooks plugin, and points you
-at `shiibar-cc doctor` to verify everything end to end:
+`Shiibar CC.app` (installed to `~/Applications` by default), code-signs it
+locally, symlinks `shiibar-cc` / `shiibar-ccd` onto `~/.local/bin`, and
+launches the app once (which registers it as a Login Item and starts the
+daemon). It then prints the two commands to install the hooks plugin, and
+points you at `shiibar-cc doctor` to verify everything end to end:
 
-```
-/plugin marketplace add bufferings/shiibar-cc
-/plugin install shiibar-cc@shiibar-cc
+```sh
+claude plugin marketplace add bufferings/shiibar-cc
+claude plugin install shiibar-cc@shiibar-cc
 ```
 
 To remove it:
 
 ```sh
-./scripts/uninstall.sh   # quits the app; removes the app bundle, Login
-                          # Item, ~/.local/bin symlinks, state directory,
-                          # the app's saved preferences, local signing
-                          # certificate, and iTerm2 Automation grant
-```
-
-Then remove the hooks plugin from inside a Claude Code session:
-
-```
-/plugin uninstall shiibar-cc
+./scripts/dev-uninstall.sh   # quits the app; removes the app bundle, Login
+                              # Item, ~/.local/bin symlinks, state directory,
+                              # the app's saved preferences, local signing
+                              # certificate, and iTerm2 Automation grant
+claude plugin uninstall shiibar-cc
 ```
 
 Either way, the notification permission itself can't be removed by a

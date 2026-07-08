@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Removes what scripts/install.sh placed, plus a full teardown: the
+# Removes what scripts/dev-install.sh placed, plus a full teardown: the
 # "Shiibar CC.app" bundle, its Login Item registration, the ~/.local/bin
 # symlinks, the state dir, the Login Item UserDefaults flag, the local
 # code-signing identity, and the iTerm2 Automation TCC grant. This used to
-# be a separate `--purge` stage, but install.sh can already recreate
+# be a separate `--purge` stage, but dev-install.sh can already recreate
 # everything here from scratch, so there was no real use for a lighter
 # "temporarily remove" step — see DESIGN.md §8.20. The notification
 # permission has no CLI removal API and is called out at the end as a

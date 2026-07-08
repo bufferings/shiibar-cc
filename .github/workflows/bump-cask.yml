@@ -1,0 +1,78 @@
+# Bumps the bufferings/homebrew-tap cask to a newly published release. Runs
+# only on `release: published` (never on a draft, and never on a prerelease
+# — the `if:` guard) so the cask can never point at an asset the owner
+# hasn't smoke-tested yet: draft -> owner smoke -> publish -> this workflow,
+# in that order, is the only path that updates the tap (see M17/M18 in
+# docs/tasks/ for the pipeline this completes).
+#
+# The sha256 is recomputed from the published asset (not carried over from
+# the release build's own log) so the cask always hashes what is actually
+# downloadable from the release, not what the build job merely claimed to
+# produce.
+name: Bump cask
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  bump-cask:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      # Check out this repo AT THE RELEASE TAG, not main, so the cask
+      # template used is the one that shipped with that release.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Download the release asset and hash it
+        id: asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          version="${tag#v}"
+          mkdir -p dist
+          gh release download "$tag" \
+            --repo "${{ github.repository }}" \
+            --pattern '*-arm64.zip' \
+            --dir dist
+          zip_path="$(find dist -name '*-arm64.zip' -print -quit)"
+          sha256="$(shasum -a 256 "$zip_path" | awk '{ print $1 }')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=$version sha256=$sha256 from $zip_path"
+
+      - name: Check out bufferings/homebrew-tap
+        uses: actions/checkout@v5
+        with:
+          repository: bufferings/homebrew-tap
+          token: ${{ secrets.TAP_PUSH_TOKEN }}
+          path: tap
+
+      - name: Render the cask template and push
+        run: |
+          version="${{ steps.asset.outputs.version }}"
+          sha256="${{ steps.asset.outputs.sha256 }}"
+
+          mkdir -p tap/Casks
+          sed \
+            -e "s/{{VERSION}}/$version/g" \
+            -e "s/{{SHA256}}/$sha256/g" \
+            packaging/homebrew/shiibar-cc.rb \
+            > tap/Casks/shiibar-cc.rb
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/shiibar-cc.rb
+          if git diff --cached --quiet; then
+            echo "no changes to the rendered cask — nothing to commit"
+            exit 0
+          fi
+          git commit -m "shiibar-cc $version"
+          git push

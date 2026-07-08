@@ -93,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `scripts/uninstall.sh` launches the app with this flag to
+        // `scripts/dev-uninstall.sh` launches the app with this flag to
         // deregister the Login Item before deleting the `.app` bundle —
         // `SMAppService.unregister()` only works from inside the still-
         // installed bundle, so it can't be done from the shell script
@@ -133,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// as a **first-launch-only** auto-registration: it records that the
     /// check ran (regardless of outcome) and never repeats it, so a user who later
     /// turns "Start at Login" off via the ⌄ menu keeps that choice across
-    /// restarts. Only meaningful once bundled as a `.app` (`install.sh`'s
+    /// restarts. Only meaningful once bundled as a `.app` (`dev-install.sh`'s
     /// job, §4.5); in a `swift run` dev build this is a no-op and the flag
     /// is never recorded, so the check re-runs on the next bundled launch.
     private func performFirstLaunchLoginItemAutoRegistrationIfNeeded() {

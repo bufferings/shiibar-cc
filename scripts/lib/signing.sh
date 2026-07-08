@@ -1,4 +1,4 @@
-# Shared local code-signing identity lookup, sourced by scripts/install.sh
+# Shared local code-signing identity lookup, sourced by scripts/dev-install.sh
 # and scripts/dev-reload.sh (DESIGN.md §4.5: a stable signing identity, not
 # ad-hoc, so notification permission doesn't reset across rebuilds).
 #

@@ -109,7 +109,7 @@ echo "Trusting it for code signing (a system dialog will ask for your login pass
 if ! security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$CERT_PEM"; then
   echo "warning: could not add code-signing trust automatically." >&2
   echo "  Open Keychain Access, find the '$COMMON_NAME' certificate, expand" >&2
-  echo "  'Trust', and set 'Code Signing' to 'Always Trust'. Then re-run install.sh." >&2
+  echo "  'Trust', and set 'Code Signing' to 'Always Trust'. Then re-run dev-install.sh." >&2
 fi
 
 # Loud verification: an identity that exists but isn't trusted for code
@@ -125,6 +125,6 @@ else
   echo "    2. Double-click '$COMMON_NAME', expand 'Trust'," >&2
   echo "       set 'Code Signing' to 'Always Trust', close (enter password)." >&2
   echo "    3. Verify: security find-identity -v -p codesigning | grep '$COMMON_NAME'" >&2
-  echo "    4. Re-run scripts/install.sh." >&2
+  echo "    4. Re-run scripts/dev-install.sh." >&2
   exit 1
 fi

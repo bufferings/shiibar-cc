@@ -106,7 +106,7 @@ else
   echo >&2
   echo "Re-run this script after fixing it, or, to consciously accept ad-hoc" >&2
   echo "signing (notification permission resets on every rebuild):" >&2
-  echo "  SHIIBAR_CC_ALLOW_ADHOC=1 scripts/install.sh" >&2
+  echo "  SHIIBAR_CC_ALLOW_ADHOC=1 scripts/dev-install.sh" >&2
   exit 1
 fi
 
