@@ -442,6 +442,10 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 - **Setup Check ウィンドウ**(⌄ → Setup Check…): 導入状態の一覧点検。`shiibar-cc doctor --json`(§4.4)の
   結果に、アプリでしか取れない 2 項目(通知許可の状態 / ログイン時起動の登録状態)を加えて
   ✓/⚠/✗ で表示し、各行に対処のヒントを一言添える。Re-run ボタン付き。
+  **見た目は Settings ウィンドウと同じ SwiftUI `Form` + `.formStyle(.grouped)`**
+  (2 グループ: **Doctor** = doctor 由来のチェック / **App** = アプリ側 2 項目。
+  ウィンドウ内の大見出しは置かない — タイトルバーが兼ねる。
+  Re-run は Form の外の常時表示フッターに置きスクロールに巻き込まない)。
   LSUIElement アプリのため表示時に `NSApp.activate` が必要。
   判定ロジックはアプリに複製しない(doctor が正)。将来のドロップ導入時のオンボーディングを兼ねる(§8.18)
 - **表示ラベル**: cwd の**末尾 2 要素のみ**を表示(足りなければあるだけ。ホーム配下は
