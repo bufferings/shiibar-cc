@@ -82,9 +82,11 @@ brew install --cask bufferings/tap/shiibar-cc
 
 This installs `Shiibar CC.app` to `/Applications` and symlinks
 `shiibar-cc` / `shiibar-ccd` into Homebrew's `bin`. **It also automatically
-installs the hooks plugin** (skipped if it's already installed, disabled,
-or removed, or if it can't find the `claude` CLI). If it doesn't run,
-install the plugin yourself:
+installs the hooks plugin** on first install (skipped if you disabled or
+removed the plugin, or if it can't find the `claude` CLI), and while the
+plugin stays enabled, every `brew upgrade` of this cask also updates the
+hooks to match the app. If the automatic install doesn't run, install the
+plugin yourself:
 
 ```sh
 claude plugin marketplace add bufferings/shiibar-cc

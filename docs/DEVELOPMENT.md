@@ -220,6 +220,10 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 ### リリース手順
 
+タグの前にパイプライン一式をリハーサルしたいとき(初回・secrets を変えたあと)は **dry-run** が使える:
+Actions タブ → Release → Run workflow(workflow_dispatch)。実 secrets で署名・公証・staple まで走り、
+Release は作らず zip を workflow artifact に置く。
+
 1. リリースコミットで `plugin/.claude-plugin/plugin.json` の `version` をタグと同じ番号に上げる
    (**hooks を変えていなくても**。bump = hooks 配布のゲート — Claude Code は version が変わらない限り
    キャッシュした plugin を使い続ける。DESIGN.md §4.1)。`Cargo.toml` とはタイミングが違う点に注意:
@@ -229,8 +233,10 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
    検査し、不一致ならビルド前に失敗する)
 3. Actions が arm64 ビルド → Developer ID 署名(hardened runtime)→ 公証 → staple → zip を行い、
    **draft** の GitHub Release を作る
-4. 所有者が draft の zip を実機スモークする
-5. スモーク OK なら draft を publish する(この操作が正式な公開)
+4. 所有者が draft の zip を**起動確認**する(.app が開いて doctor が見える程度でよい —
+   公証が通っていない・zip が壊れている、を publish 前に弾くのが目的。本格的な検証は
+   手順 6 のあと `brew install` した実物で行い、見つかった問題は patch リリースで直す)
+5. 起動確認 OK なら draft を publish する(この操作が正式な公開)
 6. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
    再計算して tap の cask を更新する
 7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
