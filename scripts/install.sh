@@ -13,7 +13,7 @@
 # shipped as a Claude Code plugin (this repository doubles as the
 # marketplace, DESIGN.md §4.1/§8.19), so Claude Code — not this script —
 # merges the plugin's hooks into the user's settings when they run
-# `/plugin install`. There is no JSON to hand-merge or print here anymore.
+# `claude plugin install`. There is no JSON to hand-merge or print here anymore.
 
 set -euo pipefail
 
@@ -22,7 +22,6 @@ BIN_DIR="${SHIIBAR_CC_BIN_DIR:-$HOME/.local/bin}"
 APP_DIR="${SHIIBAR_CC_APP_DIR:-$HOME/Applications}"
 APP_NAME="Shiibar CC.app"
 APP_PATH="$APP_DIR/$APP_NAME"
-BUNDLE_ID="cc.shiibar.menubar"
 # Fresh CFBundleVersion per install: icon/metadata caches (LaunchServices,
 # iconservices) key on bundle id + version, so a constant version can pin
 # stale state — e.g. the pre-icon registration — forever.
@@ -30,6 +29,10 @@ BUILD_STAMP="$(date +%Y%m%d%H%M%S)"
 
 # shellcheck source=scripts/lib/signing.sh
 source "$ROOT/scripts/lib/signing.sh"
+# shellcheck source=scripts/lib/bundle.sh
+source "$ROOT/scripts/lib/bundle.sh"
+# shellcheck source=scripts/lib/app-lifecycle.sh
+source "$ROOT/scripts/lib/app-lifecycle.sh"
 
 echo "==> Building shiibar-ccd / shiibar-cc (release)..."
 (cd "$ROOT" && cargo build --release -p shiibar-ccd -p shiibar-cc)
@@ -38,52 +41,29 @@ echo "==> Building the menu bar app (release)..."
 (cd "$ROOT/app" && swift build -c release)
 APP_BIN_DIR="$(cd "$ROOT/app" && swift build -c release --show-bin-path)"
 
+# A reinstall over a running app must stop it first: the `open` at the end
+# only foregrounds an already-running instance (it never restarts it), so
+# the old process would keep serving a stale bundle — and its surviving
+# daemon would keep running the old binary image (stop_app_and_daemon,
+# scripts/lib/app-lifecycle.sh). A fresh install has nothing to stop and
+# this is a fast no-op.
+echo "==> Stopping the running app/daemon (if any)"
+stop_app_and_daemon "$APP_PATH"
+
 echo "==> Assembling $APP_PATH"
-rm -rf "$APP_PATH"
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers"
-
-install -m 755 "$APP_BIN_DIR/ShiibarCcApp" "$APP_PATH/Contents/MacOS/ShiibarCcApp"
-install -m 755 "$ROOT/target/release/shiibar-ccd" "$APP_PATH/Contents/Helpers/shiibar-ccd"
-install -m 755 "$ROOT/target/release/shiibar-cc" "$APP_PATH/Contents/Helpers/shiibar-cc"
-
-cat > "$APP_PATH/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>CFBundleExecutable</key>
-	<string>ShiibarCcApp</string>
-	<key>CFBundleIdentifier</key>
-	<string>$BUNDLE_ID</string>
-	<key>CFBundleName</key>
-	<string>Shiibar CC</string>
-	<key>CFBundleDisplayName</key>
-	<string>Shiibar CC</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
-	<key>CFBundleVersion</key>
-	<string>$BUILD_STAMP</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
-	<key>LSUIElement</key>
-	<true/>
-	<key>NSHumanReadableCopyright</key>
-	<string>© 2026 Mitsuyuki Shiiba — MIT OR Apache-2.0</string>
-</dict>
-</plist>
-PLIST
-
-echo "==> Generating app icon (DESIGN.md §4.5, docs/tasks/M5.md T10)"
-ICON_WORKDIR="$(mktemp -d)"
-trap 'rm -rf "$ICON_WORKDIR"' EXIT
-swift "$ROOT/scripts/generate-app-icon.swift" "$ICON_WORKDIR"
-iconutil -c icns "$ICON_WORKDIR/AppIcon.iconset" -o "$ICON_WORKDIR/AppIcon.icns"
-mkdir -p "$APP_PATH/Contents/Resources"
-install -m 644 "$ICON_WORKDIR/AppIcon.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
+# CFBundleShortVersionString: the workspace version with a -dev suffix, so a
+# locally built bundle is distinguishable from a release build in the About
+# panel (release builds pass the bare number via build-release-app.sh).
+# CFBundleVersion stays a per-install timestamp for the cache-busting reason
+# above. assemble_app_bundle (scripts/lib/bundle.sh) also generates the icon.
+SHORT_VERSION="$(read_workspace_version "$ROOT/Cargo.toml")-dev"
+assemble_app_bundle \
+  "$APP_PATH" \
+  "$APP_BIN_DIR/ShiibarCcApp" \
+  "$ROOT/target/release/shiibar-ccd" \
+  "$ROOT/target/release/shiibar-cc" \
+  "$SHORT_VERSION" \
+  "$BUILD_STAMP"
 
 echo "==> Code signing (stable local identity, so rebuilds don't reset notification permission — DESIGN.md §4.5)"
 SIGN_ID="$(find_signing_identity || true)"
@@ -101,27 +81,23 @@ fi
 # app still sets the time-sensitive interruption level at runtime, which
 # the system silently downgrades to a normal alert when unentitled
 # (DESIGN.md §4.5's Focus/DND breakthrough just doesn't apply to this
-# local, non-distributed build).
-sign_all() {
-  local identity="$1"
-  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-ccd"
-  codesign --force --sign "$identity" "$APP_PATH/Contents/Helpers/shiibar-cc"
-  codesign --force --sign "$identity" --identifier "$BUNDLE_ID" "$APP_PATH"
-}
+# local, non-distributed build). Signing itself (helpers first, bundle last)
+# lives in sign_app_bundle (scripts/lib/bundle.sh); no extra flags here, so
+# the local build gets a plain signature (no hardened runtime / timestamp).
 
 # A missing stable identity is a hard error by default: silently falling
 # back to ad-hoc would reset the notification permission on every rebuild,
 # defeating the whole point (DESIGN.md §4.5). Escape hatch for a conscious
 # choice: SHIIBAR_CC_ALLOW_ADHOC=1.
 if [ -n "$SIGN_ID" ]; then
-  sign_all "$SIGN_ID"
+  sign_app_bundle "$SIGN_ID" "$APP_PATH"
   echo "    signed with local identity $SIGN_ID"
   echo "    note: the first launch may show a keychain prompt asking to let"
   echo "    codesign/the app use the signing key — choose 'Always Allow'."
 elif [ "${SHIIBAR_CC_ALLOW_ADHOC:-0}" = "1" ]; then
   echo "    warning: SHIIBAR_CC_ALLOW_ADHOC=1 — signing ad-hoc. Notification" >&2
   echo "    permission will reset on the next rebuild (DESIGN.md §4.5)." >&2
-  sign_all "-"
+  sign_app_bundle "-" "$APP_PATH"
 else
   echo "error: no stable '$SIGNING_IDENTITY_CN' codesigning identity is available," >&2
   echo "and creating one failed (see the messages above from" >&2
@@ -175,11 +151,11 @@ echo "==> hooks setup"
 if [ "$plugin_installed" -eq 1 ]; then
   echo "$PLUGIN_KEY is already enabled in $SETTINGS — nothing to do."
 else
-  echo "Install the hooks plugin from inside a Claude Code session (this"
-  echo "repository is its own marketplace, DESIGN.md §4.1):"
+  echo "Install the hooks plugin (this repository is its own marketplace,"
+  echo "DESIGN.md §4.1):"
   echo
-  echo "  /plugin marketplace add bufferings/shiibar-cc"
-  echo "  /plugin install shiibar-cc@shiibar-cc"
+  echo "  claude plugin marketplace add bufferings/shiibar-cc"
+  echo "  claude plugin install shiibar-cc@shiibar-cc"
 fi
 
 echo

@@ -10,9 +10,9 @@
 # manual step (System Settings > Notifications).
 #
 # Hooks are no longer this script's concern: they ship as a Claude Code
-# plugin (DESIGN.md §4.1/§8.19), so removing them is `/plugin uninstall
-# shiibar-cc` from inside a Claude Code session — this script just prints
-# that reminder rather than touching ~/.claude/settings.json itself.
+# plugin (DESIGN.md §4.1/§8.19), so removing them is `claude plugin uninstall
+# shiibar-cc` — this script just prints that reminder rather than touching
+# ~/.claude/settings.json itself.
 
 set -euo pipefail
 
@@ -79,9 +79,8 @@ tccutil reset AppleEvents "$BUNDLE_ID" 2>/dev/null \
 echo
 echo "==> hooks"
 echo "This script does not touch ~/.claude/settings.json — the hooks are a"
-echo "Claude Code plugin (DESIGN.md §4.1/§8.19). Remove them from inside a"
-echo "Claude Code session with:"
-echo "  /plugin uninstall shiibar-cc"
+echo "Claude Code plugin (DESIGN.md §4.1/§8.19). Remove them with:"
+echo "  claude plugin uninstall shiibar-cc"
 
 echo
 echo "Note: the notification permission cannot be removed programmatically"

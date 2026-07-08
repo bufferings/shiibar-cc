@@ -1,0 +1,154 @@
+# Release pipeline for the menu bar app. On a vX.Y.Z tag push it builds an
+# arm64 "Shiibar CC.app", signs it with the Developer ID Application identity
+# under a hardened runtime, notarizes and staples it, zips it, and opens a
+# DRAFT GitHub Release. The draft is deliberate: publishing waits on the
+# owner's on-device smoke of the notarized build (the repository's "smoke
+# before you publish" rule applied to tag distribution — a draft is visible
+# only to the owner).
+#
+# workflow_dispatch is a dry-run: it runs the full pipeline with the real
+# secrets (certificate import, notarization, staple) but skips creating the
+# draft Release, uploading the zip as a workflow artifact instead. It exists
+# to rehearse the secrets and the whole pipeline before cutting a real tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so generate-release-notes.sh can walk back to the
+          # previous tag (or the whole history for the first release).
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # No tag on a manual dry-run: take the version from Cargo.toml.
+            # shellcheck source=scripts/lib/bundle.sh
+            source scripts/lib/bundle.sh
+            version="$(read_workspace_version Cargo.toml)"
+          else
+            scripts/release/check-version.sh "$GITHUB_REF_NAME"
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+          # A fresh, ephemeral keychain unlocked for this run only; no
+          # provisioning profile is needed for Developer ID distribution.
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          cert_path="$RUNNER_TEMP/developer_id.p12"
+          echo "$DEVELOPER_ID_CERT_P12" | base64 --decode > "$cert_path"
+          security import "$cert_path" -P "$DEVELOPER_ID_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$keychain_password" "$keychain" >/dev/null
+          rm -f "$cert_path"
+
+          # Put the temporary keychain on the search list so codesign /
+          # security find-identity can see the imported identity.
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | sed 's/"//g')
+
+      - name: Build and sign the app
+        run: scripts/release/build-release-app.sh "${{ steps.version.outputs.version }}" dist
+
+      - name: Notarize
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          key_path="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
+
+          # Notarization takes a zip of the .app; this zip is only for
+          # submission and is discarded (the distributable zip is rebuilt
+          # after stapling).
+          ditto -c -k --keepParent "dist/Shiibar CC.app" dist/notarize.zip
+
+          set +e
+          out="$(xcrun notarytool submit dist/notarize.zip \
+            --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" --wait 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          if [ "$status" -ne 0 ]; then
+            submission_id="$(echo "$out" | awk '/id:/ { print $2; exit }')"
+            if [ -n "$submission_id" ]; then
+              echo "==> notarization failed; fetching the log for $submission_id"
+              xcrun notarytool log "$submission_id" \
+                --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
+            exit 1
+          fi
+
+      - name: Staple and verify
+        run: |
+          xcrun stapler staple "dist/Shiibar CC.app"
+          xcrun stapler validate "dist/Shiibar CC.app"
+          spctl -a -vv "dist/Shiibar CC.app"
+
+      - name: Package the stapled app
+        id: package
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          zip="dist/shiibar-cc-$version-arm64.zip"
+          # Rebuild the zip AFTER stapling — the submission zip predates the
+          # stapled ticket and must not be reused as the distributable.
+          ditto -c -k --keepParent "dist/Shiibar CC.app" "$zip"
+          shasum -a 256 "$zip"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/release/generate-release-notes.sh "$GITHUB_REF_NAME" > dist/release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file dist/release-notes.md \
+            "${{ steps.package.outputs.zip }}"
+
+      - name: Upload dry-run artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiibar-cc-dry-run
+          path: ${{ steps.package.outputs.zip }}
+
+      - name: Clean up secrets
+        if: always()
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
