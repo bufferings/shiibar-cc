@@ -69,30 +69,31 @@
   <ul>
     <li><strong>色は赤ただひとつ = 「あなた宛の未読(unreviewed)」</strong>。通知の発火条件と 1:1。
       status は色ではなく<strong>記号と濃度</strong>で表す — <code>!</code>(waiting・太)/
-      点灯ドット(working・4 コマアニメ)/ 無印(idle・全体 0.8)</li>
-    <li><strong>Claude が居る窓</strong>: トレイ = フルハイトの角丸窓 + 左上の <code>✳</code> 紋章
-      (Claude Code のスピナー文字)+ 右下の状態表示。
-      「ターミナルで Claude Code が動いている姿」(✳ の下で <code>...</code> が進むあの画面)をそのまま記号化したもの</li>
-    <li><strong>太さと濃度の階層が色の代役</strong>: <code>!</code> は太く、点灯ドットは濃淡で動き、
+      瞬くグリフ循環スピナー(working)/ 静止した <code>✻</code>(idle・全体 0.8)</li>
+    <li><strong>Claude が居る窓</strong>: トレイ = フルハイトの角丸窓 + 左上スロットの <strong>1 グリフ</strong>
+      (Claude Code のスピナー文字)。スロットの中身がロールアップそのもの —
+      「ターミナルで Claude Code が動いている姿」をそのまま記号化したもの</li>
+    <li><strong>太さと動き・濃度の階層が色の代役</strong>: <code>!</code> は太く、working は瞬くグリフ循環で動き、
       idle・切断は全体の減光で沈む。グレースケールだけで優先順位が読める(色覚特性にも強い)</li>
     <li>アイコンは<strong>操作ボタンを描かず、状態そのものを描く</strong>(▶/⏸ のようなメディアボタン文法は逆読みされるため不採用)</li>
   </ul>
 
-  <h2>トレイ: 角丸の窓 + ✳ 紋章 + 状態表示(ロールアップ・常に 1 枠)</h2>
+  <h2>トレイ: 角丸の窓 + 左上スロットの 1 グリフ(ロールアップ・常に 1 枠)</h2>
   <table>
-    <tr><th>状態(優先度順)</th><th>表示</th><th>意味</th></tr>
-    <tr><td>waiting が 1 台以上</td><td>✳ + <code>!</code></td><td>許可・入力待ちがいる(あなたの番)</td></tr>
-    <tr><td>working のみ</td><td>✳ + 点灯ドット(消灯 → <code>.</code> → <code>..</code> → <code>...</code> の 4 コマ・500ms)</td><td>実行中</td></tr>
-    <tr><td>全員 idle</td><td>✳ と枠のみ・全体 0.8</td><td>プロンプトが返っている = 手空き(窓は静か)</td></tr>
-    <tr><td>エージェントなし</td><td>✳ と枠のみ・全体 0.45</td><td>レイアウト不変のまま沈黙(✳ の位置は動かさない)</td></tr>
-    <tr><td>unreviewed が 1 台以上</td><td>右肩に<strong>赤バッジ</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、ドットは対応するまで残る)</td></tr>
+    <tr><th>状態(優先度順)</th><th>スロットの中身</th><th>意味</th></tr>
+    <tr><td>waiting が 1 台以上</td><td>太い <code>!</code>(✻ と入れ替え)</td><td>許可・入力待ちがいる(あなたの番)</td></tr>
+    <tr><td>working のみ</td><td>✻ が瞬く(グリフ循環スピナー。<code>·✢✳✶✻✽</code>、コサインイージング周期 2 秒)</td><td>実行中</td></tr>
+    <tr><td>全員 idle</td><td>静止した ✻・全体 0.8</td><td>プロンプトが返っている = 手空き(窓は静か)</td></tr>
+    <tr><td>エージェントなし</td><td>静止した ✻・全体 0.45</td><td>レイアウト不変のまま沈黙(スロットの位置は動かさない)</td></tr>
+    <tr><td>unreviewed が 1 台以上</td><td>右肩に<strong>赤バッジ</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、バッジは対応するまで残る)</td></tr>
   </table>
   <ul>
     <li>ロールアップ優先度: <strong>waiting &gt; working &gt; idle</strong>。トレイは全セッションの状態の代表 1 表示</li>
     <li><strong>テンプレートアイコン</strong>(モノクロ・メニューバーの文字色に自動追従)。暗い壁紙のバーでは白いグリフになる</li>
-    <li>✳ 紋章は左上(素の U+2733 のまま)。状態表示(<code>!</code> / 点灯ドット)は右下に置く。
-      点灯ドットは 3 つとも定位置・下揃えで、<strong>透明度の濃淡だけ</strong>で進む(薄 30% ⇄ 濃 100%)—
-      透明度しか変えないのでテンプレート画像のまま成立し、タイマーは working 表示のときだけ動かす</li>
+    <li>左上スロット(素の U+273B、x 6.4 基準)の <strong>1 グリフが状態そのもの</strong>:
+      idle・エージェントなしは静止した ✻ / working はドロップダウン行と同じグリフ循環スピナーが瞬く /
+      waiting は ✻ と入れ替えで太い <code>!</code>(✻ の約 1.1 倍)。
+      working のときだけタイマーが動き、グリフの差し替えのみなのでテンプレート画像のまま成立する</li>
     <li>赤バッジは窓の右肩にさせ、<strong>細い明色フチ(ハロー)を常時描く</strong>
       (明色バーでは実質不可視。テンプレート画像はバー色を知れないので条件分岐はしない)</li>
     <li>減光は 2 段階: <strong>idle = 全体 0.8 / エージェントなし = 0.45</strong>(値は実機調整。
@@ -100,21 +101,21 @@
       <strong>daemon 切断中はトレイ全体をエージェントなしと同じ減光にする</strong>(古いロールアップを正常と誤認させない。DESIGN.md §4.5)</li>
   </ul>
   <div class="mock">
-    <div class="mock-label">左から: 待ち・未読 / 待ち・対応中 / 実行中・完了未読あり / 実行中のみ / 全員待機(0.8) / エージェントなし・切断(0.45)。実行中の点灯ドットは 4 コマアニメの 1 コマ(<code>..</code>)を静止で示す</div>
+    <div class="mock-label">左から: 待ち・未読 / 待ち・対応中 / 実行中・完了未読あり / 実行中のみ / 全員待機(0.8) / エージェントなし・切断(0.45)。実行中の ✻ はグリフ循環スピナーの 1 コマ(静止画のため)を示す</div>
     <div class="mbar">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">!</text></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="currentColor" fill-opacity="0.3"/><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="currentColor" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="currentColor" fill-opacity="0.3"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.45"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="currentColor" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.45"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
       <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem" style="font-variant-numeric:tabular-nums">7月5日(日) 0:15</span>
     </div>
     <div class="mock-label">暗色メニューバー(壁紙の色を拾った例)での見え方 — テンプレートの自動反転で白いグリフになる。赤バッジには明色フチ</div>
     <div class="mbar" style="background:#5c2018;color:#f4f0ee">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text><text x="12" y="12.97" font-size="10.5" font-weight="700" text-anchor="middle" fill="#f4f0ee" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text><circle cx="9.6" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="1"/><circle cx="12" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="1"/><circle cx="14.4" cy="13" r="1.05" fill="#f4f0ee" fill-opacity="0.3"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="10.88" font-size="12" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x2733;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="#f4f0ee" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
       <span class="mitem" style="font-variant-numeric:tabular-nums;color:#f4f0ee">0:15</span>
     </div>
   </div>
@@ -217,17 +218,19 @@
 
   <h2>実装ノート</h2>
   <ul>
-    <li>トレイは<strong>二層合成</strong>: 窓 + ✳ + 状態表示の<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
-      <strong>赤ドットを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
+    <li>トレイは<strong>二層合成</strong>: 窓 + スロットグリフの<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
+      <strong>赤バッジを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
       一次案 = `MenuBarExtra` の label で ZStack(テンプレート NSImage + 赤 Circle オーバーレイ)、
       不可なら effectiveAppearance 監視の非テンプレート合成にフォールバック。
-      ✳ 紋章と <code>!</code> は文字グリフ(attributed string)、点灯ドットとバッジは自前描画</li>
-    <li><strong>✳ は 8 本スポークの単純な米印(U+2733 系の文字記号)に留め、Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
+      スロットの ✻・<code>!</code>・グリフ循環の各コマはすべて文字グリフ(attributed string)、バッジは自前描画</li>
+    <li><strong>✻ は素の Unicode 文字グリフ(U+273B TEARDROP-SPOKED ASTERISK 系の文字記号)のまま使い、
+      Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
     <li>ドロップダウンは標準 NSMenu ではなく<strong>カスタムビュー(SwiftUI `MenuBarExtra` の window スタイル)</strong>。
       ホバー・クリック・警告行は自前実装になる(M4 の工数に織り込む)</li>
     <li>線の太さ・間隔・光学調整はすべて<strong>実機(Retina レンダリング)で最終決定</strong>。実機確認項目:
-      ✳ と枠の間隔が融合して見えないか / 点灯ドットの濃淡差が小サイズで読めるか /
-      赤ドットのハローが各種メニューバー色で機能するか</li>
+      ✻ と枠の間隔が融合して見えないか / working のグリフ循環が小サイズで判読できるか
+      (花弁が潰れる場合は 9.5pt → 10.5pt まで戻してよい) /
+      赤バッジのハローが各種メニューバー色で機能するか</li>
     <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は 1 クリックで見える)</li>
   </ul>
 </div>

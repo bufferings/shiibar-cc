@@ -71,19 +71,20 @@ let entries: [IconEntry] = [
 ]
 
 // Sizes at or below this many pixels use the simplified tile+asterisk-only
-// variant (M5.md T10: "at 32px and below, the simplified ✳-only variant") — the state-symbol column
-// and badge are too fine to read at that resolution.
+// variant (M24 T2: "at 32px and below, the simplified ✻-only variant") — the
+// badge is too fine to read at that resolution.
 let simplifiedThreshold = 32
 
-// U+2733 EIGHT SPOKED ASTERISK with VS15 (U+FE0E) to force the text
-// presentation (M5.md T10: "bare U+2733 (text presentation)") instead of a
-// possible color-emoji glyph.
-let asterisk = "\u{2733}\u{FE0E}"
+// U+273B TEARDROP-SPOKED ASTERISK with VS15 (U+FE0E) to force the text
+// presentation (M24 T2: "bare U+273B (text presentation)") instead of a
+// possible color-emoji glyph — same character as the tray emblem
+// (TrayIconMetrics.emblemText) and the dropdown row symbol's idle glyph.
+let asterisk = "\u{273B}\u{FE0E}"
 
 // MARK: - Text helpers (CoreText, drawn directly into the CGContext)
 
-func ctFont(size: CGFloat, bold: Bool = false) -> CTFont {
-    let font = NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
+func ctFont(size: CGFloat) -> CTFont {
+    let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     return font as CTFont
 }
 
@@ -96,23 +97,9 @@ func makeLine(_ text: String, font: CTFont, color: CGColor) -> CTLine {
     return CTLineCreateWithAttributedString(attrString)
 }
 
-/// Draws `text` with an explicit baseline point, optionally centered on x
-/// around that point (used where the spec pins an exact baseline, e.g. the
-/// full-size ✳).
-func drawBaselineText(_ ctx: CGContext, text: String, font: CTFont, color: CGColor, baseline: CGPoint, centerX: Bool) {
-    let line = makeLine(text, font: font, color: color)
-    var origin = baseline
-    if centerX {
-        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        origin.x -= width / 2
-    }
-    ctx.textPosition = origin
-    CTLineDraw(line, ctx)
-}
-
-/// Draws `text` optically centered (both axes) on `center` (used where the
-/// spec gives a center point / font size but no baseline, e.g. the
-/// simplified ✳ and the state-column "!").
+/// Draws `text` optically centered (both axes) on `center` (used for both
+/// the simplified and normal ✻: M24 T2 drops the old exact-baseline
+/// placement in favor of optical centering for both variants).
 func drawCenteredText(_ ctx: CGContext, text: String, font: CTFont, color: CGColor, center: CGPoint) {
     let line = makeLine(text, font: font, color: color)
     var ascent: CGFloat = 0
@@ -137,64 +124,18 @@ func drawTile(_ ctx: CGContext, margin: CGFloat, tileSize: CGFloat) {
     ctx.fillPath()
 }
 
-/// Waiting symbol: circle + bold "!" + red badge with a white halo on the
-/// upper-right shoulder (M5.md T10). The exact vertical placement of "!"
-/// inside the circle isn't pinned by the spec beyond its font size — it's
-/// drawn optically centered.
-func drawWaitingSymbol(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat, strokeWidth: CGFloat) {
+/// Red unreviewed badge with a white halo (M24 T2: same two-layer drawing
+/// as the pre-M24 badge this replaces — a filled circle plus a stroked
+/// halo ring of the same radius). `center` and `r` are in the 100-unit
+/// logical space; `length` converts to pixels.
+func drawBadge(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat) {
     let radius = length(r)
-    ctx.setStrokeColor(foregroundColor)
-    ctx.setLineWidth(strokeWidth)
-    ctx.strokeEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-
-    let font = ctFont(size: length(r * 1.75), bold: true)
-    drawCenteredText(ctx, text: "!", font: font, color: foregroundColor, center: center)
-
-    // Badge offset (+0.74r, -0.74r) in the spec's y-down logical space means
-    // right and up; `center` here is already in CG's y-up pixel space, so up
-    // is +y.
-    let badgeCenter = CGPoint(x: center.x + length(r * 0.74), y: center.y + length(r * 0.74))
-    let badgeRadius = length(4.2)
-    let badgeRect = CGRect(x: badgeCenter.x - badgeRadius, y: badgeCenter.y - badgeRadius, width: badgeRadius * 2, height: badgeRadius * 2)
+    let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
     ctx.setFillColor(badgeColor)
-    ctx.fillEllipse(in: badgeRect)
+    ctx.fillEllipse(in: rect)
     ctx.setStrokeColor(haloColor)
-    ctx.setLineWidth(length(4.2 * 0.22))
-    ctx.strokeEllipse(in: badgeRect)
-}
-
-/// Working symbol: an open 270° arc, round caps, no arrowhead (M5.md T10).
-/// The spec doesn't pin the gap's rotation for the icon; the gap is placed
-/// in the north-west quadrant to match the existing "working" spinner glyph
-/// (docs/menubar-design.html, `.spin` path: starts due north, sweeps
-/// clockwise on-screen through east/south to due west).
-func drawWorkingSymbol(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat, strokeWidth: CGFloat) {
-    ctx.setStrokeColor(foregroundColor)
-    ctx.setLineWidth(strokeWidth)
-    ctx.setLineCap(.round)
-    let radius = length(r)
-    let startAngle = CGFloat.pi / 2 // due north
-    let endAngle = startAngle - (3 * .pi / 2) // 270 degrees, clockwise on-screen
-    ctx.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
-    ctx.strokePath()
-}
-
-/// Idle symbol: empty circle at 50% stroke opacity (M5.md T10).
-func drawIdleSymbol(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat, strokeWidth: CGFloat) {
-    ctx.setStrokeColor(foregroundColor.copy(alpha: 0.5) ?? foregroundColor)
-    ctx.setLineWidth(strokeWidth)
-    let radius = length(r)
-    ctx.strokeEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-}
-
-func drawStateColumn(_ ctx: CGContext, point: (CGFloat, CGFloat) -> CGPoint, length: (CGFloat) -> CGFloat) {
-    let columnX: CGFloat = 72
-    let r: CGFloat = 8
-    let strokeWidth = length(2.6)
-
-    drawWaitingSymbol(ctx, center: point(columnX, 26), r: r, length: length, strokeWidth: strokeWidth)
-    drawWorkingSymbol(ctx, center: point(columnX, 52), r: r, length: length, strokeWidth: strokeWidth)
-    drawIdleSymbol(ctx, center: point(columnX, 78), r: r, length: length, strokeWidth: strokeWidth)
+    ctx.setLineWidth(length(r * 0.22))
+    ctx.strokeEllipse(in: rect)
 }
 
 func renderIcon(pixels: Int) -> CGImage {
@@ -233,13 +174,17 @@ func renderIcon(pixels: Int) -> CGImage {
     drawTile(ctx, margin: margin, tileSize: tileSize)
 
     if pixels <= simplifiedThreshold {
-        // Simplified variant: tile + ✳ only, centered, 60 units (M5.md T10).
+        // Simplified variant: tile + centered ✻ only, 60pt, no badge (M24
+        // T2) — too fine a resolution for a badge to read.
         let font = ctFont(size: length(60))
         drawCenteredText(ctx, text: asterisk, font: font, color: foregroundColor, center: point(50, 50))
     } else {
-        let font = ctFont(size: length(46))
-        drawBaselineText(ctx, text: asterisk, font: font, color: foregroundColor, baseline: point(32, 49), centerX: true)
-        drawStateColumn(ctx, point: point, length: length)
+        // Normal variant: tile + ✻ optically centered at (30, 30), 56pt +
+        // red badge at (78, 22), r 7 (M24 T2 — replaces the old baseline-
+        // pinned ✳ + state-symbol column entirely).
+        let font = ctFont(size: length(56))
+        drawCenteredText(ctx, text: asterisk, font: font, color: foregroundColor, center: point(30, 30))
+        drawBadge(ctx, center: point(78, 22), r: 7, length: length)
     }
 
     guard let image = ctx.makeImage() else {

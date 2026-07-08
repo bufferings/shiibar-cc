@@ -1,8 +1,9 @@
 // AppKit renderer for the tray icon (the tray section of menubar-design.html,
-// DESIGN.md §4.5 / M5.md T8's final geometry): draws the rounded window
-// frame + ✳ emblem + rolled-up status indicator (+ red unreviewed dot) into
-// an NSImage, redrawn on every state change (and, only while the rollup
-// shows `working`, on every animation tick — see `TrayIconAnimator`).
+// DESIGN.md §4.5 / M24 T1's "window + one glyph" geometry): draws the
+// rounded window frame + one emblem-slot glyph carrying the whole rollup
+// (+ red unreviewed badge) into an NSImage, redrawn on every state change
+// (and, only while the rollup shows `working`, on every animation tick —
+// see `AppState`'s working-animation timer).
 //
 // Why an NSImage and not composed SwiftUI views: the MenuBarExtra label is
 // not a normal rendering context. On-device it dropped Shape strokes and
@@ -13,34 +14,37 @@
 // supported label content.
 //
 // Two-layer rule (menubar-design.html implementation notes) — unchanged by
-// the M5 T8 redesign:
-//   - no dot   -> ONE template image (glyph only). Auto-tints to the menu
+// the M24 T1 redesign:
+//   - no badge -> ONE template image (glyph only). Auto-tints to the menu
 //                 bar's foreground color; the dim level is baked into the
 //                 alpha channel, which template rendering preserves.
-//   - dot      -> ONE non-template image: glyph drawn in a light/dark
-//                 appearance-matched monochrome + red dot with its light
+//   - badge    -> ONE non-template image: glyph drawn in a light/dark
+//                 appearance-matched monochrome + red badge with its light
 //                 halo. This is the spec's sanctioned fallback
 //                 (appearance-observed non-template compositing).
 //
-// `✳` is the plain U+2733 EIGHT SPOKED ASTERISK character, forced to text
-// presentation (trailing U+FE0E) so it never renders as a colored emoji
+// M24 T1 unified the tray's whole rollup into ONE emblem-slot glyph (top-
+// left, x 6.4): idle/none show the static `✻` (plain U+273B, forced to text
+// presentation with trailing U+FE0E so it never renders as a colored emoji
 // glyph — it must not be reshaped toward the Anthropic sunburst logo
-// either. All geometry lives in `TrayIconMetrics` below — single place to
-// tweak after looking at the real menu bar (M5.md T8). Emblem size, badge
-// size/position and the row-symbol proportions were settled in the
-// 2026-07-05 on-device round; menubar-design.html carries the same final
-// values.
+// either); working swaps in the same `GlyphCycleSpinner` cycle
+// (ShiibarCcCore) the dropdown row symbol animates (§9); waiting swaps in a
+// bold "!" at ~1.1x the emblem size. The old bottom-right lit-dot working
+// indicator and bottom-right "!" are gone — the emblem slot IS the rollup
+// now. All geometry lives in `TrayIconMetrics` below — single place to
+// tweak after looking at the real menu bar. `emblemFontSize` is a starting
+// point (M24 brief: 9.5, legibility outranks the exact number — bump back
+// toward 10.5 on-device if the ✻ petals collapse on a real Retina menu
+// bar). Badge size/position are unchanged from the pre-M24 on-device round.
 //
 // Coordinates are y-up (CoreGraphics/AppKit convention, `flipped: false`
-// below) — menubar-design.html's SVG mock shows the same shape y-flipped
-// (M5.md T8).
+// below) — menubar-design.html's SVG mock shows the same shape y-flipped.
 
 import AppKit
 import ShiibarCcCore
 
 /// Every tunable constant for the tray drawing, in points, on a y-up canvas.
-/// Values are M5.md T8's final geometry for the final (✳ emblem +
-/// frame) design.
+/// Values are M24 T1's "window + one glyph" geometry.
 enum TrayIconMetrics {
     static let canvasWidth: CGFloat = 20
     static let canvasHeight: CGFloat = 18
@@ -50,49 +54,42 @@ enum TrayIconMetrics {
     static let frameCornerRadius: CGFloat = 3.5
     static let frameLineWidth: CGFloat = 1.4
 
-    // ✳ emblem, top-left (plain U+2733, forced text presentation).
-    static let emblemText = "\u{2733}\u{FE0E}"
+    // Emblem slot, top-left — the ENTIRE rollup lives here now (M24 T1):
+    // idle/none draw the static ✻ (plain U+273B, forced text presentation),
+    // working cycles GlyphCycleSpinner's frames, waiting swaps in a bold "!"
+    // at `waitingBangScale` times this size.
+    static let emblemText = "\u{273B}\u{FE0E}"
     static let emblemCenter = NSPoint(x: 6.4, y: 11.2)
-    // On-device round 2026-07-05: the U+2733 glyph fills well under its em
-    // box, so a 9.5pt em read as far less than the intended quarter-of-icon
-    // presence. 12pt puts the visible glyph at roughly half the frame's
-    // linear size (= ~1/4 of its area).
-    static let emblemFontSize: CGFloat = 12
+    // M24 brief starting point: 9.5 ("legibility outranks the number" — the
+    // brief permits bumping back up to 10.5 on-device if the ✻ petals
+    // collapse on a real Retina menu bar). Supersedes the pre-M24 12pt,
+    // which was sized for the old always-plus-a-separate-status-glyph
+    // layout this design replaces.
+    static let emblemFontSize: CGFloat = 9.5
 
-    // Status indicator, bottom-right. `waiting` and the working dots share
-    // the same horizontal center as the mock.
-    static let statusCenterX: CGFloat = 12
+    // Waiting "!": swapped into the emblem slot in place of the ✻, ~1.1x
+    // its size (M24 brief), heavy weight.
+    static let waitingBangScale: CGFloat = 1.1
 
-    static let waitingCenter = NSPoint(x: 12, y: 8.6)
-    static let waitingFontSize: CGFloat = 10.5
-
-    // Working: 3 dots on one row, lighting up left-to-right across the
-    // 4-frame cycle (frame 0 = all faint, frame N = the first N lit; §9:
-    // 500ms/frame).
-    static let workingDotY: CGFloat = 5.0
-    static let workingDotDx: CGFloat = 2.4
-    static let workingDotRadius: CGFloat = 1.05
-    static let workingDotFaintAlpha: CGFloat = 0.3
-
-    // Red unreviewed dot, overhanging the frame's top-right corner, with a
+    // Red unreviewed badge, overhanging the frame's top-right corner, with a
     // light halo ring always drawn (invisible on light bars by design).
-    // On-device round 2026-07-05: r 2.2 was too small to register as a
-    // badge next to real menu bar neighbors; grown and pulled slightly
-    // inward so dot + halo still fit the 18pt canvas.
-    static let dotCenter = NSPoint(x: 15.6, y: 13.9)
-    static let dotRadius: CGFloat = 3.6
+    // Unchanged by M24 T1 (pre-M24 on-device round 2026-07-05: r 2.2 was too
+    // small to register as a badge next to real menu bar neighbors; grown
+    // and pulled slightly inward so dot + halo still fit the 18pt canvas).
+    static let badgeCenter = NSPoint(x: 15.6, y: 13.9)
+    static let badgeRadius: CGFloat = 3.6
     static let haloLineWidth: CGFloat = 0.9
-    static let dotColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
+    static let badgeColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
     static let haloColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85)
 
-    // Glyph monochrome for the non-template (dot) variant.
+    // Glyph monochrome for the non-template (badge) variant.
     static let lightAppearanceGlyph = NSColor.black.withAlphaComponent(0.9)
     static let darkAppearanceGlyph = NSColor.white.withAlphaComponent(0.95)
 }
 
 enum TrayIconRenderer {
     /// Render the tray image for `state`. `darkMenuBar` only matters for
-    /// the non-template (dot) variant; the template variant tints itself.
+    /// the non-template (badge) variant; the template variant tints itself.
     static func render(state: TrayIconState, darkMenuBar: Bool) -> NSImage {
         let size = NSSize(width: TrayIconMetrics.canvasWidth, height: TrayIconMetrics.canvasHeight)
         let image = NSImage(size: size, flipped: false) { _ in
@@ -125,62 +122,46 @@ enum TrayIconRenderer {
         frame.lineWidth = m.frameLineWidth
         frame.stroke()
 
-        // 2. ✳ emblem — always drawn (dimmed with everything else); M5 T8
-        // dropped the old ❯ prompt entirely.
-        drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
-
-        // 3. Rolled-up status indicator, bottom-right. `idle`/`none` carry
-        // no extra glyph at all now (M5 T8 dropped the idle `_` underscore
-        // too) — they differ from each other only in `state.dim`.
+        // 2. Emblem slot — the ENTIRE rollup lives here now (M24 T1):
+        // waiting swaps in a bold "!", working cycles the same glyph-cycle
+        // spinner as the dropdown row symbol (`GlyphCycleSpinner`,
+        // ShiibarCcCore), idle/none show the static ✻. Core's Rollup
+        // priority (waiting > working > idle) is untouched — this switch
+        // only picks which glyph represents the priority `state.glyph`
+        // already carries.
         switch state.glyph {
         case .waiting:
-            drawGlyphText("!", center: m.waitingCenter, size: m.waitingFontSize, weight: .bold, color: glyphColor)
+            drawGlyphText(
+                "!",
+                center: m.emblemCenter,
+                size: m.emblemFontSize * m.waitingBangScale,
+                weight: .heavy,
+                color: glyphColor
+            )
         case .working(let frame):
-            drawWorkingDots(litCount: frame, color: glyphColor)
+            let glyph = GlyphCycleSpinner.glyphs[frame % GlyphCycleSpinner.glyphs.count]
+            drawGlyphText(glyph, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
         case .idle, .none:
-            break
+            drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
         }
 
-        // 4. Red dot + halo (non-template variant only; also dimmed, since
-        // the whole tray grays out together, menubar-design.html).
+        // 3. Red badge + halo (non-template variant only; also dimmed,
+        // since the whole tray grays out together, menubar-design.html).
+        // Unchanged by M24 T1.
         if state.hasUnreviewedDot {
-            let dotRect = NSRect(
-                x: m.dotCenter.x - m.dotRadius,
-                y: m.dotCenter.y - m.dotRadius,
-                width: m.dotRadius * 2,
-                height: m.dotRadius * 2
+            let badgeRect = NSRect(
+                x: m.badgeCenter.x - m.badgeRadius,
+                y: m.badgeCenter.y - m.badgeRadius,
+                width: m.badgeRadius * 2,
+                height: m.badgeRadius * 2
             )
-            let dot = NSBezierPath(ovalIn: dotRect)
-            m.dotColor.withAlphaComponent(m.dotColor.alphaComponent * dim).setFill()
-            dot.fill()
-            let halo = NSBezierPath(ovalIn: dotRect)
+            let badge = NSBezierPath(ovalIn: badgeRect)
+            m.badgeColor.withAlphaComponent(m.badgeColor.alphaComponent * dim).setFill()
+            badge.fill()
+            let halo = NSBezierPath(ovalIn: badgeRect)
             halo.lineWidth = m.haloLineWidth
             m.haloColor.withAlphaComponent(m.haloColor.alphaComponent * dim).setStroke()
             halo.stroke()
-        }
-    }
-
-    /// Draw the 3-dot working indicator: the leftmost `litCount` dots at
-    /// full (already-dimmed) opacity, the rest at `workingDotFaintAlpha` of
-    /// that (M5 T8: "all-faint -> 1 lit -> 2 lit -> 3 lit").
-    private static func drawWorkingDots(litCount: Int, color: NSColor) {
-        let m = TrayIconMetrics.self
-        let xPositions = [
-            m.statusCenterX - m.workingDotDx,
-            m.statusCenterX,
-            m.statusCenterX + m.workingDotDx,
-        ]
-        for (index, x) in xPositions.enumerated() {
-            let lit = index < litCount
-            let dotColor = lit ? color : color.withAlphaComponent(color.alphaComponent * m.workingDotFaintAlpha)
-            let rect = NSRect(
-                x: x - m.workingDotRadius,
-                y: m.workingDotY - m.workingDotRadius,
-                width: m.workingDotRadius * 2,
-                height: m.workingDotRadius * 2
-            )
-            dotColor.setFill()
-            NSBezierPath(ovalIn: rect).fill()
         }
     }
 

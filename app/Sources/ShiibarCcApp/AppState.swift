@@ -61,9 +61,10 @@ final class AppState: ObservableObject {
     /// `setSortMode`.
     @Published private(set) var sortMode: SortMode
     private static let sortModeKey = "cc.shiibar.sortMode"
-    /// Current frame (0..<`Rollup.workingFrameCount`) of the tray's working
-    /// animation (M5 T8). Only meaningful while `workingAnimationTimer` is
-    /// running; `trayIcon` reads it on every render regardless.
+    /// Current `GlyphCycleSpinner` frame index of the tray's working
+    /// animation (M5 T8, M24 T1). Only meaningful while
+    /// `workingAnimationTimer` is running; `trayIcon` reads it on every
+    /// render regardless.
     @Published private(set) var workingAnimationFrame = 0
     private var workingAnimationTimer: Timer?
 
@@ -307,14 +308,15 @@ final class AppState: ObservableObject {
         flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: mode).map(\.target)
     }
 
-    // MARK: - Tray working animation (M5 T8)
+    // MARK: - Tray working animation (M5 T8, M24 T1)
 
-    /// Start/stop the 500ms-tick animation timer (§9) to match whether the
-    /// rollup currently shows `working` — called whenever `agents` or
-    /// `connected` changes (their `didSet`s above), since either can flip
-    /// the rollup in or out of `working`. `hasUnreviewed` doesn't affect
-    /// this decision (the red-dot overlay doesn't change which glyph is
-    /// shown), so `false` is passed as a cheap placeholder.
+    /// Start/stop the `GlyphCycleSpinner.tickIntervalSeconds`-tick animation
+    /// timer (§9, 50ms) to match whether the rollup currently shows
+    /// `working` — called whenever `agents` or `connected` changes (their
+    /// `didSet`s above), since either can flip the rollup in or out of
+    /// `working`. `hasUnreviewed` doesn't affect this decision (the badge
+    /// overlay doesn't change which glyph is shown), so `false` is passed
+    /// as a cheap placeholder.
     private func refreshWorkingAnimationTimer() {
         let rollupGlyph = Rollup.icon(
             statuses: agents.map(\.status),
@@ -330,9 +332,9 @@ final class AppState: ObservableObject {
 
         switch (isWorking, workingAnimationTimer) {
         case (true, .none):
-            workingAnimationFrame = 0
+            advanceWorkingAnimationFrame()
             workingAnimationTimer = Timer.scheduledTimer(
-                withTimeInterval: Rollup.workingFrameIntervalSeconds,
+                withTimeInterval: GlyphCycleSpinner.tickIntervalSeconds,
                 repeats: true
             ) { [weak self] _ in
                 Task { @MainActor in
@@ -348,8 +350,13 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Re-derive the current frame from wall-clock time (same
+    /// `GlyphCycleSpinner` formula as `RowSymbolView`'s `TimelineView`)
+    /// rather than incrementing a counter — a pure function of "now" needs
+    /// no separate reset-to-0 handling and stays in phase with every other
+    /// spinner in the process for free.
     private func advanceWorkingAnimationFrame() {
-        workingAnimationFrame = (workingAnimationFrame + 1) % Rollup.workingFrameCount
+        workingAnimationFrame = GlyphCycleSpinner.frameIndex(atReferenceTime: Date().timeIntervalSinceReferenceDate)
     }
 
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)

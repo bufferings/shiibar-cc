@@ -67,10 +67,11 @@ struct RowSymbolView: View {
             // (e.g. a sort-mode switch reorders the list), which froze the
             // old arc spinner. Deriving the frame from wall-clock time has
             // no animation state to cancel — and all rows stay in phase
-            // for free. 50ms ticks are enough to catch the fast mid-sweep
-            // frame changes of the cosine easing below.
-            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !spinning)) { context in
-                statusGlyph(Self.workingGlyph(at: context.date))
+            // with each other AND with the tray emblem (`TrayIconRenderer`,
+            // M24 T1) for free, since both read `GlyphCycleSpinner` off the
+            // same reference clock.
+            TimelineView(.animation(minimumInterval: GlyphCycleSpinner.tickIntervalSeconds, paused: !spinning)) { context in
+                statusGlyph(GlyphCycleSpinner.glyph(atReferenceTime: context.date.timeIntervalSinceReferenceDate))
                     .foregroundStyle(Color.primary)
             }
         }
@@ -80,7 +81,7 @@ struct RowSymbolView: View {
     /// shared glyph size — idle and working differ only in opacity and
     /// motion. Every glyph string carries a trailing U+FE0E (VARIATION
     /// SELECTOR-15) forcing text presentation so it renders as the plain
-    /// glyph instead of a colored emoji — same technique as the tray's ✳
+    /// glyph instead of a colored emoji — same technique as the tray's ✻
     /// emblem (TrayIconRenderer.emblemText). Verify on-device (T2) that
     /// none of them turn into a color glyph.
     private func statusGlyph(_ glyph: String) -> some View {
@@ -99,33 +100,6 @@ struct RowSymbolView: View {
     private static let waitingLineWidthRatio: CGFloat = 1.7 / 20
     /// menubar-design.html waiting mock: "!" font-size 10.5 on a 20-unit box.
     private static let waitingBangSizeRatio: CGFloat = 10.5 / 20
-
-    /// Working spinner frames — the Claude Code TUI's own glyph cycle
-    /// (M22 brief, read from claude CLI 2.1.204), each forced to text
-    /// presentation with U+FE0E.
-    private static let workingGlyphs: [String] = [
-        "\u{00B7}\u{FE0E}", // ·
-        "\u{2722}\u{FE0E}", // ✢
-        "\u{2733}\u{FE0E}", // ✳
-        "\u{2736}\u{FE0E}", // ✶
-        "\u{273B}\u{FE0E}", // ✻
-        "\u{273D}\u{FE0E}", // ✽
-    ]
-
-    /// Spinner cycle period (M22 brief: the TUI's 2-second cosine easing).
-    private static let workingPeriod: TimeInterval = 2.0
-
-    /// Frame for the working spinner at `date`: the brief's formula
-    /// `round((1 - cos(2*pi*t/2)) / 2 * 5)` — a cosine sweep that dwells
-    /// on the first and last glyphs and passes quickly through the middle
-    /// ones (NOT uniform stepping). Phase is shared by every working row
-    /// because the frame is a pure function of wall-clock time.
-    static func workingGlyph(at date: Date) -> String {
-        let t = date.timeIntervalSinceReferenceDate
-        let eased = (1 - cos(2 * .pi * t / workingPeriod)) / 2
-        let index = Int((eased * Double(workingGlyphs.count - 1)).rounded())
-        return workingGlyphs[index]
-    }
 
     private var badge: some View {
         ZStack {
