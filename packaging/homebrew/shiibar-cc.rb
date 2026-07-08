@@ -28,13 +28,14 @@ cask "shiibar-cc" do
   binary "#{appdir}/Shiibar CC.app/Contents/Helpers/shiibar-ccd"
 
   postflight do
-    # Best-effort installation of the hooks plugin from the Claude Code CLI.
-    # Every step is allowed to fail without failing the cask install (the
-    # caveats below spell out the two-command manual fallback): `claude`
-    # itself may not be installed, the plugin commands may error, etc.
+    # Best-effort install/update of the hooks plugin from the Claude Code
+    # CLI. Every step is allowed to fail without failing the cask install
+    # or upgrade (the caveats below spell out the two-command manual
+    # fallback): `claude` itself may not be installed, the plugin commands
+    # may error, etc.
     # Written as a shell script (not Cask's Ruby system_command helpers)
-    # because the logic needs a PATH-independent `claude` resolution, a
-    # grep-based idempotency guard, and command chaining that reads far
+    # because the logic needs a PATH-independent `claude` resolution,
+    # grep-based settings checks, and command chaining that reads far
     # more clearly as shell than as a chain of Ruby system_command calls.
     script = <<~SH
       claude_bin=""
@@ -55,15 +56,31 @@ cask "shiibar-cc" do
         exit 0
       fi
 
-      # First-run guard: if shiibar-cc@shiibar-cc already has an entry in
-      # enabledPlugins (true OR false), leave it alone. This makes `brew
-      # upgrade` a no-op here, and never re-enables a plugin the user
-      # deliberately disabled or removed. Matched with grep, not jq, since
-      # jq may not be installed (scripts/dev-install.sh has a similar
-      # grep fallback, but only for the `true` value; this guard also
-      # covers `false`, since here any existing entry means "leave it").
+      # Three-way branch on the shiibar-cc@shiibar-cc entry in enabledPlugins
+      # (DESIGN.md §8.28). Matched with grep, not jq, since jq may not be
+      # installed (scripts/dev-install.sh has the same grep fallback for the
+      # `true` value):
+      #
+      # 1. No entry: first install — add the marketplace and install the
+      #    plugin.
+      # 2. Entry with value `true` (plugin enabled): refresh the hooks so a
+      #    `brew upgrade` delivers them together with the app, without
+      #    depending on the user's marketplace auto-update setting (off by
+      #    default for third-party marketplaces). Both commands are needed,
+      #    in this order — verified against the real CLI: `marketplace
+      #    update` only refreshes the marketplace clone (the installed
+      #    plugin stays at its old version), and `plugin update` only
+      #    installs the newest version already present in that clone (it
+      #    does not refresh the clone itself).
+      # 3. Entry with any other value (e.g. `false`): do nothing — never
+      #    re-enable or refresh a plugin the user deliberately disabled or
+      #    removed.
       settings="$HOME/.claude/settings.json"
       if [ -f "$settings" ] && grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:' "$settings"; then
+        if grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:[[:space:]]*true' "$settings"; then
+          "$claude_bin" plugin marketplace update shiibar-cc || true
+          "$claude_bin" plugin update shiibar-cc@shiibar-cc || true
+        fi
         exit 0
       fi
 
@@ -86,7 +103,11 @@ cask "shiibar-cc" do
     <<~EOS
       Shiibar CC tried to install its Claude Code hooks plugin automatically
       (skipped if it was already installed, disabled, or removed; skipped if
-      the claude CLI wasn't found). To do it yourself, or if it didn't work:
+      the claude CLI wasn't found). While the plugin stays enabled, every
+      brew upgrade of this cask also updates the hooks to match the app
+      (running Claude Code sessions pick that up on their next restart).
+      To install the plugin yourself, or if the automatic install didn't
+      work:
 
         claude plugin marketplace add bufferings/shiibar-cc
         claude plugin install shiibar-cc@shiibar-cc

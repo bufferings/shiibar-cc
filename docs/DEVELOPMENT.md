@@ -194,16 +194,21 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 ### リリース手順
 
-1. タグ `vX.Y.Z` を push する(タグは **`Cargo.toml` の `[workspace.package]` の version と一致必須**。
-   `.github/workflows/release.yml` の `check-version.sh` が検査し、不一致ならビルド前に失敗する)
-2. Actions が arm64 ビルド → Developer ID 署名(hardened runtime)→ 公証 → staple → zip を行い、
+1. リリースコミットで `plugin/.claude-plugin/plugin.json` の `version` をタグと同じ番号に上げる
+   (**hooks を変えていなくても**。bump = hooks 配布のゲート — Claude Code は version が変わらない限り
+   キャッシュした plugin を使い続ける。DESIGN.md §4.1)。`Cargo.toml` とはタイミングが違う点に注意:
+   あちらは前リリースの publish 直後に bump 済み(手順 7)、こちらはリリースコミットで初めて上げる
+2. タグ `vX.Y.Z` を push する(タグは **`Cargo.toml` の `[workspace.package]` の version・
+   `plugin.json` の version と三点一致必須**。`.github/workflows/release.yml` の `check-version.sh` が
+   検査し、不一致ならビルド前に失敗する)
+3. Actions が arm64 ビルド → Developer ID 署名(hardened runtime)→ 公証 → staple → zip を行い、
    **draft** の GitHub Release を作る
-3. 所有者が draft の zip を実機スモークする
-4. スモーク OK なら draft を publish する(この操作が正式な公開)
-5. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
+4. 所有者が draft の zip を実機スモークする
+5. スモーク OK なら draft を publish する(この操作が正式な公開)
+6. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
    再計算して tap の cask を更新する
-6. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
-   bump してコミットする
+7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
+   bump してコミットする(`plugin.json` は上げない — 次のリリースコミットまで公開済みの番号を保つ)
 
 **公開後のタグは再利用禁止**。公開前に失敗した draft は、そのタグごと削除してよい。
 
