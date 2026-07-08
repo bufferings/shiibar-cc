@@ -569,6 +569,7 @@ shiibar/
 │   ├── dev-install.sh      # バイナリ配置 + .app 化(shiibar-ccd・shiibar-cc 同梱)+ CLI symlink + Login Items + プラグイン導入案内
 │   ├── dev-uninstall.sh
 │   ├── dev-reload.sh       # 開発中の daemon / app 差し替え(ドッグフーディング用)
+│   ├── dev-demo.sh         # 偽 hook 再生でデモ用セッションを並べる(README スクリーンショット用)
 │   ├── generate-app-icon.swift  # アプリアイコンの唯一の原本(bundle.sh が実行して .icns を生成・同梱)
 │   ├── lib/                # スクリプト共有部(bundle.sh = .app 組み立て+署名の単一ソース、署名 ID 管理、アプリ/daemon 停止)
 │   └── release/            # リリースビルド用(タグ⇔バージョン検査・署名付きビルド・リリースノート生成。§8.28)

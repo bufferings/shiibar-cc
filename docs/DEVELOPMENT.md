@@ -163,6 +163,12 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   アタッチするので、手動 daemon と併用しても壊れない。ただしアプリを Quit すると
   daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
+- **README のスクリーンショット**(`docs/assets/`)の撮り直しは `scripts/dev-demo.sh` で:
+  `stage` が偽 hook 再生(上記「hooks の検証」と同じ技法)で waiting / working / idle の
+  3 状態を実 daemon に並べる(**定期 reconcile が約 60 秒で偽セッションを掃除する**ので、
+  流したらすぐ撮る。何度でも流し直せる)。`banner` は完了通知バナーを 1 つ出す。
+  `cleanup` で偽セッションを削除(放置でも reconcile が消す)。
+  見た目を変えたリリースの後は撮り直しを忘れない(2026-07-09 の M22–M24 で実例)
 
 ## アイコンまわりの開発メモ
 
