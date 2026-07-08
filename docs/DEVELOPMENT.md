@@ -86,12 +86,15 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
   bump-cask の checkout が `couldn't find remote ref refs/heads/main` で落ちる
   (v0.1.0 publish 時に実例 — 初期 README コミットを作って再実行で解消。2026-07-09)
 - **利用者側の tap trust**: 現行の Homebrew は非公式 tap の信頼要求が**既定で有効**
-  (`HOMEBREW_REQUIRE_TAP_TRUST` の default = true。6.0.9 の env_config で確認)で、
-  未信頼の tap の cask は**ロード時点で**操作ごと拒否される。README の手順は
-  `brew trust bufferings/tap` を 1 行目に置いてある。
+  (`HOMEBREW_REQUIRE_TAP_TRUST` の default = true)で、未信頼の tap の cask はロード時点で
+  操作ごと拒否される — ただし**完全修飾名での操作は明示の同意として通る**(コマンドラインに
+  完全修飾名か tap 名があれば trust 不要)うえ、その cask が trust.json に**自動登録**され、
+  以後の裸名の list / upgrade もそれで通る(いずれも 6.0.9 のソース
+  `Library/Homebrew/trust.rb` の `explicitly_allowed?` / `trust_fully_qualified_items!` と、
+  untrust 状態からの実測で確認。2026-07-09)。README の
+  `brew install --cask bufferings/tap/shiibar-cc` は完全修飾名なので、事前の `brew trust` は不要。
   なお v0.1.0 移行時(2026-07-09)に「アプリだけ入って symlink・postflight が無い」
-  中途半端な状態を一度観測した(発生経路は未特定 — 現行実装のロード時拒否では説明がつかない)。
-  trust してからアプリを消して `brew install` し直すことで解消した
+  中途半端な状態を一度観測した(発生経路は未特定)。アプリを消して `brew install` し直すことで解消した
 - **GitHub Actions の Secrets**(shiibar-cc に 6 つ。名前と用途は release.yml / bump-cask.yml):
   値と鍵ファイルの原本はすべて所有者の 1Password にあり、リポジトリにも会話ログにも置かない。
   期限があるのは `TAP_PUSH_TOKEN` だけ(fine-grained PAT。対象 = homebrew-tap のみ・
