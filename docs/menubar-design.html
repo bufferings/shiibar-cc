@@ -57,9 +57,6 @@
   .sym { width:20px; height:20px; flex:none; color:var(--text); }
   .sym svg { width:100%; height:100%; display:block; overflow:visible; }
   .mi.hover .sym { color:#fff; }
-  .spin { animation:rot 1.7s linear infinite; transform-origin:50% 50%; }
-  @media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
-  @keyframes rot { to { transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -132,8 +129,8 @@
       <strong>Settings…</strong>(実行項目。クリックで独立した Settings ウィンドウを開く)/
       <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ)/ ─── /
       <strong>アプリ自身</strong>: <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/
-      <strong>Quit</strong>。チェック項目(Sort by のラジオ)はクリックしてもメニューを閉じず、
-      チェック表示がその場で切り替わる。実行項目は閉じる。
+      <strong>Quit</strong>。項目はすべてクリックで閉じる(Sort by のラジオも —
+      閉じるとドロップダウン一覧に並び替え結果がすぐ映る)。
       <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
     <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
       閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
@@ -145,9 +142,17 @@
     <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
       (一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
       クリック動作なし(切り分けは <code>doctor</code>)</li>
-    <li><strong>行頭の状態記号</strong>(20px 相当): <strong>空の ◯ = idle</strong>(線 55% 濃度)/
-      <strong>◯ に太い ! = waiting</strong> / <strong>回転スピナー = working</strong>
-      (開いた円弧、1.7 秒/周。ドロップダウンが開いている間だけ回す)</li>
+    <li><strong>行頭の状態記号</strong>(20px 相当): <strong>薄い ✻(静止・50% 濃度)= idle</strong>
+      (U+273B の文字グリフ。本家 TUI が手を止めたときに出す「✻ Worked for Ns」の
+      マーカーと同じ「静止している Claude」)/
+      <strong>グリフ循環スピナー(100% 濃度)= working</strong>
+      (Claude Code の TUI と同じ <code>·</code> <code>✢</code> <code>✳</code> <code>✶</code>
+      <code>✻</code> <code>✽</code> の循環。位置 = <code>round((1−cos(2πt/2000))/2 × 5)</code> —
+      周期 2 秒のコサインイージングで、両端に留まり中間を素早く通過する本家のリズム。
+      等間隔ステップにしない。ドロップダウンが開いている間だけ動かす)/
+      <strong>輪郭だけの吹き出し + 太い ! = waiting</strong>(塗りなし —
+      Claude があなたに話しかけて返事を待っている)。
+      下のモックは静止画のため working は循環の 1 コマ(✻)を示す(idle との差は濃度のみ)</li>
     <li>行は 2 行: <strong>1 行目 = 作業内容</strong>(waiting は許可内容 = <code>message</code>、それ以外は最後のプロンプト先頭 = <code>task</code>。
       どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
     <li><strong>未読(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
@@ -173,7 +178,7 @@
     <li>UI 文言は英語。行の中身(プロンプト・許可内容)はユーザー入力そのまま。1 行目は末尾省略(ellipsis)、
       行数が多いときは縦スクロール(最大高は実機調整)</li>
     <li>エージェントゼロのときは topbar + 「No agents」の一行のみ</li>
-    <li>状態記号の凡例は UI に置かない(空◯ / ! / スピナーは一般的な文法で読める、の割り切り)</li>
+    <li>状態記号の凡例は UI に置かない(吹き出し ! / 瞬くスピナー / 薄い ✻ は文法で読める、の割り切り)</li>
   </ul>
   <div class="mock">
     <div class="mock-label">既定(Grouped): 見出し + カード、未読が各グループの上</div>
@@ -181,20 +186,20 @@
       <div class="topbar"><span class="vbtn">⌄</span></div>
       <div class="ghdr">Waiting</div>
       <div class="gcard">
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
       </div>
       <div class="ghdr">Working</div>
       <div class="gcard">
-      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
       </div>
     </div>
     <div class="mock-label">Newest session モード(Sort by で選択。フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例)</div>
     <div class="menu">
       <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
-      <div class="mi hover"><span class="sym"><svg viewBox="0 0 17 17"><g class="spin"><path d="M8.5 2.4 a6.1 6.1 0 1 1 -6.1 6.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="8.5" y="12" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">!</text><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="13.9" cy="3.1" r="3.8" fill="var(--red)"/><circle cx="13.9" cy="3.1" r="3.8" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
-      <div class="mi"><span class="sym"><svg viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
+      <div class="mi hover"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
+      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" fill-opacity="0.5" stroke="none">&#x273B;&#xFE0E;</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
+      <div class="mi"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" fill-opacity="0.5" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
     </div>
     <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
     <div class="menu" style="width:380px">

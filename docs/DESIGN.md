@@ -62,9 +62,9 @@ Claude Code hooks ──(Unix socket, NDJSON)──► shiibar-ccd
 
 | status    | 意味                         | 表示(トレイ / ドロップダウン行頭)      |
 | --------- | ---------------------------- | ---------------------------------------- |
-| `working` | 実行中(あなたの番ではない)   | 点灯ドット(4 コマアニメ)/ 回転スピナー |
-| `waiting` | 許可・入力待ち(あなたの番)   | `!`(太)/ ◯ + `!`                       |
-| `idle`    | 待機中                       | 無印・全体 0.8 / 空の ◯                  |
+| `working` | 実行中(あなたの番ではない)   | 点灯ドット(4 コマアニメ)/ グリフ循環スピナー |
+| `waiting` | 許可・入力待ち(あなたの番)   | `!`(太)/ 輪郭の吹き出し + `!`          |
+| `idle`    | 待機中                       | 無印・全体 0.8 / 薄い `✻`(静止)        |
 
 表示に status の色は使わない(**赤は unreviewed 専用**)。見た目の正は menubar-design.html。
 
@@ -394,8 +394,10 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
 - **ドロップダウン**: フラットな一覧 + **行頭の状態記号**が既定。行は 2 行 — **1 行目 = 作業内容**(waiting は `message`(許可内容 /
   `waitingFor`)、それ以外は `task`(最後の依頼文)。どちらも無ければラベルを昇格。§3.6)、**2 行目 = ラベル + 経過時間**
   (開いた時点の値で固定。毎秒の更新はしない — 開き直せば最新値になる)。
-  行頭の状態記号: **空の ◯ = idle / ◯ に `!` = waiting / 回転スピナー = working**(スピナーは
-  ドロップダウンが開いている間だけ回す。見た目は menubar-design.html)。
+  行頭の状態記号: **薄い `✻`(静止)= idle / 輪郭の吹き出し + 太い `!` = waiting /
+  グリフ循環スピナー = working**(Claude Code の TUI と同じ `·✢✳✶✻✽` の循環・
+  コサインイージング周期 2 秒。「瞬いている Claude」と「静止している Claude」の対。
+  ドロップダウンが開いている間だけ動かす。見た目・数値は menubar-design.html)。
   **未確認 = 1 行目太字 + 状態記号の右肩の赤バッジ**(トレイの「窓の右肩バッジ」と同じ文法。
   行の右端には何も置かない)。
   クリックで `shiibar-cc focus <target>` を subprocess 実行し、**ドロップダウンを閉じる**。
@@ -420,9 +422,8 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   - **アプリ自身**: **About Shiibar CC**(標準の About パネル = `orderFrontStandardAboutPanel`。
     アイコン・名前・バージョンは bundle から自動。LSUIElement アプリのため表示時に
     `NSApp.activate` が必要 — Setup Check と同じ)/ **Quit**
-  **チェック項目(Sort のラジオ)はクリックしてもメニューを閉じない**
-  (続けて操作できる。チェック表示はその場で更新)。
-  実行項目(Rescan / Clear badges / Settings… / Setup Check… / About / Quit)はクリックで閉じる。
+  **メニュー項目はすべてクリックで閉じる**(Sort のラジオも閉じる — 閉じた直後に、
+  開いたままのドロップダウン一覧へ並び替え結果が映るので、続けて確認できる)。
   UI 文言は英語。Filter 欄は post-v1(v1 の topbar は ⌄ のみ。§8.10 の精神)
 - **Settings ウィンドウ**(⌄ → Settings…): 設定をまとめる独立ウィンドウ。Setup Check と同じく
   表示時に `NSApp.activate`。**閉じるボタンは置かない**(全項目が選んだ瞬間に反映され
