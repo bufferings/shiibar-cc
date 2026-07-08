@@ -25,7 +25,7 @@ jobs:
   release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           # Full history so generate-release-notes.sh can walk back to the
           # previous tag (or the whole history for the first release).
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload dry-run artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: shiibar-cc-dry-run
           path: ${{ steps.package.outputs.zip }}

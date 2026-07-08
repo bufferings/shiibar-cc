@@ -942,3 +942,7 @@ resume は §8.15 のとおり実装後に削除した)。
   採用時に rustup / 公式で現物を再確認すること)。急ぎで欲しくなったらサードパーティ `cargo-cooldown`
 - **CI を作るとき**: `cargo build --locked` + `cargo-deny`(advisories / licenses / bans)を最初から入れる。
   cargo-vet は個人用・小規模には過剰なので採らない
+- **GitHub Actions の `uses:` はフルコミット SHA で固定する**(タグはコメントで併記。
+  `owner/action@<40 桁 SHA> # vX`)。ci.yml / release.yml / bump-cask.yml の全 `uses:` に適用済み。
+  release.yml のジョブは notarization の一時キーチェーンや .p8 鍵など secrets を扱う時間帯があり、
+  そこで動く action がタグ参照だと上流の差し替えで任意コードが実行され得るため
