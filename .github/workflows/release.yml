@@ -24,6 +24,11 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    # The long pole is Apple's notarization queue: normally minutes, but a
+    # first-time submission has been observed to take an hour+ (2026-07-08).
+    # The notarytool --wait below gets its own 100m limit so its log-fetch
+    # error path still runs before this job-level cap kills the run.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -90,15 +95,21 @@ jobs:
           # after stapling).
           ditto -c -k --keepParent "dist/Shiibar CC.app" dist/notarize.zip
 
+          # Stream the submit/wait progress to the job log via tee (a --wait
+          # can legitimately take an hour+, and a captured-only output shows
+          # nothing until it returns) while keeping a copy for the
+          # submission-id extraction below. --timeout bounds only our wait:
+          # the Notary service keeps processing, so a timed-out submission
+          # can still be checked later with `notarytool info`.
           set +e
-          out="$(xcrun notarytool submit dist/notarize.zip \
+          xcrun notarytool submit dist/notarize.zip \
             --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" --wait 2>&1)"
-          status=$?
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait --timeout 100m 2>&1 | tee "$RUNNER_TEMP/notarize.log"
+          status=${PIPESTATUS[0]}
           set -e
-          echo "$out"
           if [ "$status" -ne 0 ]; then
-            submission_id="$(echo "$out" | awk '/id:/ { print $2; exit }')"
+            submission_id="$(awk '/id:/ { print $2; exit }' "$RUNNER_TEMP/notarize.log")"
             if [ -n "$submission_id" ]; then
               echo "==> notarization failed; fetching the log for $submission_id"
               xcrun notarytool log "$submission_id" \

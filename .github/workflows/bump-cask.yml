@@ -22,6 +22,7 @@ jobs:
   bump-cask:
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       # Check out this repo AT THE RELEASE TAG, not main, so the cask
       # template used is the one that shipped with that release.
