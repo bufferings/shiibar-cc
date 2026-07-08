@@ -147,16 +147,10 @@ private struct TopBar: View {
     /// click, so checkmarks and Clear badges' enabled state always show the
     /// live state.
     ///
-    /// The CHECK rows below (Sort by's 3 radio choices) are
-    /// `CheckMenuItemView`s, not plain `NSMenuItem`s with an action — §4.5's
-    /// uncommitted keep-open clause says clicking a CHECK item must NOT
-    /// close the menu, and a custom `view` is the only supported way to get
-    /// that: AppKit only auto-closes the menu for its own action-dispatch
-    /// path, never for a view that handles its own mouse events. Action
-    /// items (Rescan / Clear badges / Settings… / About Shiibar CC / Setup
-    /// Check… / Quit) are unchanged plain items via `makeItem`/`VMenuHandler`
-    /// — Settings… (M14 T1) opens the independent Settings window instead of
-    /// the old inline submenu of toggles.
+    /// Every item, including the Sort by radio choices, is a plain
+    /// `NSMenuItem` with a `target`/`action` via `makeItem`/`VMenuHandler` —
+    /// clicking any of them closes the menu (§4.5: "menu items all close on
+    /// click, Sort's radios too").
     private func presentMenu() {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
@@ -183,30 +177,11 @@ private struct TopBar: View {
         let sort = NSMenuItem(title: "Sort by", action: nil, keyEquivalent: "")
         let sortMenu = NSMenu()
         sortMenu.autoenablesItems = false
-        let sortModes = SortMode.allCases
-        let sortViews = sortModes.map { mode in
-            CheckMenuItemView(title: mode.menuTitle, isOn: state.sortMode == mode)
-        }
-        // Weak boxes, not the views themselves, are what each closure
-        // below captures — the views already form the strong-ownership
-        // chain menu -> sortMenu -> item -> view, and each view also
-        // retains its own `onSelect` closure; capturing the sibling views
-        // directly here would close a retain cycle that outlives the menu
-        // (this whole tree is rebuilt from scratch on every ⌄ click, so a
-        // cycle here would leak on every open).
-        let sortViewBoxes = sortViews.map(WeakBox.init)
-        for (mode, view) in zip(sortModes, sortViews) {
-            let item = NSMenuItem(title: mode.menuTitle, action: nil, keyEquivalent: "")
-            item.view = view
+        for mode in SortMode.allCases {
+            let item = makeItem(mode.menuTitle, action: #selector(VMenuHandler.selectSortMode(_:)))
+            item.state = state.sortMode == mode ? .on : .off
+            item.representedObject = mode
             sortMenu.addItem(item)
-            view.onSelect = { [weak state] in
-                state?.setSortMode(mode)
-                // Radio semantics: only one of the three can be on, so a
-                // click refreshes all three sibling checkmarks in place.
-                for (siblingMode, box) in zip(sortModes, sortViewBoxes) {
-                    box.value?.setOn(siblingMode == mode)
-                }
-            }
         }
         sort.submenu = sortMenu
         menu.addItem(sort)
@@ -267,6 +242,13 @@ private final class VMenuHandler: NSObject {
 
     @objc func rescan(_ sender: Any?) { state?.runReconcile(showFeedback: true) }
     @objc func clearBadges(_ sender: Any?) { state?.clearBadges() }
+    /// Sort by radio choice (§4.5/§8.25). A plain action item like every
+    /// other ⌄ menu row now — AppKit closes the menu on dispatch the same
+    /// way it does for Rescan/Clear badges/etc, no keep-open special case.
+    @objc func selectSortMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? SortMode else { return }
+        state?.setSortMode(mode)
+    }
     /// §4.5/§8.24: `NSApp.activate` before the standard About panel, same
     /// LSUIElement requirement as `openSetupCheck` below (an LSUIElement
     /// app doesn't automatically come forward when it shows a window).
@@ -292,175 +274,6 @@ private final class VMenuHandler: NSObject {
         openWindow?(id: SettingsWindow.id)
     }
     @objc func quit(_ sender: Any?) { state?.quit() }
-}
-
-/// A non-retaining reference, used so a closure can hold onto a sibling
-/// `CheckMenuItemView` (to refresh its checkmark) without joining a retain
-/// cycle with that view's own `onSelect` closure.
-private final class WeakBox<T: AnyObject> {
-    weak var value: T?
-    init(_ value: T) { self.value = value }
-}
-
-/// A CHECK-style ⌄ submenu row (one of Sort by's 3 radio choices). This is
-/// an `NSMenuItem`'s custom `view`, not a plain item with a `target`/
-/// `action` — that's the load-bearing choice (§4.5's keep-open clause):
-/// AppKit only auto-closes an open menu when *it* dispatches an item's
-/// action; a view that handles its own mouse events owns tracking, and the
-/// menu stays open unless the view calls `NSMenu.cancelTracking()` — which
-/// `mouseUp` here never does.
-///
-/// Metrics mirror the native check-item look at `NSFont.menuFont(ofSize:
-/// 13)`: a leading checkmark column, then the label, in a row sized to
-/// match a native item at this font (so the "Sort by" submenu doesn't look
-/// like a foreign control next to the rest of the ⌄ menu — tune `rowHeight`
-/// on-device if it doesn't line up).
-///
-/// Keyboard navigation of these rows is degraded: AppKit only drives
-/// arrow-key/Return highlighting for its own item cells, never for a
-/// custom `view`. Accepted trade-off for the keep-open behavior — mouse
-/// interaction (the only way these items are meant to be used, same as
-/// every other row in this dropdown) is unaffected.
-private final class CheckMenuItemView: NSView {
-    static let rowHeight: CGFloat = 22
-    static let checkColumnWidth: CGFloat = 20
-    private static let horizontalTrailingInset: CGFloat = 14
-    private static let highlightInsetX: CGFloat = 5
-    fileprivate static let highlightCornerRadius: CGFloat = 4
-
-    /// Set post-init (not an init parameter) so callers can build every
-    /// sibling row first and only then wire closures that reference each
-    /// other (the sort radio group's "refresh all three" needs the full
-    /// sibling list to exist before any of them can be clicked).
-    var onSelect: () -> Void = {}
-
-    private let checkLabel = NSTextField(labelWithString: "")
-    private let titleLabel = NSTextField(labelWithString: "")
-    /// Native menus draw their selection as a vibrancy MATERIAL, not a
-    /// flat color fill — a solid selectedContentBackgroundColor visibly
-    /// mismatches the neighboring native items' blue. NSVisualEffectView
-    /// with the .selection material (emphasized) is the same mechanism the
-    /// system uses, so mixed native/custom rows highlight identically.
-    private let highlightView: NSVisualEffectView = {
-        let view = NSVisualEffectView()
-        view.material = .selection
-        view.state = .active
-        view.isEmphasized = true
-        view.blendingMode = .behindWindow
-        view.wantsLayer = true
-        view.layer?.cornerRadius = CheckMenuItemView.highlightCornerRadius
-        view.layer?.cornerCurve = .continuous
-        view.layer?.masksToBounds = true
-        view.isHidden = true
-        return view
-    }()
-    private var trackingArea: NSTrackingArea?
-    private var isHighlighted = false {
-        didSet { updateColors() }
-    }
-
-    init(title: String, isOn: Bool) {
-        let font = NSFont.menuFont(ofSize: 13)
-        let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
-        let width = Self.checkColumnWidth + ceil(titleWidth) + Self.horizontalTrailingInset
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
-        // The initial frame width is only this row's MINIMUM (it feeds the
-        // menu's width calculation); AppKit then stretches every item view
-        // to the final menu width when the mask allows it — which is what
-        // makes hover and the highlight reach the menu's right edge, like
-        // native items.
-        autoresizingMask = [.width]
-
-        highlightView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(highlightView)
-        NSLayoutConstraint.activate([
-            highlightView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.highlightInsetX),
-            highlightView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.highlightInsetX),
-            highlightView.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            highlightView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
-        ])
-
-        checkLabel.font = font
-        checkLabel.alignment = .center
-        titleLabel.font = font
-        titleLabel.stringValue = title
-        for label in [checkLabel, titleLabel] {
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.backgroundColor = .clear
-            addSubview(label)
-        }
-        NSLayoutConstraint.activate([
-            checkLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            checkLabel.widthAnchor.constraint(equalToConstant: Self.checkColumnWidth - 4),
-            checkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.checkColumnWidth),
-            titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor,
-                constant: -Self.horizontalTrailingInset
-            ),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-
-        setAccessibilityElement(true)
-        setAccessibilityRole(.menuItem)
-        setAccessibilityLabel(title)
-
-        setOn(isOn)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    /// Repaints just the checkmark glyph — called at build time and again
-    /// right after a click, so the row reflects the new state without
-    /// rebuilding the whole menu (rebuilding only happens on the NEXT ⌄
-    /// open, so the menu can stay open per §4.5).
-    func setOn(_ isOn: Bool) {
-        checkLabel.stringValue = isOn ? "✓" : ""
-        setAccessibilityValue(isOn ? "on" : "off")
-    }
-
-    private func updateColors() {
-        highlightView.isHidden = !isHighlighted
-        let color: NSColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-        checkLabel.textColor = color
-        titleLabel.textColor = color
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
-            owner: self,
-            userInfo: nil
-        )
-        trackingArea = area
-        addTrackingArea(area)
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHighlighted = true
-    }
-
-    /// This also covers the "clear on menu close" requirement in practice:
-    /// the whole ⌄ menu (and every view in it) is discarded and rebuilt
-    /// fresh on each `presentMenu()` call, so there's no cross-open
-    /// highlight state to leak — only the within-one-open hover case
-    /// (handled here) is real.
-    override func mouseExited(with event: NSEvent) {
-        isHighlighted = false
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        onSelect()
-    }
-
 }
 
 /// The ⌄ chip's persistent background (T2 follow-up, M5) — never the
