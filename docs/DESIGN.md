@@ -495,6 +495,8 @@ SwiftUI(macOS 13+、`MenuBarExtra` の **window スタイル**。ドロップダ
   **切断中はトレイ全体もグレー化**する)/ 通知権限が denied /
   **focus・reconcile のいずれかが TCC エラー(exit 3)を返した**(reconcile が権限で沈黙すると
   backstop ごと失われるため、focus に限定しない)。
+  **通知権限の denied 判定はドロップダウンを開くたびに再評価する**(起動後に許可を変えても
+  アプリの再起動なしで警告行の表示/非表示に反映される)。
   また、アプリが実行する subprocess の失敗(非ゼロ exit)は exit code と stderr を os_log に記録する
   (黙って握りつぶさない — 本項の大原則)
 - **daemon のライフサイクル管理**: アプリ起動時に socket へ接続し、応答があれば**既存 daemon にアタッチ**する

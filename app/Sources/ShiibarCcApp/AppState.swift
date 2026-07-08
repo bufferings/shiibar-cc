@@ -176,6 +176,13 @@ final class AppState: ObservableObject {
         dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
         isDropdownOpen = true
         flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: sortMode).map(\.target)
+        // §4.5: re-evaluate the notification-permission warning row on every
+        // open, not just at launch — a permission change made mid-session
+        // (e.g. granted in System Settings after startup) must be reflected
+        // without an app restart. `getNotificationSettings` is async, so the
+        // row can lag by a beat right after opening; that's accepted (M25 —
+        // it converges to the latest value on this open, no debouncing).
+        notificationManager.refreshPermissionStatus()
     }
 
     func start() {
