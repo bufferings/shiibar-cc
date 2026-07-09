@@ -43,24 +43,20 @@ final class AppState: ObservableObject {
     /// symbol's working spinner animates only while it is). Tracked via the
     /// same `NSWindow` key notifications as `dropdownOpenedAt`.
     @Published private(set) var isDropdownOpen = false
-    /// The dropdown's flat-mode row order, settled at the moment the
-    /// dropdown opens and held fixed until the next open (§4.5: "the order
-    /// doesn't move while it's open") — the same freeze-at-open idea as
-    /// `dropdownOpenedAt`, but for row order instead of elapsed time. Only
-    /// meaningful for the two flat `SortMode`s; `.grouped` uses
-    /// `Grouping.groupedRows` instead and ignores this. Holds target IDs
-    /// (rather than snapshotting whole `Agent` values) so row *content*
-    /// (status symbol, bold/badge, elapsed time) still reflects live
-    /// updates — only the ordering is frozen.
-    @Published private(set) var flatOrderSnapshot: [String] = []
-    /// ⌄ menu "Sort by" selection (§4.5/§8.25, M5 T9): persisted in
-    /// UserDefaults, defaults to `SortMode.defaultMode` ("Grouped") when
-    /// nothing is stored yet. Changing it (a deliberate user action, unlike
-    /// the passive background updates the freeze-at-open rule guards
-    /// against) re-settles `flatOrderSnapshot` immediately — see
-    /// `setSortMode`.
+    /// "Sort by" selection (§4.5/§8.25/§8.31, M5 T9): persisted in
+    /// UserDefaults, falling back to `SortMode.defaultMode` ("Grouped")
+    /// when nothing — or an unknown value, e.g. one stored by a build
+    /// that still had the mode §8.31 removed — is stored.
     @Published private(set) var sortMode: SortMode
     private static let sortModeKey = "cc.shiibar.sortMode"
+    /// Settings > General "Appearance" (§4.5/§8.30, M27 T5): System /
+    /// Light / Dark, persisted in UserDefaults (same pattern as
+    /// `sortMode`), applied as `NSApp.appearance` the moment it's picked
+    /// and re-applied at launch (`start()`). The tray icon is a template
+    /// image, so it keeps following the menu bar's own appearance
+    /// regardless (§4.5).
+    @Published private(set) var appearanceSetting: AppearanceSetting
+    private static let appearanceKey = "cc.shiibar.appearance"
     /// Current `GlyphCycleSpinner` frame index of the tray's working
     /// animation (M5 T8, M24 T1). Only meaningful while
     /// `workingAnimationTimer` is running; `trayIcon` reads it on every
@@ -90,6 +86,9 @@ final class AppState: ObservableObject {
         self.notificationManager = notificationManager
         let storedSortMode = UserDefaults.standard.string(forKey: Self.sortModeKey).flatMap(SortMode.init(rawValue:))
         self.sortMode = storedSortMode ?? SortMode.defaultMode
+        let storedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey)
+            .flatMap(AppearanceSetting.init(rawValue:))
+        self.appearanceSetting = storedAppearance ?? AppearanceSetting.defaultSetting
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
         self.lifecycle = DaemonLifecycleManager(
@@ -117,8 +116,8 @@ final class AppState: ObservableObject {
         periodicReconcileScheduler?.invalidate()
     }
 
-    /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`/`flatOrderSnapshot`)
-    /// every time the dropdown panel opens; track its close the same way.
+    /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`) every time the
+    /// dropdown panel opens; track its close the same way.
     ///
     /// The open signal is `NSWindow.didBecomeKeyNotification`: the
     /// MenuBarExtra window-style panel becomes the key window on every
@@ -175,7 +174,6 @@ final class AppState: ObservableObject {
     func captureDropdownOpenTime() {
         dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
         isDropdownOpen = true
-        flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: sortMode).map(\.target)
         // §4.5: re-evaluate the notification-permission warning row on every
         // open, not just at launch — a permission change made mid-session
         // (e.g. granted in System Settings after startup) must be reflected
@@ -186,6 +184,8 @@ final class AppState: ObservableObject {
     }
 
     func start() {
+        // §4.5 (M27 T5): re-apply the persisted appearance at launch.
+        applyAppearance()
         notificationManager.requestAuthorizationIfNeeded()
         lifecycle.onConnectedChanged = { [weak self] isConnected in
             self?.connected = isConnected
@@ -286,33 +286,42 @@ final class AppState: ObservableObject {
         Grouping.groupedRows(agents: agents, now: now, home: home)
     }
 
-    /// Flat dropdown rows (`.newestSession` / `.recentActivity`) as of `now`.
-    /// Row *order* comes from `flatOrderSnapshot` (settled at the last
-    /// dropdown open, §4.5) rather than being recomputed from the live
-    /// `agents` array here — that's what keeps rows from reshuffling while
-    /// the dropdown is open even as `last_report_at` keeps changing for a
-    /// still-active agent. Row *content* still reflects live `agents`:
-    /// only entries still present are shown, and any agent discovered after
-    /// the snapshot was taken (e.g. a brand new session) is appended at the
-    /// end rather than dropped.
+    /// Flat "Newest session" rows as of `now`, computed live from `agents`
+    /// on every render — `created_at` descending, the same per-render
+    /// approach as `groups(now:)` above (§4.5/§8.31: the key is immutable,
+    /// so the order is stable by construction, no freezing needed).
     func flatRows(now: Int64) -> [AgentRow] {
-        let byTarget = Dictionary(uniqueKeysWithValues: agents.map { ($0.target, $0) })
-        var ordered = flatOrderSnapshot.compactMap { byTarget[$0] }
-        let knownTargets = Set(flatOrderSnapshot)
-        let newcomers = Sorting.flatOrder(agents: agents.filter { !knownTargets.contains($0.target) }, mode: sortMode)
-        ordered.append(contentsOf: newcomers)
-        return ordered.map { Grouping.makeRow(agent: $0, now: now, home: home) }
+        Sorting.newestFirst(agents: agents).map { Grouping.makeRow(agent: $0, now: now, home: home) }
     }
 
-    /// ⌄ menu "Sort by" selection (§4.5, M5 T9). Unlike the passive
-    /// background updates the freeze-at-open rule guards against, picking a
-    /// new mode is a deliberate user action — re-settle the flat order
-    /// immediately (for `.grouped`, `flatOrderSnapshot` is simply unused
-    /// until the mode is switched back).
+    /// "Sort by" selection (§4.5, M5 T9): persist and publish. Both
+    /// containers order live from `agents` on every render, so the new
+    /// mode shows immediately with nothing to re-settle (§8.31).
     func setSortMode(_ mode: SortMode) {
         sortMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: Self.sortModeKey)
-        flatOrderSnapshot = Sorting.flatOrder(agents: agents, mode: mode).map(\.target)
+    }
+
+    /// Settings "Appearance" pick (§4.5, M27 T5): applied the moment it's
+    /// selected (no "OK to confirm", §8.26), persisted for the launch-time
+    /// re-apply in `start()`.
+    func setAppearanceSetting(_ setting: AppearanceSetting) {
+        appearanceSetting = setting
+        UserDefaults.standard.set(setting.rawValue, forKey: Self.appearanceKey)
+        applyAppearance()
+    }
+
+    /// §4.5: System = `NSApp.appearance = nil` (follow the OS); Light /
+    /// Dark pin the whole app — dropdown, Agents window, Settings, Setup
+    /// Check — to aqua / darkAqua. The name strings live in
+    /// `AppearanceSetting` (ShiibarCcCore) where a unit test pins them to
+    /// the real `NSAppearance.Name` constants.
+    private func applyAppearance() {
+        if let rawName = appearanceSetting.nsAppearanceNameRawValue {
+            NSApp.appearance = NSAppearance(named: NSAppearance.Name(rawName))
+        } else {
+            NSApp.appearance = nil
+        }
     }
 
     // MARK: - Tray working animation (M5 T8, M24 T1)

@@ -1,6 +1,6 @@
-// Dropdown grouping/sorting (DESIGN.md §4.5, the dropdown section of
+// Dropdown grouping/sorting (DESIGN.md §4.5/§8.31, the dropdown section of
 // menubar-design.html): group by status (Waiting / Working / Idle, empty
-// groups hidden), unreviewed rows first within each group, row content
+// groups hidden), newest session first within each group, row content
 // derived from `message` (waiting) / `task` / label promotion.
 
 import Foundation
@@ -69,18 +69,21 @@ public enum Grouping {
     /// Group and sort the whole agent table for the dropdown. Empty groups
     /// (including for statuses this build doesn't lay out, e.g. `.unknown`)
     /// are omitted entirely (menubar-design.html: "empty groups hidden").
-    /// Within a group, unreviewed rows sort first; ties keep relative order
-    /// (`Array.sorted` is a stable sort in Swift, so re-opening the dropdown
-    /// without any change keeps a stable layout, matching the spec's
-    /// stable-ordering requirement — §4.5: the order must be stable every
-    /// time the dropdown opens).
+    /// Within a group, newest session first — `created_at` descending, the
+    /// same immutable key the flat mode uses (§4.5/§8.31: "Grouped is the
+    /// newest-session order partitioned by status"). `unreviewed` does NOT
+    /// affect position (§8.31: pinning unreviewed rows to the top made a
+    /// row drop the moment its badge was cleared — the badge and bold text
+    /// carry that signal instead). Ties keep relative order (`Array.sorted`
+    /// is a stable sort in Swift), so rows only ever move between groups
+    /// (status changes), never within one.
     public static func groupedRows(agents: [Agent], now: Int64, home: String?) -> [AgentGroup] {
         var groups: [AgentGroup] = []
         for status in groupOrder {
             let rows = agents
                 .filter { $0.status == status }
+                .sorted { $0.createdAt > $1.createdAt }
                 .map { makeRow(agent: $0, now: now, home: home) }
-                .sorted { lhs, rhs in lhs.unreviewed && !rhs.unreviewed }
             if !rows.isEmpty {
                 groups.append(AgentGroup(status: status, rows: rows))
             }

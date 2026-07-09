@@ -54,10 +54,50 @@ struct ShiibarCcMenuBarApp: App {
             SettingsView(
                 notificationManager: appDelegate.state.notificationManager,
                 loginItemEnabledProvider: { appDelegate.state.loginItemEnabled },
-                toggleLoginItem: { appDelegate.state.toggleLoginItem() }
+                toggleLoginItem: { appDelegate.state.toggleLoginItem() },
+                appearanceSetting: appDelegate.state.appearanceSetting,
+                setAppearance: { appDelegate.state.setAppearanceSetting($0) }
             )
         }
         .windowResizability(.contentSize)
+
+        // Agents window (§4.5 "the agent list window", M26): the ⌄ menu's "Open as
+        // Window" (AgentListView's VMenuHandler.openAsWindow) opens this —
+        // same shared list content as the dropdown (`AgentListView`), an
+        // ordinary window that stays open until closed instead of closing
+        // on outside click. `windowResizability(.contentSize)` matches the
+        // dropdown's fixed width (340) and scrolling list (maxHeight 360),
+        // same pattern as Setup Check / Settings above.
+        //
+        // `.hiddenTitleBar` (§4.5, M26 T4): hides the title-bar CHROME
+        // only. The traffic-light buttons stay, in the slim former-title-
+        // bar band at the top, and the shared list lays out below that
+        // band with the exact same layout the dropdown has (SwiftUI
+        // reserves the band as a top safe-area inset, so no per-container
+        // layout difference is needed). Measured on-device (standalone
+        // harness, macOS 14): the style keeps `.titled` in the styleMask,
+        // keeps all three standard buttons, and still sets `NSWindow.title`
+        // to the scene title below (only `titleVisibility` goes hidden) —
+        // so the title-based window lookup (`VMenuHandler.openAsWindow`),
+        // the lifecycle filter (`AgentsWindowViewModel`), and Mission
+        // Control's listing keep working unchanged; the band also remains
+        // the window's standard title-bar drag area.
+        Window(AgentsWindow.title, id: AgentsWindow.id) {
+            AgentsWindowView(state: appDelegate.state)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        // App menu (§4.5/§8.30, M27 T2), visible while the Agents window
+        // has the app in regular mode (AgentsWindowViewModel, M27 T1).
+        // Commands are app-wide; they're declared on this scene because the
+        // menu exists exactly as long as this window does. `.commands` can
+        // only EMPTY the standard menus — `MainMenuPruner` (started in
+        // `AppDelegate`, see AppMenu.swift) hides the leftover husks.
+        .commands {
+            AppMenuCommands(state: appDelegate.state)
+            RemoveStandardMenusCommands()
+            RemoveStandardMenusCommands.Extra()
+        }
     }
 }
 
@@ -79,9 +119,23 @@ enum SettingsWindow {
     static let id = "settings"
 }
 
+/// The Agents `Window` scene's stable id/title (§4.5 "the agent list window", M26),
+/// shared between the scene declaration above, the `openWindow(id:)` +
+/// title-filter resolution in `AgentListView`'s `VMenuHandler.openAsWindow`,
+/// and `AgentsWindowViewModel`'s window-lifecycle title filter — the same
+/// title-filter idea `SetupCheckWindow.title` uses for
+/// `SetupCheckViewModel.observeWindowLifecycle` (M16).
+enum AgentsWindow {
+    static let id = "agents"
+    static let title = "Agents"
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state: AppState
+    /// Keeps the menu bar down to the app menu alone while the app is
+    /// regular (§4.5/§8.30, M27 T2) — see AppMenu.swift.
+    private let mainMenuPruner = MainMenuPruner()
 
     override init() {
         let bundleURL = Bundle.main.bundleURL
@@ -106,10 +160,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Menu-bar-only: no Dock icon, no app menu (§4.5/§8.4).
+        // Menu-bar-only at launch: no Dock icon, no app menu (§4.5/§8.4).
+        // The app becomes regular only while the Agents window exists
+        // (AgentsWindowViewModel.switchToRegularApp, §8.30/M27 T1).
         NSApp.setActivationPolicy(.accessory)
+        mainMenuPruner.start()
         performFirstLaunchLoginItemAutoRegistrationIfNeeded()
         state.start()
+    }
+
+    /// Dock-icon click (and any other reopen event) while the app is
+    /// regular brings the Agents window forward (§4.5/§8.30, M27 T1).
+    /// Reopen can only happen while the app is regular, and the app is
+    /// regular exactly while the Agents window exists — so the target is
+    /// always that window. ⌘Tab needs no code here: activating the app
+    /// raises its visible windows on its own.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

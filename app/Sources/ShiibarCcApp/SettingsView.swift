@@ -5,8 +5,9 @@
 // title bar's red button / ⌘W is the only way to close, because every
 // control here applies immediately (no "OK to confirm"). Two groups:
 // General (Start at Login, reusing AppState's existing SMAppService
-// read/write) and Sounds (Mute sound / Waiting sound / Done sound, Waiting
-// above Done per the product's own waiting > working > idle priority).
+// read/write; Appearance = System / Light / Dark, §8.30/M27 T5) and Sounds
+// (Mute sound / Waiting sound / Done sound, Waiting above Done per the
+// product's own waiting > working > idle priority).
 // Values are all UserDefaults-backed via `NotificationManager` (§4.5) — this
 // view only wires them to SwiftUI and previews a pick via `NSSound(named:)`
 // (direct playback, not through a notification — the pick is a user-
@@ -21,6 +22,7 @@ import SwiftUI
 @MainActor
 final class SettingsViewModel: ObservableObject {
     @Published private(set) var loginItemEnabled: Bool
+    @Published private(set) var appearance: AppearanceSetting
     @Published var muted: Bool
     @Published var waitingSoundName: String
     @Published var doneSoundName: String
@@ -29,16 +31,21 @@ final class SettingsViewModel: ObservableObject {
     private let notificationManager: NotificationManager
     private let loginItemEnabledProvider: () -> Bool
     private let toggleLoginItemAction: () -> Void
+    private let setAppearanceAction: (AppearanceSetting) -> Void
 
     init(
         notificationManager: NotificationManager,
         loginItemEnabledProvider: @escaping () -> Bool,
         toggleLoginItem: @escaping () -> Void,
+        appearanceSetting: AppearanceSetting,
+        setAppearance: @escaping (AppearanceSetting) -> Void,
         availableSoundNames: [String] = SoundEnumerator.availableSoundNames()
     ) {
         self.notificationManager = notificationManager
         self.loginItemEnabledProvider = loginItemEnabledProvider
         self.toggleLoginItemAction = toggleLoginItem
+        self.appearance = appearanceSetting
+        self.setAppearanceAction = setAppearance
         self.loginItemEnabled = loginItemEnabledProvider()
         self.muted = notificationManager.isMuted
         self.waitingSoundName = notificationManager.waitingSoundName
@@ -56,6 +63,14 @@ final class SettingsViewModel: ObservableObject {
     func toggleLoginItem() {
         toggleLoginItemAction()
         refreshLoginItemStatus()
+    }
+
+    /// Appearance pick (§4.5/§8.30, M27 T5): applies the moment it's
+    /// selected — `AppState.setAppearanceSetting` flips `NSApp.appearance`
+    /// and persists the choice.
+    func setAppearance(_ setting: AppearanceSetting) {
+        appearance = setting
+        setAppearanceAction(setting)
     }
 
     func setMuted(_ value: Bool) {
@@ -86,12 +101,16 @@ struct SettingsView: View {
     init(
         notificationManager: NotificationManager,
         loginItemEnabledProvider: @escaping () -> Bool,
-        toggleLoginItem: @escaping () -> Void
+        toggleLoginItem: @escaping () -> Void,
+        appearanceSetting: AppearanceSetting,
+        setAppearance: @escaping (AppearanceSetting) -> Void
     ) {
         _viewModel = StateObject(wrappedValue: SettingsViewModel(
             notificationManager: notificationManager,
             loginItemEnabledProvider: loginItemEnabledProvider,
-            toggleLoginItem: toggleLoginItem
+            toggleLoginItem: toggleLoginItem,
+            appearanceSetting: appearanceSetting,
+            setAppearance: setAppearance
         ))
     }
 
@@ -109,6 +128,19 @@ struct SettingsView: View {
                     get: { viewModel.loginItemEnabled },
                     set: { _ in viewModel.toggleLoginItem() }
                 ))
+
+                // Appearance (§4.5/§8.30, M27 T5): System / Light / Dark,
+                // default System — the OS can stay light while this app
+                // (the always-visible Agents window in particular) goes
+                // dark. Applies on pick, like every control here.
+                Picker("Appearance", selection: Binding(
+                    get: { viewModel.appearance },
+                    set: { viewModel.setAppearance($0) }
+                )) {
+                    ForEach(AppearanceSetting.allCases, id: \.self) { setting in
+                        Text(setting.displayName).tag(setting)
+                    }
+                }
             }
 
             Section("Sounds") {

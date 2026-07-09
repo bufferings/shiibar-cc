@@ -9,6 +9,7 @@ final class GroupingTests: XCTestCase {
         cwd: String = "/Users/example/proj",
         task: String? = nil,
         message: String? = nil,
+        createdAt: Int64 = 0,
         since: Int64 = 0
     ) -> Agent {
         Agent(
@@ -19,6 +20,7 @@ final class GroupingTests: XCTestCase {
             cwd: cwd,
             task: task,
             message: message,
+            createdAt: createdAt,
             since: since,
             lastSeen: since
         )
@@ -39,15 +41,43 @@ final class GroupingTests: XCTestCase {
         XCTAssertEqual(groups.map(\.status), [.working])
     }
 
-    func testUnreviewedRowsSortFirstWithinAGroupAndOrderIsStableOtherwise() {
+    func testWithinGroupOrderIsCreatedAtDescending() {
+        // §4.5/§8.31: within a group, newest session first — the same
+        // immutable `created_at` key as the flat mode.
         let agents = [
-            agent(target: "a", status: .idle, unreviewed: false),
-            agent(target: "b", status: .idle, unreviewed: true),
-            agent(target: "c", status: .idle, unreviewed: false),
-            agent(target: "d", status: .idle, unreviewed: true),
+            agent(target: "old", status: .idle, createdAt: 100),
+            agent(target: "newest", status: .idle, createdAt: 300),
+            agent(target: "mid", status: .idle, createdAt: 200),
         ]
         let groups = Grouping.groupedRows(agents: agents, now: 0, home: nil)
-        XCTAssertEqual(groups[0].rows.map(\.target), ["b", "d", "a", "c"])
+        XCTAssertEqual(groups[0].rows.map(\.target), ["newest", "mid", "old"])
+    }
+
+    func testUnreviewedDoesNotAffectPositionWithinAGroup() {
+        // §8.31: unreviewed pinning is REMOVED — clearing a badge must not
+        // move the row (the badge and bold text carry the signal, not the
+        // position). Unreviewed rows deliberately sit below newer reviewed
+        // ones here; the order must follow `created_at` alone.
+        let agents = [
+            agent(target: "new-reviewed", status: .idle, unreviewed: false, createdAt: 300),
+            agent(target: "old-unreviewed", status: .idle, unreviewed: true, createdAt: 100),
+            agent(target: "mid-unreviewed", status: .idle, unreviewed: true, createdAt: 200),
+        ]
+        let groups = Grouping.groupedRows(agents: agents, now: 0, home: nil)
+        XCTAssertEqual(
+            groups[0].rows.map(\.target),
+            ["new-reviewed", "mid-unreviewed", "old-unreviewed"]
+        )
+    }
+
+    func testWithinGroupTiesKeepRelativeOrderBecauseSortIsStable() {
+        let agents = [
+            agent(target: "a", status: .idle, createdAt: 100),
+            agent(target: "b", status: .idle, createdAt: 100),
+            agent(target: "c", status: .idle, createdAt: 100),
+        ]
+        let groups = Grouping.groupedRows(agents: agents, now: 0, home: nil)
+        XCTAssertEqual(groups[0].rows.map(\.target), ["a", "b", "c"], "equal keys must not reorder")
     }
 
     func testWaitingRowUsesMessageAsPrimaryLine() {

@@ -10,7 +10,7 @@ import Foundation
 
 /// Which of the three row symbols to draw for a given status. `nil` for
 /// `.unknown` — callers already exclude unknown-status agents from both the
-/// flat (`Sorting.flatOrder`) and grouped (`Grouping.groupedRows`) row
+/// flat (`Sorting.newestFirst`) and grouped (`Grouping.groupedRows`) row
 /// lists, so this is never actually looked up for one in practice; it's
 /// still handled explicitly rather than defaulting silently to some symbol.
 public enum RowSymbolKind: Equatable, Sendable {

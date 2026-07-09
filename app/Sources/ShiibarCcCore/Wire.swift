@@ -74,9 +74,9 @@ public struct Agent: Equatable, Decodable, Sendable {
     /// `#[serde(default)]`.
     public let createdAt: Int64
     /// Epoch seconds of the last hook report for this target (§3.6). NOT
-    /// bumped by reconcile or the stale sweep. The sort key for the
-    /// dropdown's "Recent activity" mode (§4.5). Same forward-compat
-    /// default-to-0 rule as `createdAt`.
+    /// bumped by reconcile or the stale sweep. No UI consumes it — it stays
+    /// on the wire as a record (§8.31; the sort mode that keyed on it was
+    /// removed). Same forward-compat default-to-0 rule as `createdAt`.
     public let lastReportAt: Int64
     public let since: Int64
     public let lastSeen: Int64
