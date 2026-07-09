@@ -41,6 +41,13 @@ struct AgentListContainer {
     /// Gates the row spinner and hover highlight (§4.5): dropdown =
     /// `AppState.isDropdownOpen`; window = `AgentsWindowViewModel.isVisible`.
     let isActive: Bool
+    /// Dropdown only (§4.5/§8.32, M29 T1): `visibleFrame` height of the
+    /// display the dropdown opened on (`AppState.dropdownScreenVisibleHeight`,
+    /// captured per open), from which the list's height cap is computed so
+    /// the WHOLE dropdown fits the visible area. `nil` for the window —
+    /// its list fills whatever height the user gave the window (M29 T2),
+    /// no screen-derived cap.
+    let screenVisibleHeight: Double?
 
     /// The ⌄ top bar is dropdown-only (§4.5/§8.30, M27 T3): the Agents
     /// window's content is the list and warning rows alone — its verbs
@@ -56,11 +63,131 @@ struct AgentListContainer {
     /// focuses, so a run of waiting agents can be resolved one after
     /// another without the list disappearing.
     var dismissesOnRowClick: Bool { kind == .dropdown }
+    /// Click-through for rows (§4.5, M29 bugfix): in the Agents window,
+    /// rows act on the FIRST click even while the window is unfocused —
+    /// the window exists for glance-and-jump, no throwaway activation
+    /// click. Window only: the dropdown panel is key whenever it is
+    /// visible, so first-mouse gating never comes up there.
+    var firesOnFirstClick: Bool { kind == .window }
+}
+
+/// `NSHostingView` that answers `acceptsFirstMouse` with true, so the
+/// SwiftUI content it hosts receives the click that also activates a
+/// non-key window (§4.5 click-through, M29 bugfix). Measured on-device: a
+/// plain SwiftUI `Button` in a non-key window swallows the first click (it
+/// only activates the window; a second click is needed) because AppKit
+/// consults `acceptsFirstMouse` on the hit view — the hosting view — and
+/// the SwiftUI-provided one declines; the same synthetic first click fires
+/// the action once the row is hosted in this subclass.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Wraps one row in a `FirstMouseHostingView`. Scoped to rows on purpose:
+/// the traffic-light band keeps its standard drag behavior and nothing
+/// else in the window is click-sensitive. Sizing measured on-device:
+/// inside a `ScrollView` (the only place rows live) the hosted row adopts
+/// its natural height (~47pt) and fills the proposed width, identical to
+/// the unwrapped row. Hover state crosses the boundary as ordinary
+/// captured state; `updateNSView` re-assigns `rootView` so every outer
+/// render reconciles into the hosted tree.
+private struct FirstMouseHost<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    func makeNSView(context: Context) -> NSHostingView<Content> {
+        FirstMouseHostingView(rootView: content)
+    }
+
+    func updateNSView(_ view: NSHostingView<Content>, context: Context) {
+        view.rootView = content
+    }
 }
 
 struct AgentListView: View {
     @ObservedObject var state: AppState
     let container: AgentListContainer
+    /// Natural (uncapped) height of the scroll content, measured by the
+    /// GeometryReader background on the list's inner VStack — inside a
+    /// ScrollView the content always lays out at its natural height, so
+    /// this is exact, not estimated (M29 panel-height bugfix). 0 until the
+    /// first layout lands.
+    @State private var naturalListHeight: CGFloat = 0
+
+    /// Warning rows currently rendered at the bottom (must mirror the
+    /// `WarningRow` conditions in `body`) — feeds the dropdown chrome
+    /// estimate below.
+    private var warningRowCount: Int {
+        (state.connected ? 0 : 1)
+            + (state.notificationManager.permissionDenied ? 1 : 0)
+            + (state.tccWarning ? 1 : 0)
+    }
+
+    /// Estimated height of everything the dropdown draws AROUND the
+    /// scrolling list (M29 T1) — the values mirror the layout constants in
+    /// this file: outer `.padding(.vertical, 6)` = 12; top bar = 2 top
+    /// padding + 24 chip; one 2pt `VStack` spacing above the list; each
+    /// warning row ≈ 15pt of 12pt text + 8pt vertical padding + 2pt
+    /// spacing. A few points of drift are absorbed by
+    /// `AgentListHeights.dropdownBottomMargin`.
+    private var dropdownChromeHeight: Double {
+        let outerPadding = 12.0
+        let topBar = 26.0 + 2.0
+        let warningRow = 25.0
+        return outerPadding + topBar + Double(warningRowCount) * warningRow
+    }
+
+    /// The scrolling list's max height (§4.5/§8.32, M29): dropdown =
+    /// content-sized up to "the whole dropdown fits the display's visible
+    /// area" (computed per open, see `AgentListContainer.screenVisibleHeight`);
+    /// window = fills whatever height the user gave the window (the
+    /// `ScrollView` turns greedy and the window, not the content, decides).
+    private var listMaxHeight: CGFloat {
+        guard let visibleHeight = container.screenVisibleHeight else { return .infinity }
+        return CGFloat(AgentListHeights.dropdownListCap(
+            visibleFrameHeight: visibleHeight,
+            chromeHeight: dropdownChromeHeight
+        ))
+    }
+
+    /// Explicit ideal for the dropdown's list frame (M29 panel-height
+    /// bugfix): min(measured natural height, cap). Load-bearing — measured
+    /// on-device, a ScrollView's self-reported ideal plateaus well below
+    /// the M29 cap, so `.frame(maxHeight:)` alone never grows the list
+    /// past that plateau (the old ~360-era look). `nil` (no override)
+    /// until the first measurement lands, and always for the window
+    /// container, whose list is sized by the window instead.
+    private var listIdealHeight: CGFloat? {
+        guard container.kind == .dropdown, naturalListHeight > 0 else { return nil }
+        return min(naturalListHeight, listMaxHeight)
+    }
+
+    /// What the whole dropdown panel should be tall (list + chrome),
+    /// reported to `AppState`, which enforces it on the panel window —
+    /// SwiftUI's own MenuBarExtra sizing clamps the panel to ~1/3 of the
+    /// display's visible height regardless of the content's ideal
+    /// (measured; see `AgentListHeights.dropdownPanelContentHeight`).
+    private var desiredPanelHeight: Double? {
+        guard container.kind == .dropdown, naturalListHeight > 0,
+              let visibleHeight = container.screenVisibleHeight else { return nil }
+        return AgentListHeights.dropdownPanelContentHeight(
+            naturalListHeight: Double(naturalListHeight),
+            listCap: AgentListHeights.dropdownListCap(
+                visibleFrameHeight: visibleHeight,
+                chromeHeight: dropdownChromeHeight
+            ),
+            chromeHeight: dropdownChromeHeight
+        )
+    }
+
+    /// Measures the scroll content's natural height (see
+    /// `naturalListHeight`) without affecting layout.
+    private var listHeightReader: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { naturalListHeight = geo.size.height }
+                .onChange(of: geo.size.height) { naturalListHeight = $0 }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -89,8 +216,9 @@ struct AgentListView: View {
                                 GroupSection(group: group, state: state, container: container)
                             }
                         }
+                        .background(listHeightReader)
                     }
-                    .frame(maxHeight: 360)
+                    .frame(idealHeight: listIdealHeight, maxHeight: listMaxHeight)
                 }
             } else {
                 let rows = state.flatRows(now: container.openedAt)
@@ -104,8 +232,9 @@ struct AgentListView: View {
                             }
                         }
                         .padding(.horizontal, 4)
+                        .background(listHeightReader)
                     }
-                    .frame(maxHeight: 360)
+                    .frame(idealHeight: listIdealHeight, maxHeight: listMaxHeight)
                 }
             }
 
@@ -135,6 +264,13 @@ struct AgentListView: View {
         }
         .padding(.vertical, 6)
         .frame(width: 340)
+        // M29 panel-height bugfix: hand the desired whole-panel height to
+        // AppState, which enforces it on the MenuBarExtra panel window
+        // (SwiftUI's own panel sizing clamps at ~1/3 of the display's
+        // visible height — measured). `nil` for the window container and
+        // before the first measurement; AppState ignores nil.
+        .onAppear { state.setDropdownDesiredPanelHeight(desiredPanelHeight) }
+        .onChange(of: desiredPanelHeight) { state.setDropdownDesiredPanelHeight($0) }
     }
 }
 
@@ -380,10 +516,28 @@ private final class VMenuHandler: NSObject {
     @objc func openAsWindow(_ sender: Any?) {
         guard let panelWindow = containerWindow else { return }
         let topLeft = NSPoint(x: panelWindow.frame.minX, y: panelWindow.frame.maxY)
+        // First-open height fallback (§4.5, M29 T2: "natural list height +
+        // band"): the dropdown panel's own frame height. It holds the SAME
+        // list content, already laid out content-sized — swapping its
+        // topbar (~28pt) for the window's traffic-light band (~28pt) makes
+        // the panel's outer height the window's natural outer height, and
+        // the window opens as a true pinned dropdown. (SwiftUI itself
+        // can't provide this: a greedy-height ScrollView reports a
+        // constant ideal, measured on-device — a fresh window would open
+        // at an arbitrary ~450pt regardless of content.)
+        let firstOpenFallbackHeight = Double(panelWindow.frame.height)
+        // The display cap for the applied height: the display the dropdown
+        // is on — the same one the window is about to open on.
+        let maximumHeight = Double(panelWindow.screen?.visibleFrame.height ?? .greatestFiniteMagnitude)
         state?.dismissDropdown()
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: AgentsWindow.id)
-        positionAgentsWindow(topLeft: topLeft, attemptsRemaining: Self.positionAgentsWindowMaxAttempts)
+        placeAgentsWindow(
+            topLeft: topLeft,
+            firstOpenFallbackHeight: firstOpenFallbackHeight,
+            maximumHeight: maximumHeight,
+            attemptsRemaining: Self.placeAgentsWindowMaxAttempts
+        )
     }
 
     /// On a first-ever "Open as Window" the underlying `NSWindow` for
@@ -393,17 +547,48 @@ private final class VMenuHandler: NSObject {
     /// SwiftUI's own default position, violating §4.5's "always right under
     /// the icon" rule (position under the icon every time). Retry a bounded number of
     /// turns instead of assuming the window shows up on the first one; if it
-    /// still isn't there after `positionAgentsWindowMaxAttempts` turns, give
+    /// still isn't there after `placeAgentsWindowMaxAttempts` turns, give
     /// up silently rather than positioning some unrelated window.
-    private static let positionAgentsWindowMaxAttempts = 10
+    private static let placeAgentsWindowMaxAttempts = 10
 
-    private func positionAgentsWindow(topLeft: NSPoint, attemptsRemaining: Int) {
+    /// Position AND height in one `setFrame` (§4.5, M29 T2): top-left =
+    /// the panel's former top-left (position is a rule, never remembered);
+    /// height = the remembered height if any, else the first-open natural
+    /// fallback, clamped to the window's own minimum (kept current by
+    /// AppKit from the content bounds) and the display. One call means the
+    /// height application cannot fight the positioning. Width is never
+    /// touched (pinned at 340 by the content bounds).
+    private func placeAgentsWindow(
+        topLeft: NSPoint,
+        firstOpenFallbackHeight: Double,
+        maximumHeight: Double,
+        attemptsRemaining: Int
+    ) {
         guard attemptsRemaining > 0 else { return }
         DispatchQueue.main.async { [weak self] in
             if let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) {
-                window.setFrameTopLeftPoint(topLeft)
+                let height = AgentListHeights.agentsWindowHeightToApply(
+                    stored: AgentsWindowHeightMemory.stored(),
+                    firstOpenFallback: firstOpenFallbackHeight,
+                    minimum: Double(window.minSize.height),
+                    maximum: maximumHeight
+                )
+                window.setFrame(
+                    NSRect(
+                        x: topLeft.x,
+                        y: topLeft.y - CGFloat(height),
+                        width: window.frame.width,
+                        height: CGFloat(height)
+                    ),
+                    display: true
+                )
             } else {
-                self?.positionAgentsWindow(topLeft: topLeft, attemptsRemaining: attemptsRemaining - 1)
+                self?.placeAgentsWindow(
+                    topLeft: topLeft,
+                    firstOpenFallbackHeight: firstOpenFallbackHeight,
+                    maximumHeight: maximumHeight,
+                    attemptsRemaining: attemptsRemaining - 1
+                )
             }
         }
     }
@@ -579,6 +764,19 @@ private struct RowView: View {
     }
 
     var body: some View {
+        // §4.5 click-through (M29 bugfix): in the Agents window, host the
+        // row in a first-mouse-accepting NSHostingView so the click that
+        // focuses the window ALSO fires the row (hover already showed the
+        // affordance; the first click must honor it). Dropdown rows stay
+        // plain — the panel is key whenever visible.
+        if container.firesOnFirstClick {
+            FirstMouseHost(content: rowButton)
+        } else {
+            rowButton
+        }
+    }
+
+    private var rowButton: some View {
         Button {
             // §4.5 M26 T1: the dropdown focuses AND closes (existing
             // `rowClicked` behavior); the Agents window only focuses, so a

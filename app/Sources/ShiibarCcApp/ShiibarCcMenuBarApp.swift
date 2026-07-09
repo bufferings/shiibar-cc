@@ -65,9 +65,13 @@ struct ShiibarCcMenuBarApp: App {
         // Window" (AgentListView's VMenuHandler.openAsWindow) opens this —
         // same shared list content as the dropdown (`AgentListView`), an
         // ordinary window that stays open until closed instead of closing
-        // on outside click. `windowResizability(.contentSize)` matches the
-        // dropdown's fixed width (340) and scrolling list (maxHeight 360),
-        // same pattern as Setup Check / Settings above.
+        // on outside click. `windowResizability(.contentSize)` derives the
+        // window's min/max from the content bounds `AgentsWindowView`
+        // declares — width pinned at 340, height user-resizable from ~3
+        // rows up (§4.5/§8.32, M29 T2; see the measurement comment there).
+        // Unlike Setup Check / Settings above (fixed-size content, so the
+        // same modifier yields a non-resizable window), this scene's
+        // content is deliberately height-flexible.
         //
         // `.hiddenTitleBar` (§4.5, M26 T4): hides the title-bar CHROME
         // only. The traffic-light buttons stay, in the slim former-title-
@@ -94,7 +98,7 @@ struct ShiibarCcMenuBarApp: App {
         // only EMPTY the standard menus — `MainMenuPruner` (started in
         // `AppDelegate`, see AppMenu.swift) hides the leftover husks.
         .commands {
-            AppMenuCommands(state: appDelegate.state)
+            AppMenuCommands(state: appDelegate.state, menuModel: appDelegate.appMenuModel)
             RemoveStandardMenusCommands()
             RemoveStandardMenusCommands.Extra()
         }
@@ -133,6 +137,10 @@ enum AgentsWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state: AppState
+    /// The deduped slice of `state` the app menu observes (M29 bugfix —
+    /// see `AppMenuModel` in AppMenu.swift): agent churn must not
+    /// invalidate an open menu.
+    let appMenuModel: AppMenuModel
     /// Keeps the menu bar down to the app menu alone while the app is
     /// regular (§4.5/§8.30, M27 T2) — see AppMenu.swift.
     private let mainMenuPruner = MainMenuPruner()
@@ -143,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ? bundleURL.appendingPathComponent("Contents/Helpers")
             : nil
         state = AppState(helpersDirectory: helpersDirectory)
+        appMenuModel = AppMenuModel(state: state)
         super.init()
     }
 

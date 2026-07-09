@@ -21,14 +21,58 @@
 //    zero churn. See `prune()` for the measurements.
 
 import AppKit
+import Combine
 import ShiibarCcCore
 import SwiftUI
+
+/// The menu-facing slice of `AppState`, re-published ONLY when a value the
+/// menu actually renders genuinely changes (M29 bugfix, measured
+/// on-device): with the Commands observing `AppState` directly, EVERY
+/// `@Published` change — notably the `agents` array churning on each hook
+/// report — invalidated the commands content, and a commands invalidation
+/// landing while the Sort by submenu was open closed that submenu on the
+/// spot (the top-level menu survives thanks to `MainMenuPruner`'s
+/// hide-not-remove approach, but the Picker's submenu does not; harness:
+/// the first churn killed an open submenu within ~0.2s, while this deduped
+/// facade held one open through five churn bursts). The menu renders
+/// exactly two values — Clear badges' enabled state and the Sort by
+/// selection — so only genuine changes to those may invalidate it (a menu
+/// refresh on a real Clear-badges flip is acceptable).
+@MainActor
+final class AppMenuModel: ObservableObject {
+    @Published private(set) var hasUnreviewed: Bool
+    @Published private(set) var sortMode: SortMode
+
+    private var subscriptions: Set<AnyCancellable> = []
+
+    init(state: AppState) {
+        hasUnreviewed = state.hasUnreviewed
+        sortMode = state.sortMode
+        // `$agents` emits the NEW array (willSet timing), so deriving from
+        // the emitted value — not from `state.hasUnreviewed`, which still
+        // reads the old array at that instant — is load-bearing.
+        state.$agents
+            .map { agents in agents.contains { $0.unreviewed } }
+            .removeDuplicates()
+            .sink { [weak self] in self?.hasUnreviewed = $0 }
+            .store(in: &subscriptions)
+        state.$sortMode
+            .removeDuplicates()
+            .sink { [weak self] in self?.sortMode = $0 }
+            .store(in: &subscriptions)
+    }
+}
 
 /// The app menu's own items (§4.5, M27 T2). Lives on the Agents `Window`
 /// scene in `ShiibarCcMenuBarApp` — commands are app-wide regardless of
 /// which scene declares them.
 struct AppMenuCommands: Commands {
-    @ObservedObject var state: AppState
+    /// Deliberately a plain `let`, NOT `@ObservedObject` — used for actions
+    /// only. Observing `AppState` here is what closed an open Sort by
+    /// submenu on every agent hook report (see `AppMenuModel` above);
+    /// everything the menu RENDERS comes from `menuModel`.
+    let state: AppState
+    @ObservedObject var menuModel: AppMenuModel
     /// Works from Commands too (measured on-device, M27 harness: a
     /// commands-defined item fired via `performActionForItem` opened the
     /// target `Window` scene).
@@ -60,9 +104,9 @@ struct AppMenuCommands: Commands {
             Button("Rescan") { state.runReconcile(showFeedback: true) }
                 .keyboardShortcut("r")
             Button("Clear badges") { state.clearBadges() }
-                .disabled(!state.hasUnreviewed) // §4.5/§8.24, same as ⌄
+                .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
             Picker("Sort by", selection: Binding(
-                get: { state.sortMode },
+                get: { menuModel.sortMode },
                 set: { state.setSortMode($0) }
             )) {
                 ForEach(SortMode.allCases, id: \.self) { mode in

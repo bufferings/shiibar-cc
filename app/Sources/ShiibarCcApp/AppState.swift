@@ -43,6 +43,15 @@ final class AppState: ObservableObject {
     /// symbol's working spinner animates only while it is). Tracked via the
     /// same `NSWindow` key notifications as `dropdownOpenedAt`.
     @Published private(set) var isDropdownOpen = false
+    /// `visibleFrame` height (menu bar and Dock excluded) of the display
+    /// the dropdown panel is actually on, captured per open like
+    /// `dropdownOpenedAt` (§4.5/§8.32, M29 T1 — multi-display setups use
+    /// the panel's own display, read off the panel `NSWindow` the open
+    /// notification carries). Drives the dropdown list's height cap — see
+    /// `AgentListView`. Seeded from the main screen so the very first
+    /// render (before the first open signal lands) has a sane value.
+    @Published private(set) var dropdownScreenVisibleHeight: Double =
+        Double(NSScreen.main?.visibleFrame.height ?? 800)
     /// "Sort by" selection (§4.5/§8.25/§8.31, M5 T9): persisted in
     /// UserDefaults, falling back to `SortMode.defaultMode` ("Grouped")
     /// when nothing — or an unknown value, e.g. one stored by a build
@@ -72,6 +81,13 @@ final class AppState: ObservableObject {
     let helpersDirectory: URL?
     private var dropdownOpenObserver: NSObjectProtocol?
     private var dropdownCloseObserver: NSObjectProtocol?
+    private var dropdownPlacementObservers: [NSObjectProtocol] = []
+    /// Enforces the dropdown panel window's height (M29 panel-height
+    /// bugfix — see `DropdownPanelSizer` at the bottom of this file).
+    /// Deliberately non-isolated so the `didMove` closure can call it
+    /// synchronously — a main-actor hop would defer the correction past
+    /// the panel's next draw.
+    private let dropdownPanelSizer = DropdownPanelSizer()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
     /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
@@ -112,6 +128,10 @@ final class AppState: ObservableObject {
         if let observer = dropdownCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        let placementObservers = dropdownPlacementObservers
+        for observer in placementObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
         workingAnimationTimer?.invalidate()
         periodicReconcileScheduler?.invalidate()
     }
@@ -143,8 +163,11 @@ final class AppState: ObservableObject {
             guard let window = notification.object as? NSWindow,
                   !window.className.contains("NSStatusBarWindow"),
                   let self else { return }
+            // The panel is on screen when it becomes key, so its `screen`
+            // is the display the dropdown actually opened on (M29 T1).
+            let screenVisibleHeight = (window.screen?.visibleFrame.height).map(Double.init)
             Task { @MainActor in
-                self.captureDropdownOpenTime()
+                self.captureDropdownOpenTime(screenVisibleHeight: screenVisibleHeight)
             }
         }
         dropdownCloseObserver = NotificationCenter.default.addObserver(
@@ -166,14 +189,83 @@ final class AppState: ObservableObject {
                 self.isDropdownOpen = stillVisible
             }
         }
+        // Panel placement and size enforcement (§4.5 "panel placement" +
+        // the M29 panel-height bugfix), hooked on BOTH `didMove` and
+        // `didResize` — measured on-device:
+        // - Near the display's right edge the OS flips the panel to extend
+        //   LEFT from the icon; the spec wants the NSMenu edge behavior
+        //   instead (shift the whole panel left, right edge flush with the
+        //   visible area). `didBecomeKey` is too early (on first open the
+        //   panel still sits at (0,0), and a shift applied there is
+        //   overwritten by the OS placement that follows); the placement
+        //   itself fires `didMove`, so correcting here runs AFTER each OS
+        //   move and sticks — while the panel is still occluded
+        //   (pre-first-draw), so no visible jump.
+        // - SwiftUI's own MenuBarExtra sizing clamps the panel height to
+        //   ~1/3 of the display's visible height regardless of the
+        //   content's ideal, and it reasserts that height on reopen and on
+        //   content changes — sometimes WITHOUT an origin change, which is
+        //   why `didResize` must be hooked too (with `didMove` alone the
+        //   reassertion won on reopen/growth; with both, every scenario
+        //   converges to the desired height in one correction).
+        // Self-triggering is safe: our own setFrame re-fires these
+        // notifications, where desired == current and the tolerance guards
+        // no-op. The class-name filter is the same private-API assumption
+        // family as `dismissDropdown` (measured class:
+        // `_TtGC7SwiftUI18MenuBarExtraWindow…`); if a macOS version renames
+        // it, no correction happens and the panel degrades to the OS
+        // flip + OS height clamp.
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            dropdownPlacementObservers.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main,
+                using: { [sizer = dropdownPanelSizer] notification in
+                    guard let panel = notification.object as? NSWindow,
+                          panel.className.contains("MenuBarExtraWindow"),
+                          let icon = NSApp.windows.first(where: { $0.className.contains("NSStatusBarWindow") }),
+                          let screen = panel.screen ?? icon.screen else { return }
+                    let visible = screen.visibleFrame
+                    let desiredX = DropdownPanelPlacement.clampedX(
+                        iconMinX: Double(icon.frame.minX),
+                        panelWidth: Double(panel.frame.width),
+                        visibleMinX: Double(visible.minX),
+                        visibleMaxX: Double(visible.maxX)
+                    )
+                    if abs(Double(panel.frame.minX) - desiredX) > DropdownPanelPlacement.tolerance {
+                        panel.setFrameOrigin(NSPoint(x: desiredX, y: panel.frame.minY))
+                    }
+                    sizer.enforce(on: panel)
+                }
+            ))
+        }
+    }
+
+    /// The whole-dropdown panel height the view wants (M29 panel-height
+    /// bugfix): reported by `AgentListView` (measured natural list height,
+    /// capped, plus chrome — see
+    /// `AgentListHeights.dropdownPanelContentHeight`), enforced immediately
+    /// and re-enforced after every OS move/resize of the panel. `nil`
+    /// reports (window container / no measurement yet) are ignored.
+    func setDropdownDesiredPanelHeight(_ height: Double?) {
+        guard let height, height > 0 else { return }
+        dropdownPanelSizer.desiredHeight = height
+        if let panel = NSApp.windows.first(where: { $0.className.contains("MenuBarExtraWindow") }) {
+            dropdownPanelSizer.enforce(on: panel)
+        }
     }
 
     /// Also called from the dropdown's `onAppear` as a belt-and-braces
     /// second trigger (harmless if both fire on the same open; covers a
-    /// macOS version whose panel mounts the view fresh per open).
-    func captureDropdownOpenTime() {
+    /// macOS version whose panel mounts the view fresh per open — that
+    /// path has no panel window at hand, so it passes no screen height
+    /// and the last captured value stays).
+    func captureDropdownOpenTime(screenVisibleHeight: Double? = nil) {
         dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
         isDropdownOpen = true
+        if let screenVisibleHeight {
+            dropdownScreenVisibleHeight = screenVisibleHeight
+        }
         // §4.5: re-evaluate the notification-permission warning row on every
         // open, not just at launch — a permission change made mid-session
         // (e.g. granted in System Settings after startup) must be reflected
@@ -586,6 +678,41 @@ final class AppState: ObservableObject {
     /// to avoid re-entering the termination sequence.
     func bestEffortShutdownDaemon() {
         lifecycle.shutdown {}
+    }
+}
+
+/// Keeps the MenuBarExtra panel window as tall as the dropdown content
+/// wants (M29 panel-height bugfix). Measured on-device: SwiftUI's own
+/// MenuBarExtra sizing clamps the panel to roughly a third of the
+/// display's visible height (342pt on a 1025pt visible frame) no matter
+/// how tall the content's ideal is, so the M29 "grow to the display" cap
+/// could never engage — while a direct window `setFrame` above that limit
+/// sticks, the hosted content re-lays out to fill it (the list's
+/// `maxHeight` cap keeps it bounded), and later content churn does not
+/// snap it back. `desiredHeight` comes from the view's measurement
+/// (`AppState.setDropdownDesiredPanelHeight`); enforcement is top-edge
+/// anchored (the panel hangs from the menu bar). Not `@MainActor` on
+/// purpose: called synchronously from the `didMove` notification closure
+/// (main thread via `queue: .main`), where an actor hop would defer past
+/// the panel's next draw. `@unchecked Sendable` is sound here: every
+/// access is on the main thread by construction (`queue: .main` observers
+/// and `@MainActor AppState` methods).
+private final class DropdownPanelSizer: @unchecked Sendable {
+    var desiredHeight: Double?
+
+    func enforce(on panel: NSWindow) {
+        guard let desired = desiredHeight,
+              abs(Double(panel.frame.height) - desired) > DropdownPanelPlacement.tolerance else { return }
+        let frame = panel.frame
+        panel.setFrame(
+            NSRect(
+                x: frame.minX,
+                y: frame.maxY - CGFloat(desired),
+                width: frame.width,
+                height: CGFloat(desired)
+            ),
+            display: true
+        )
     }
 }
 

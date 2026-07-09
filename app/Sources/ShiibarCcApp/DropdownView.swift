@@ -17,7 +17,8 @@ struct DropdownView: View {
             container: AgentListContainer(
                 kind: .dropdown,
                 openedAt: state.dropdownOpenedAt,
-                isActive: state.isDropdownOpen
+                isActive: state.isDropdownOpen,
+                screenVisibleHeight: state.dropdownScreenVisibleHeight
             )
         )
         // Belt and braces for the per-open capture: the primary signal is

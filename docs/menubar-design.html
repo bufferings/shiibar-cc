@@ -139,6 +139,7 @@
     <li><strong>一覧ウィンドウ</strong>(⌄ → Open as Window。DESIGN.md §4.5/§8.30):
       ドロップダウンと同じ一覧を、タイトルバー非表示(<code>hiddenTitleBar</code>)の普通のウィンドウで
       出しっぱなしにできる。上端は信号機ボタンだけの細い帯(ドラッグ領域)、その下に同じ見た目の一覧。
+      幅は固定・縦はリサイズ可で高さを記憶(中身の増減では伸縮しない。DESIGN.md §8.32)。
       <strong>topbar(⌄)は置かない</strong> — 窓がある間はアプリが通常アプリになり、操作は画面上端の
       アプリメニュー 1 個(About / Settings… ⌘, / Setup Check… / Rescan ⌘R / Clear badges /
       Sort by / Close Window ⌘W / Quit ⌘Q)に出る</li>
@@ -188,7 +189,8 @@
       失敗(TCC 以外)<code>Rescan failed</code>(同じく 2 秒)。セカンダリ色 12px・クリック不可。
       件数は出さない。TCC エラー(exit 3)は上記の警告行の扱い</li>
     <li>UI 文言は英語。行の中身(プロンプト・許可内容)はユーザー入力そのまま。1 行目は末尾省略(ellipsis)、
-      行数が多いときは縦スクロール(最大高は実機調整)</li>
+      一覧の高さはセッション数ぶん伸び、ディスプレイの可視領域で頭打ち → 縦スクロール
+      (DESIGN.md §8.32)</li>
     <li>エージェントゼロのときは topbar + 「No agents」の一行のみ</li>
     <li>状態記号の凡例は UI に置かない(吹き出し ! / 瞬くスピナー / 薄い ✻ は文法で読める、の割り切り)</li>
   </ul>

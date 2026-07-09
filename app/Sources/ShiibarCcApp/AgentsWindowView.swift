@@ -72,11 +72,28 @@ final class AgentsWindowViewModel: ObservableObject {
             guard let window = notification.object as? NSWindow,
                   window.title == AgentsWindow.title,
                   let self else { return }
+            let frameHeight = Double(window.frame.height)
             Task { @MainActor in
-                self.noteWindowClosed()
+                self.noteWindowClosed(frameHeight: frameHeight)
             }
         }
-        windowLifecycleObservers = [becameKeyObserver, willCloseObserver]
+        // Height memory (§4.5/§8.32, M29 T2): remember the height the user
+        // dragged the window to. `didEndLiveResize` fires only for USER
+        // resizes (not for the programmatic `setFrame` height application),
+        // so this is exactly "the user decided a height".
+        let liveResizeObserver = center.addObserver(
+            forName: NSWindow.didEndLiveResizeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title == AgentsWindow.title else { return }
+            let frameHeight = Double(window.frame.height)
+            Task { @MainActor in
+                AgentsWindowHeightMemory.save(frameHeight)
+            }
+        }
+        windowLifecycleObservers = [becameKeyObserver, willCloseObserver, liveResizeObserver]
     }
 
     /// Genuine (re)open — not a plain refocus while still visible (same
@@ -95,10 +112,17 @@ final class AgentsWindowViewModel: ObservableObject {
         startRefreshTimer()
     }
 
-    private func noteWindowClosed() {
+    private func noteWindowClosed(frameHeight: Double) {
         isVisible = false
         refreshTimer?.invalidate()
         refreshTimer = nil
+        // Height memory, belt and braces (§4.5, M29 T2): also persist at
+        // close, so "reopen at the same height" holds even when the height
+        // was never live-resized this session (e.g. the first-open natural
+        // height, or SwiftUI's own frame restoration across launches — our
+        // stored value is applied on every open and must therefore always
+        // reflect the last state the user saw).
+        AgentsWindowHeightMemory.save(frameHeight)
         // §4.5/§8.30 (M27 T1): the Dock icon, ⌘Tab entry and app menu
         // exist only while the Agents window does — back to the resident
         // accessory the moment it closes. No activation dance is needed on
@@ -162,6 +186,26 @@ final class AgentsWindowViewModel: ObservableObject {
     }
 }
 
+/// UserDefaults-backed memory of the Agents window's FRAME height
+/// (§4.5/§8.32, M29 T2: the resident container's size is the user's
+/// decision — remembered, unlike the position, which is a rule: always
+/// under the icon). Written by `AgentsWindowViewModel` (live resize +
+/// close), read by `VMenuHandler.placeAgentsWindow` when applying the
+/// frame on open. `stored()` returns 0 when nothing is saved —
+/// `AgentListHeights.agentsWindowHeightToApply` treats that as "first
+/// open, use the natural fallback".
+enum AgentsWindowHeightMemory {
+    static let key = "cc.shiibar.agentsWindowHeight"
+
+    @MainActor static func save(_ frameHeight: Double) {
+        UserDefaults.standard.set(frameHeight, forKey: key)
+    }
+
+    @MainActor static func stored() -> Double {
+        UserDefaults.standard.double(forKey: key)
+    }
+}
+
 struct AgentsWindowView: View {
     @ObservedObject var state: AppState
     @StateObject private var windowState: AgentsWindowViewModel
@@ -177,8 +221,27 @@ struct AgentsWindowView: View {
             container: AgentListContainer(
                 kind: .window,
                 openedAt: windowState.openedAt,
-                isActive: windowState.isVisible
+                isActive: windowState.isVisible,
+                screenVisibleHeight: nil // M29 T2: no screen cap — the window's height rules the list
             )
+        )
+        // Vertical-only resizability (§4.5/§8.32, M29 T2): with the scene's
+        // `windowResizability(.contentSize)`, the window's min/max track
+        // THESE content bounds — width pinned at 340 (min == max), height
+        // free from ~3 rows up (the traffic-light band is added on top by
+        // AppKit automatically). Measured on-device (M29 harness): this
+        // yields `styleMask.resizable` with contentMin (340, 150+band) and
+        // contentMax (340, inf) — the user can drag height only — and a
+        // programmatic `setFrame` (the height apply in
+        // `VMenuHandler.placeAgentsWindow`) sticks, with AppKit itself
+        // clamping anything below the minimum. Removing the `.contentSize`
+        // resizability instead was measured to unbound BOTH axes (the
+        // window even opens at the wrong width), so it stays.
+        .frame(
+            minWidth: 340,
+            maxWidth: 340,
+            minHeight: CGFloat(AgentListHeights.agentsWindowMinContentHeight),
+            maxHeight: .infinity
         )
         // No safe-area tricks (§4.5, M26 T4): `.hiddenTitleBar` reserves
         // the former title bar as a top safe-area inset (28pt, measured
