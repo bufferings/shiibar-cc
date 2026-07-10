@@ -1,5 +1,5 @@
 {
   "name": "shiibar-cc",
   "description": "Reports Claude Code hook events to the shiibar-cc menu bar app's daemon.",
-  "version": "0.1.1"
+  "version": "0.2.0"
 }
