@@ -88,6 +88,10 @@ final class AppState: ObservableObject {
     /// synchronously — a main-actor hop would defer the correction past
     /// the panel's next draw.
     private let dropdownPanelSizer = DropdownPanelSizer()
+    /// Places the Agents window pre-paint on (re)open (see
+    /// `AgentsWindowPlacer` in AgentsWindowView.swift); armed by
+    /// `VMenuHandler.openAsWindow` via `expectAgentsWindowPlacement`.
+    private let agentsWindowPlacer = AgentsWindowPlacer()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
     /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
@@ -119,6 +123,22 @@ final class AppState: ObservableObject {
             self?.focus(target: target)
         }
         observeDropdownOpen()
+        agentsWindowPlacer.start()
+    }
+
+    /// Arm the Agents window's pre-paint placement for the open the ⌄
+    /// menu's "Open as Window" is about to trigger (see
+    /// `AgentsWindowPlacer` for the measured mechanism).
+    func expectAgentsWindowPlacement(
+        topLeft: NSPoint,
+        firstOpenFallbackHeight: Double,
+        maximumHeight: Double
+    ) {
+        agentsWindowPlacer.expect(
+            topLeft: topLeft,
+            firstOpenFallbackHeight: firstOpenFallbackHeight,
+            maximumHeight: maximumHeight
+        )
     }
 
     deinit {

@@ -9,6 +9,7 @@
 // in this app needs (Settings / Setup Check, M14/M5 T5).
 
 import AppKit
+import os
 import ShiibarCcCore
 import SwiftUI
 
@@ -190,21 +191,162 @@ final class AgentsWindowViewModel: ObservableObject {
 /// (§4.5/§8.32, M29 T2: the resident container's size is the user's
 /// decision — remembered, unlike the position, which is a rule: always
 /// under the icon). Written by `AgentsWindowViewModel` (live resize +
-/// close), read by `VMenuHandler.placeAgentsWindow` when applying the
-/// frame on open. `stored()` returns 0 when nothing is saved —
+/// close), read by `AgentsWindowPlacer` when applying the frame on open.
+/// `stored()` returns 0 when nothing is saved —
 /// `AgentListHeights.agentsWindowHeightToApply` treats that as "first
-/// open, use the natural fallback".
+/// open, use the natural fallback". Not actor-isolated: `UserDefaults` is
+/// thread-safe, and the placer reads it from `queue: .main` notification
+/// closures where an actor hop would defer past the window's next paint.
 enum AgentsWindowHeightMemory {
     static let key = "cc.shiibar.agentsWindowHeight"
 
-    @MainActor static func save(_ frameHeight: Double) {
+    static func save(_ frameHeight: Double) {
         UserDefaults.standard.set(frameHeight, forKey: key)
     }
 
-    @MainActor static func stored() -> Double {
+    static func stored() -> Double {
         UserDefaults.standard.double(forKey: key)
     }
 }
+
+/// Places the Agents window on (re)open without a visible jump (pre-push
+/// polish bugfix). After `openWindow(id:)`, SwiftUI shows the window at
+/// ITS frame first — the previous showing's frame on a reopen — and any
+/// post-open main-queue correction can land only AFTER the first paint: a
+/// visible jump.
+///
+/// Two mechanisms, in order of preference:
+/// - **Arm-time placement (reopen path, timing-free)**: a closed SwiftUI
+///   window keeps existing in `NSApp.windows`, hidden — so at the ⌄ click
+///   the target frame is applied DIRECTLY to that hidden window, before
+///   `openWindow` is even called. Whatever the open/activation sequence
+///   does afterwards (including M27's regular-app Dock dance), the window
+///   cannot paint anywhere but the target, because it never has another
+///   frame. Measured in a full-production-flow harness (arm -> panel
+///   dismiss via status-button click -> activate -> openWindow -> policy
+///   switch + Dock dance): the hidden window moves at arm time and every
+///   later event, first paint included, is at the target.
+/// - **Notification enforcement (first-open path + backstop)**: on a
+///   first-in-process open no window exists at arm time; the placement is
+///   then enforced inside the opening window's own notifications
+///   (didMove/didResize fire during instantiation while the window is
+///   occluded and not yet visible; didBecomeKey also fires pre-paint) —
+///   same technique as `DropdownPanelSizer`.
+///
+/// `expect(...)` arms one placement at the ⌄ click (the only opener — the
+/// item is disabled while the window exists, and a Dock-click reopen only
+/// raises an already-visible window, which never re-arms this); the
+/// pending placement is cleared once the window is actually visible, so
+/// later user drags are never snapped back. Every step is logged
+/// (`agentsWindowLog`, category "agents-window") so a misbehaving open
+/// can be reconstructed with `log show`.
+///
+/// Not `@MainActor` on purpose (same reasoning as `DropdownPanelSizer`):
+/// called synchronously from `queue: .main` notification closures, where
+/// an actor hop would defer the correction past the paint it must beat.
+/// `@unchecked Sendable` is sound: every access is on the main thread by
+/// construction.
+final class AgentsWindowPlacer: @unchecked Sendable {
+    private struct Pending {
+        let topLeft: NSPoint
+        let firstOpenFallbackHeight: Double
+        let maximumHeight: Double
+    }
+
+    private var pending: Pending?
+    private var observers: [NSObjectProtocol] = []
+
+    func start() {
+        let names: [(Notification.Name, String)] = [
+            (NSWindow.didMoveNotification, "didMove"),
+            (NSWindow.didResizeNotification, "didResize"),
+            (NSWindow.didBecomeKeyNotification, "didBecomeKey"),
+            (NSWindow.didChangeOcclusionStateNotification, "occlusionChange"),
+        ]
+        for (name, label) in names {
+            observers.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main,
+                using: { [weak self] notification in
+                    guard let self,
+                          let window = notification.object as? NSWindow,
+                          window.title == AgentsWindow.title else { return }
+                    if self.pending != nil {
+                        agentsWindowLog.log("\(label, privacy: .public): frame=\(String(describing: window.frame), privacy: .public) occludedVisible=\(window.occlusionState.contains(.visible), privacy: .public) isVisible=\(window.isVisible, privacy: .public)")
+                    }
+                    self.enforceIfPending(on: window, reason: label)
+                }
+            ))
+        }
+    }
+
+    deinit {
+        let observers = self.observers
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Arm the placement for the window that is about to open: position =
+    /// the dropdown panel's top-left (captured at the ⌄ click, before the
+    /// dropdown dismisses — §4.5: always under the icon, never remembered);
+    /// height = the remembered height, or the panel's own height on a
+    /// first-ever open (§4.5/M29 T2), clamped to the window minimum and
+    /// the display at enforcement time. If the (hidden) window from a
+    /// previous showing still exists, it is placed right here — see the
+    /// type comment's arm-time mechanism.
+    func expect(topLeft: NSPoint, firstOpenFallbackHeight: Double, maximumHeight: Double) {
+        pending = Pending(
+            topLeft: topLeft,
+            firstOpenFallbackHeight: firstOpenFallbackHeight,
+            maximumHeight: maximumHeight
+        )
+        agentsWindowLog.log("armed: topLeft=\(String(describing: topLeft), privacy: .public) fallbackHeight=\(firstOpenFallbackHeight, privacy: .public) max=\(maximumHeight, privacy: .public)")
+        if let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) {
+            agentsWindowLog.log("arm-time window exists (isVisible=\(window.isVisible, privacy: .public)) — placing while hidden")
+            enforceIfPending(on: window, reason: "arm")
+        }
+    }
+
+    private func enforceIfPending(on window: NSWindow, reason: String) {
+        guard let pending else { return }
+        let height = AgentListHeights.agentsWindowHeightToApply(
+            stored: AgentsWindowHeightMemory.stored(),
+            firstOpenFallback: pending.firstOpenFallbackHeight,
+            minimum: Double(window.minSize.height),
+            maximum: pending.maximumHeight
+        )
+        let target = NSRect(
+            x: pending.topLeft.x,
+            y: pending.topLeft.y - CGFloat(height),
+            width: window.frame.width,
+            height: CGFloat(height)
+        )
+        if abs(window.frame.minX - target.minX) > 0.5
+            || abs(window.frame.minY - target.minY) > 0.5
+            || abs(window.frame.height - target.height) > 0.5 {
+            window.setFrame(target, display: true)
+            agentsWindowLog.log("enforced \(String(describing: target), privacy: .public) (\(reason, privacy: .public))")
+        }
+        // The open is complete once the window is actually on screen —
+        // disarm so later user drags/resizes are never snapped back.
+        // (Cleared on visibility, not on frame match, so a clamped target
+        // can't leave a stale pending armed forever.)
+        if window.occlusionState.contains(.visible) {
+            self.pending = nil
+            agentsWindowLog.log("disarmed (\(reason, privacy: .public)); frame at first visibility=\(String(describing: window.frame), privacy: .public)")
+        }
+    }
+}
+
+/// os_log sink for the Agents window placement timeline. Same
+/// subsystem/category convention as `loginItemLog` / `CLIRunner`.
+///   log show --last 5m --predicate 'subsystem == "cc.shiibar.menubar" AND category == "agents-window"'
+private let agentsWindowLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "cc.shiibar.menubar",
+    category: "agents-window"
+)
 
 struct AgentsWindowView: View {
     @ObservedObject var state: AppState
@@ -232,8 +374,8 @@ struct AgentsWindowView: View {
         // AppKit automatically). Measured on-device (M29 harness): this
         // yields `styleMask.resizable` with contentMin (340, 150+band) and
         // contentMax (340, inf) — the user can drag height only — and a
-        // programmatic `setFrame` (the height apply in
-        // `VMenuHandler.placeAgentsWindow`) sticks, with AppKit itself
+        // programmatic `setFrame` (the frame apply in
+        // `AgentsWindowPlacer`) sticks, with AppKit itself
         // clamping anything below the minimum. Removing the `.contentSize`
         // resizability instead was measured to unbound BOTH axes (the
         // window even opens at the wrong width), so it stays.

@@ -499,98 +499,34 @@ private final class VMenuHandler: NSObject {
     /// while no Agents window exists — the menu item is disabled otherwise
     /// (§4.5; see `presentMenu`), so this always opens a fresh window.
     ///
-    /// Steps, in this order (per the M26 brief): 1) read the dropdown
-    /// panel's screen frame BEFORE dismissing it (dismissing/closing could
-    /// otherwise change or invalidate it); 2) dismiss the dropdown, bring
-    /// the app forward (LSUIElement requirement), and open the Agents
-    /// window; 3) locate the now-open `NSWindow` and force its top-left to
-    /// the panel's former position.
+    /// Steps, in this order: 1) read the dropdown panel's screen frame
+    /// BEFORE dismissing it (dismissing/closing could otherwise change or
+    /// invalidate it); 2) ARM the pre-paint placement (`AgentsWindowPlacer`
+    /// — position = the panel's top-left, §4.5: always under the icon,
+    /// never remembered; height = remembered, else the panel's own height
+    /// as the first-open natural fallback, §4.5/M29 T2: the panel holds
+    /// the SAME list already laid out content-sized, and its topbar
+    /// (~28pt) trades for the window's traffic-light band, so the window
+    /// opens as a true pinned dropdown); 3) dismiss the dropdown, bring
+    /// the app forward (LSUIElement requirement), and open the window.
     ///
-    /// `openWindow(id:)` does not hand back the `NSWindow` synchronously
-    /// (the scene instantiates asynchronously under the hood) — resolve it
-    /// on a later main-queue turn by title, the same title-filter technique
-    /// `SetupCheckViewModel.observeWindowLifecycle` (M16) uses to pick one
-    /// window out of the global NSWindow notifications. Per §4.5: don't
-    /// fight SwiftUI's own frame restoration — whatever it does, this
-    /// overwrites the position explicitly on every open.
+    /// The placement is applied inside the opening window's own
+    /// notifications, BEFORE its first paint — a post-`openWindow`
+    /// main-queue retry loop was measured to land after the reopen's first
+    /// paint (SwiftUI shows its restored frame first), a visible jump. See
+    /// `AgentsWindowPlacer` for the measurements.
     @objc func openAsWindow(_ sender: Any?) {
         guard let panelWindow = containerWindow else { return }
-        let topLeft = NSPoint(x: panelWindow.frame.minX, y: panelWindow.frame.maxY)
-        // First-open height fallback (§4.5, M29 T2: "natural list height +
-        // band"): the dropdown panel's own frame height. It holds the SAME
-        // list content, already laid out content-sized — swapping its
-        // topbar (~28pt) for the window's traffic-light band (~28pt) makes
-        // the panel's outer height the window's natural outer height, and
-        // the window opens as a true pinned dropdown. (SwiftUI itself
-        // can't provide this: a greedy-height ScrollView reports a
-        // constant ideal, measured on-device — a fresh window would open
-        // at an arbitrary ~450pt regardless of content.)
-        let firstOpenFallbackHeight = Double(panelWindow.frame.height)
-        // The display cap for the applied height: the display the dropdown
-        // is on — the same one the window is about to open on.
-        let maximumHeight = Double(panelWindow.screen?.visibleFrame.height ?? .greatestFiniteMagnitude)
+        state?.expectAgentsWindowPlacement(
+            topLeft: NSPoint(x: panelWindow.frame.minX, y: panelWindow.frame.maxY),
+            firstOpenFallbackHeight: Double(panelWindow.frame.height),
+            // The display cap for the applied height: the display the
+            // dropdown is on — the same one the window is about to open on.
+            maximumHeight: Double(panelWindow.screen?.visibleFrame.height ?? .greatestFiniteMagnitude)
+        )
         state?.dismissDropdown()
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: AgentsWindow.id)
-        placeAgentsWindow(
-            topLeft: topLeft,
-            firstOpenFallbackHeight: firstOpenFallbackHeight,
-            maximumHeight: maximumHeight,
-            attemptsRemaining: Self.placeAgentsWindowMaxAttempts
-        )
-    }
-
-    /// On a first-ever "Open as Window" the underlying `NSWindow` for
-    /// `AgentsWindow.id` may not exist yet on the very next main-queue turn
-    /// — SwiftUI's `Window` scene instantiation is async and its timing
-    /// isn't guaranteed. Missing it silently would leave the window at
-    /// SwiftUI's own default position, violating §4.5's "always right under
-    /// the icon" rule (position under the icon every time). Retry a bounded number of
-    /// turns instead of assuming the window shows up on the first one; if it
-    /// still isn't there after `placeAgentsWindowMaxAttempts` turns, give
-    /// up silently rather than positioning some unrelated window.
-    private static let placeAgentsWindowMaxAttempts = 10
-
-    /// Position AND height in one `setFrame` (§4.5, M29 T2): top-left =
-    /// the panel's former top-left (position is a rule, never remembered);
-    /// height = the remembered height if any, else the first-open natural
-    /// fallback, clamped to the window's own minimum (kept current by
-    /// AppKit from the content bounds) and the display. One call means the
-    /// height application cannot fight the positioning. Width is never
-    /// touched (pinned at 340 by the content bounds).
-    private func placeAgentsWindow(
-        topLeft: NSPoint,
-        firstOpenFallbackHeight: Double,
-        maximumHeight: Double,
-        attemptsRemaining: Int
-    ) {
-        guard attemptsRemaining > 0 else { return }
-        DispatchQueue.main.async { [weak self] in
-            if let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) {
-                let height = AgentListHeights.agentsWindowHeightToApply(
-                    stored: AgentsWindowHeightMemory.stored(),
-                    firstOpenFallback: firstOpenFallbackHeight,
-                    minimum: Double(window.minSize.height),
-                    maximum: maximumHeight
-                )
-                window.setFrame(
-                    NSRect(
-                        x: topLeft.x,
-                        y: topLeft.y - CGFloat(height),
-                        width: window.frame.width,
-                        height: CGFloat(height)
-                    ),
-                    display: true
-                )
-            } else {
-                self?.placeAgentsWindow(
-                    topLeft: topLeft,
-                    firstOpenFallbackHeight: firstOpenFallbackHeight,
-                    maximumHeight: maximumHeight,
-                    attemptsRemaining: attemptsRemaining - 1
-                )
-            }
-        }
     }
     @objc func quit(_ sender: Any?) { state?.quit() }
 }
