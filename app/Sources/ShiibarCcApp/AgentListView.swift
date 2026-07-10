@@ -329,13 +329,14 @@ private struct AgentListTopBar: View {
     }
 
     /// Builds the ⌄ menu fresh on every click, so checkmarks and Clear
-    /// badges' enabled state always show the live state. Ordering
-    /// (§4.5/§8.30, M27 T4) is identical to the app menu
+    /// badges' enabled state always show the live state. The shared items'
+    /// ordering (§4.5/§8.30, M27 T4) is identical to the app menu
     /// (`AppMenuCommands`) — About / - / Settings… / Setup Check… / - /
-    /// Rescan / Clear badges / Sort by / - / window verb / Quit — with only
-    /// the last group's window verb swapping per container: Open as Window
-    /// here (a ⌄-specific item, the Agents window has no ⌄), Close Window
-    /// in the app menu.
+    /// Rescan / Clear badges / Sort by / - / window verb / Quit. The last
+    /// group differs per container: the window verb swaps (Open as Window
+    /// here — a ⌄-specific item, the Agents window has no ⌄ — vs Close
+    /// Window in the app menu), and Keep on Top, being a property of the
+    /// window, exists only in the app menu (§4.5/§8.33, M30).
     ///
     /// Every item, including the Sort by radio choices, is a plain
     /// `NSMenuItem` with a `target`/`action` via `makeItem`/`VMenuHandler` —
@@ -388,9 +389,10 @@ private struct AgentListTopBar: View {
         menu.addItem(.separator())
 
         // Open as Window (§4.5 "the agent list window", M26 T2 / M27 T4): sits
-        // where the app menu puts Close Window — both menus end in a
-        // "window verb + Quit" group, and only that verb swaps per
-        // container.
+        // where the app menu puts Close Window — both menus end their last
+        // group in "window verb + Quit", with the verb swapping per
+        // container (the app menu's Keep on Top above its verb is
+        // app-menu-only, §4.5/§8.33).
         //
         // Disabled while the Agents window exists (§4.5 — same "disabled
         // when meaningless" convention as Clear badges; raising the open

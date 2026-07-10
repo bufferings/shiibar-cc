@@ -122,7 +122,8 @@
 
   <h2>ドロップダウン: フラット一覧 + 行頭の状態記号(カスタムビュー)</h2>
   <ul>
-    <li>最上部: <strong>⌄ ボタン</strong>(並び順は一覧ウィンドウ表示中のアプリメニューと同一。
+    <li>最上部: <strong>⌄ ボタン</strong>(共通項目の並び順は一覧ウィンドウ表示中のアプリメニューと同一。
+      窓の項目(Keep on Top / Close Window)はアプリメニューのみ。
       DESIGN.md §4.5/§8.30) —
       <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/ ─── /
       <strong>Settings…</strong>(実行項目。クリックで独立した Settings ウィンドウを開く)/
@@ -142,7 +143,7 @@
       幅は固定・縦はリサイズ可で高さを記憶(中身の増減では伸縮しない。DESIGN.md §8.32)。
       <strong>topbar(⌄)は置かない</strong> — 窓がある間はアプリが通常アプリになり、操作は画面上端の
       アプリメニュー 1 個(About / Settings… ⌘, / Setup Check… / Rescan ⌘R / Clear badges /
-      Sort by / Close Window ⌘W / Quit ⌘Q)に出る</li>
+      Sort by / Keep on Top(トグル・既定 OFF。ON の間だけ最前面) / Close Window ⌘W / Quit ⌘Q)に出る</li>
     <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
       閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
       2 グループ — <strong>General</strong>: Start at Login(トグル)/

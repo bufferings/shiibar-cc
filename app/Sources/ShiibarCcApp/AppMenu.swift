@@ -3,7 +3,8 @@
 // M27 T1) and shows EXACTLY one menu — the app menu — at the top of the
 // screen: About Shiibar CC / - / Settings… (⌘,) / Setup Check… / - /
 // Rescan (⌘R) / Clear badges (disabled when nothing is unreviewed) /
-// Sort by (submenu) / - / Close Window (⌘W) / Quit Shiibar CC (⌘Q).
+// Sort by (submenu) / - / Keep on Top (checkmark toggle) / Close Window
+// (⌘W) / Quit Shiibar CC (⌘Q).
 // Every item behaves exactly like its ⌄-menu namesake.
 //
 // Two mechanisms cooperate (both measured on-device, macOS 14 harness, M27):
@@ -42,12 +43,17 @@ import SwiftUI
 final class AppMenuModel: ObservableObject {
     @Published private(set) var hasUnreviewed: Bool
     @Published private(set) var sortMode: SortMode
+    /// Keep on Top checkmark state (§4.5/§8.33, M30) — routed through this
+    /// facade like the other two, so agent churn can never invalidate the
+    /// menu through it.
+    @Published private(set) var keepOnTop: Bool
 
     private var subscriptions: Set<AnyCancellable> = []
 
     init(state: AppState) {
         hasUnreviewed = state.hasUnreviewed
         sortMode = state.sortMode
+        keepOnTop = state.keepAgentsWindowOnTop
         // `$agents` emits the NEW array (willSet timing), so deriving from
         // the emitted value — not from `state.hasUnreviewed`, which still
         // reads the old array at that instant — is load-bearing.
@@ -59,6 +65,10 @@ final class AppMenuModel: ObservableObject {
         state.$sortMode
             .removeDuplicates()
             .sink { [weak self] in self?.sortMode = $0 }
+            .store(in: &subscriptions)
+        state.$keepAgentsWindowOnTop
+            .removeDuplicates()
+            .sink { [weak self] in self?.keepOnTop = $0 }
             .store(in: &subscriptions)
     }
 }
@@ -115,6 +125,16 @@ struct AppMenuCommands: Commands {
             }
         }
         CommandGroup(replacing: .appTermination) {
+            // Keep on Top (§4.5/§8.33, M30): first item of the last group,
+            // above Close Window; a `Toggle` renders as a checkmarked menu
+            // item showing the current value. No shortcut (§4.5). ON keeps
+            // the Agents window at the floating level — level only, no
+            // Space following (§8.33); default OFF, remembered across
+            // opens and launches (`AppState.setKeepAgentsWindowOnTop`).
+            Toggle("Keep on Top", isOn: Binding(
+                get: { menuModel.keepOnTop },
+                set: { state.setKeepAgentsWindowOnTop($0) }
+            ))
             // §4.5: standard close-the-key-window behavior. Lives in the
             // app menu because there is no File menu to host ⌘W.
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }

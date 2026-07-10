@@ -66,6 +66,17 @@ final class AppState: ObservableObject {
     /// regardless (§4.5).
     @Published private(set) var appearanceSetting: AppearanceSetting
     private static let appearanceKey = "cc.shiibar.appearance"
+    /// App menu "Keep on Top" (§4.5/§8.33, M30): while ON, the Agents
+    /// window sits at the floating window level — and ONLY the level;
+    /// `collectionBehavior` (Space following) is deliberately untouched
+    /// (§8.33: a separate kind of pushiness, kept out). Persisted in
+    /// UserDefaults (same pattern as `sortMode`), default OFF
+    /// (`AgentsWindowKeepOnTop.defaultEnabled` — floating is only ever the
+    /// user's explicit choice, §8.30/§8.33). Observed by the app menu via
+    /// `AppMenuModel`'s deduped facade, never directly (the M27
+    /// menu-churn lesson).
+    @Published private(set) var keepAgentsWindowOnTop: Bool
+    private static let keepOnTopKey = "cc.shiibar.agentsWindowKeepOnTop"
     /// Current `GlyphCycleSpinner` frame index of the tray's working
     /// animation (M5 T8, M24 T1). Only meaningful while
     /// `workingAnimationTimer` is running; `trayIcon` reads it on every
@@ -109,6 +120,9 @@ final class AppState: ObservableObject {
         let storedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey)
             .flatMap(AppearanceSetting.init(rawValue:))
         self.appearanceSetting = storedAppearance ?? AppearanceSetting.defaultSetting
+        // `bool(forKey:)` reads a missing key as false ==
+        // `AgentsWindowKeepOnTop.defaultEnabled` (pinned by a Core test).
+        self.keepAgentsWindowOnTop = UserDefaults.standard.bool(forKey: Self.keepOnTopKey)
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
         self.lifecycle = DaemonLifecycleManager(
@@ -412,6 +426,28 @@ final class AppState: ObservableObject {
     func setSortMode(_ mode: SortMode) {
         sortMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: Self.sortModeKey)
+    }
+
+    /// App menu "Keep on Top" toggle (§4.5/§8.33, M30): publish (the app
+    /// menu's checkmark follows via `AppMenuModel`), persist, and apply
+    /// immediately to a visible Agents window.
+    func setKeepAgentsWindowOnTop(_ enabled: Bool) {
+        keepAgentsWindowOnTop = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.keepOnTopKey)
+        applyAgentsWindowLevel()
+    }
+
+    /// Apply the Keep on Top level to the Agents window if it currently
+    /// exists (§4.5: ON = floating, OFF = the normal level; toggling takes
+    /// effect immediately on a visible window). Also called on every open
+    /// by `AgentsWindowViewModel.noteWindowBecameKey` — the existing open
+    /// detection (§8.33/M30: no new observers) — so a window opened later
+    /// picks the remembered value up. Level only; `collectionBehavior` is
+    /// deliberately never touched (§8.33). Finding the window by title is
+    /// the same technique every other Agents-window hook uses.
+    func applyAgentsWindowLevel() {
+        guard let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) else { return }
+        window.level = keepAgentsWindowOnTop ? .floating : .normal
     }
 
     /// Settings "Appearance" pick (§4.5, M27 T5): applied the moment it's

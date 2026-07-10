@@ -109,6 +109,10 @@ final class AgentsWindowViewModel: ObservableObject {
         isVisible = true
         switchToRegularApp()
         refreshElapsedBase()
+        // Keep on Top (§4.5/§8.33, M30): re-apply the remembered window
+        // level on every open — this open detection is the designated
+        // hook (no new observers).
+        state?.applyAgentsWindowLevel()
         state?.notificationManager.refreshPermissionStatus()
         startRefreshTimer()
     }
