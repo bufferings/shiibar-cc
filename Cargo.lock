@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "shiibar-cc"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "shiibar-cc-client"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "shiibar-cc-proto"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "shiibar-ccd"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
