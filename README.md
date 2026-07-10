@@ -27,6 +27,12 @@ a glance:
 Click a session in the dropdown (or a notification) and it jumps to that
 session's iTerm2 tab.
 
+The dropdown can also be pinned as a small ordinary window (`⌄` → Open as
+Window): it stays put while you click through waiting sessions one after
+another, grows as tall as you like, and while it's open the app shows up in
+the Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you
+can also switch the appearance between System, Light and Dark).
+
 <img src="docs/assets/menubar-dropdown.png" width="500"
      alt="The Shiibar CC dropdown, grouped by status: two sessions waiting
           on permission (one unreviewed, with a red badge), one working,
@@ -51,8 +57,8 @@ specific feature — nothing is requested speculatively.
   you, or finishes.
 - **Login Items**: the app registers itself to start at login automatically
   the first time you launch it. You can turn this off any time from the
-  app's `⌄` menu (Settings → Start at Login); once you do, the app respects
-  that choice and won't re-register itself.
+  app's `⌄` menu (Settings… → General → Start at Login); once you do, the
+  app respects that choice and won't re-register itself.
 - **Code signing**: the Homebrew cask ships a Developer ID–signed, notarized
   `.app` — no local signing step. Building from source instead signs the
   app locally with a stable self-signed identity created on first install
@@ -186,7 +192,8 @@ flowchart LR
   the only terminal app Shiibar CC knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
-  on daemon reconnect, and on demand via the dropdown's Rescan action.
+  on daemon reconnect, roughly every minute in the background, and on
+  demand via Rescan (in the `⌄` menu, or ⌘R while the window is open).
 - All local state — the daemon's socket, its persisted session state, and
   its log — lives under `~/.local/state/shiibar-cc/`.
 

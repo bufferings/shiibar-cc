@@ -61,7 +61,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow">shiibar-cc — 確定デザイン(2026-07-05 決定)</div>
+  <div class="eyebrow">shiibar-cc — 確定デザイン</div>
   <h1>メニューバー表示仕様</h1>
   <p class="lede">見た目の正はこのファイル。挙動(状態モデル・通知・接続)の正は DESIGN.md §4.5。</p>
 
@@ -231,6 +231,8 @@
 
   <h2>実装ノート</h2>
   <ul>
+    <li>本ページのモックアップの CSS 幅(<code>.menu { width:380px }</code>)は誌面上の例示。
+      <strong>実装の一覧幅は 340pt</strong>(ドロップダウン / 一覧ウィンドウ共通。DESIGN.md §8.32・§9)</li>
     <li>トレイは<strong>二層合成</strong>: 窓 + スロットグリフの<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
       <strong>赤バッジを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
       一次案 = `MenuBarExtra` の label で ZStack(テンプレート NSImage + 赤 Circle オーバーレイ)、
