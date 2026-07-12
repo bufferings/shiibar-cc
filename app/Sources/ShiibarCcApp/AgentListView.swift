@@ -189,6 +189,18 @@ struct AgentListView: View {
         }
     }
 
+    /// Empty-state content (zero agents), shared by the grouped and flat
+    /// branches below — both draw the identical `NoAgentsRow()`. Carries the
+    /// same `listHeightReader` measurement the populated `ScrollView` cases
+    /// use (M32 bugfix): without it, `naturalListHeight` never updates while
+    /// this branch is on screen, `desiredPanelHeight` stays nil (its
+    /// `naturalListHeight > 0` guard), and the dropdown panel is left at
+    /// whichever height a previous, populated render last reported.
+    private var emptyStateContent: some View {
+        NoAgentsRow()
+            .background(listHeightReader)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if container.showsTopBar {
@@ -208,7 +220,7 @@ struct AgentListView: View {
             if state.sortMode == .grouped {
                 let groups = state.groups(now: container.openedAt)
                 if groups.isEmpty {
-                    NoAgentsRow()
+                    emptyStateContent
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
@@ -223,7 +235,7 @@ struct AgentListView: View {
             } else {
                 let rows = state.flatRows(now: container.openedAt)
                 if rows.isEmpty {
-                    NoAgentsRow()
+                    emptyStateContent
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 1) {
