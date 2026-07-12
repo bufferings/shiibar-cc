@@ -17,3 +17,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
+# Conversations index (DESIGN.md §4.6). Links the system-provided libsqlite3;
+# the `bundled` feature is deliberately NOT enabled (DESIGN.md §10: do not
+# pull the SQLite C source into the supply chain).
+rusqlite = "0.40.1"
+# Already in the tree transitively (tokio). Used directly for kill(2) and
+# sysctl(2) in the live/past process check (DESIGN.md §4.6: no subprocess).
+libc = "0.2"

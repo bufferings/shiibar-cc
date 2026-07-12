@@ -4,7 +4,9 @@
 [licenses]
 # Every current dependency satisfies this set: crates licensed
 # "A OR B" pass if either arm is allowed.
-allow = ["MIT", "Apache-2.0", "Unicode-3.0"]
+# Zlib: foldhash (hashbrown's default hasher, reached via
+# rusqlite -> hashlink -> hashbrown; M34). Permissive, OSI-approved.
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
 
 [bans]
 # Duplicate versions of the same crate bloat the tree but aren't a

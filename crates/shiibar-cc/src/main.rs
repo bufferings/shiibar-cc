@@ -34,6 +34,7 @@ fn main() {
         Some("remove") => cmd_remove(&rest),
         Some("seen") => cmd_seen(&rest),
         Some("resume") => cmd_resume(&rest),
+        Some("conversations") => cmd_conversations(&rest),
         Some("doctor") => cmd_doctor(&rest),
         _ => {
             print_usage();
@@ -45,7 +46,7 @@ fn main() {
 
 fn print_usage() {
     eprintln!(
-        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|seen|resume|doctor> ..."
+        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|seen|resume|conversations|doctor> ..."
     );
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
@@ -209,6 +210,53 @@ fn cmd_resume(args: &[String]) -> i32 {
         eprintln!("{m}");
     }
     report.exit_code
+}
+
+fn cmd_conversations(args: &[String]) -> i32 {
+    let usage = || {
+        eprintln!("usage: shiibar-cc conversations <index|search|show> ...");
+        eprintln!("  conversations index [--json]");
+        eprintln!("  conversations search [<query>] [--json]");
+        eprintln!("  conversations show <session-id> [--json]");
+        1
+    };
+    let Some(verb) = args.first() else {
+        return usage();
+    };
+    let rest = &args[1..];
+    let json = rest.iter().any(|a| a == "--json");
+    let positional: Vec<&String> = rest.iter().filter(|a| a.as_str() != "--json").collect();
+
+    // Real wiring (DESIGN.md §4.6): transcripts and the pid-file registry
+    // under $HOME/.claude, the DB inside the state dir, the real
+    // process-liveness probe. Tests inject all four via the library.
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let deps = shiibar_cc::conversations::Deps {
+        projects_dir: home.join(".claude/projects"),
+        sessions_dir: home.join(".claude/sessions"),
+        db_path: shiibar_cc_client::resolve_state_dir().join("conversations-index.db"),
+        probe: Box::new(shiibar_cc::conversations::live::RealLiveness),
+    };
+    let mut out = std::io::stdout();
+    let mut err = std::io::stderr();
+    match verb.as_str() {
+        "index" if positional.is_empty() => {
+            shiibar_cc::conversations_cmd::run_index(&deps, json, &mut out, &mut err)
+        }
+        "search" if positional.len() <= 1 => shiibar_cc::conversations_cmd::run_search(
+            &deps,
+            positional.first().map(|s| s.as_str()),
+            json,
+            &mut out,
+            &mut err,
+        ),
+        "show" if positional.len() == 1 => {
+            shiibar_cc::conversations_cmd::run_show(&deps, positional[0], json, &mut out, &mut err)
+        }
+        _ => usage(),
+    }
 }
 
 fn cmd_doctor(args: &[String]) -> i32 {
