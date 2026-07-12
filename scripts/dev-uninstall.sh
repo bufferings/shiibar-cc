@@ -58,6 +58,23 @@ for f in shiibar-ccd shiibar-cc; do
   fi
 done
 
+echo "==> Reaping any daemon the socket-based shutdown could not reach"
+# A daemon whose socket file was already deleted (app crash, a dropped
+# handoff during an install switch) is unreachable by {"cmd":"shutdown"}
+# and is never collected by the duplicate-startup check (DESIGN.md
+# §8.8 / §4.2), so it survives as an orphan once the socket file below is
+# removed. Run unconditionally, even if $APP_PATH no longer exists — the
+# orphan can outlive the app bundle it was spawned from.
+#
+# -x requires an exact match of the full argument list (verified with
+# pkill(1) on this machine: a bare full-path invocation with no arguments
+# matches, while a process that merely takes the path as an argument, e.g.
+# `tail -f` on it, does not). The daemon is always launched with the
+# bundled absolute path and no arguments (confirmed via `ps`;
+# DaemonLifecycleManager.swift sets `process.arguments = []`), so this
+# cannot catch an unrelated process that only references the path.
+pkill -xf '/.*/Shiibar CC\.app/Contents/Helpers/shiibar-ccd' || true
+
 echo "==> Removing state dir $STATE_DIR"
 rm -rf "$STATE_DIR"
 

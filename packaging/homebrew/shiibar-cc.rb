@@ -91,6 +91,39 @@ cask "shiibar-cc" do
     system_command "/bin/bash", args: ["-c", script]
   end
 
+  # Insurance for `uninstall quit:` below: that Apple Event only reaches the
+  # daemon while the app is running and still holds its socket. A daemon
+  # whose socket file was already gone (app crash, a dropped handoff during
+  # an install switch) is unreachable that way and would otherwise survive
+  # `brew uninstall` as an orphan (DESIGN.md §8.8 / §4.2).
+  #
+  # `signal:` cannot do this instead: per the Homebrew Cask Cookbook
+  # (https://docs.brew.sh/Cask-Cookbook#uninstall-signal), its targets are
+  # bundle IDs, and shiibar-ccd is a bare helper binary with no bundle ID of
+  # its own. `uninstall script:` (same page,
+  # https://docs.brew.sh/Cask-Cookbook#uninstall-script) needs an existing
+  # script file (`executable:`) rather than an inline command, so this uses
+  # `uninstall_postflight`, a plain Ruby block that runs after the uninstall
+  # artifacts are processed (same page, "Stanza: *flight") — the same
+  # `system_command "/bin/bash", args: [...]` shape already used in
+  # `postflight` above. (`Cask/StanzaOrder` in `brew style --cask` requires
+  # this block to appear before `uninstall` in the file.)
+  #
+  # Same pattern and `-xf` reasoning as scripts/dev-uninstall.sh: verified
+  # on-device that `-xf` requires an exact match of the full argument list,
+  # so a bare full-path invocation with no arguments matches while a
+  # process that merely takes this path as an argument (e.g. `tail -f` on
+  # it) does not. The daemon is always launched with the bundled absolute
+  # path and no arguments (DaemonLifecycleManager.swift: `process.arguments
+  # = []`).
+  uninstall_postflight do
+    script = <<~'SH'
+      pkill -xf '/.*/Shiibar CC\.app/Contents/Helpers/shiibar-ccd' || true
+    SH
+
+    system_command "/bin/bash", args: ["-c", script]
+  end
+
   uninstall quit: "cc.shiibar.menubar"
 
   zap trash: [
