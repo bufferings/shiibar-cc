@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shiibar-cc Conversations 確定デザイン</title>
+<style>
+  :root { --bg:#f2f2f4; --surface:#fff; --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de; --accent:#b45309; --red:#e5484d;
+    --menu-bg:rgba(252,252,254,.97); --menu-text2:#7c7c82; --sel:#3478f6; --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.7); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#171719; --surface:#232326; --text:#ededf0; --text2:#9b9ba3; --line:#38383d; --accent:#e8a10e;
+      --menu-bg:rgba(44,44,48,.97); --menu-text2:#a5a5ad; --hl:rgba(255,213,0,.25); --hlcur:rgba(255,166,0,.5); }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-size:15px; line-height:1.65;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:48px 24px 96px; }
+  .eyebrow { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:10px; }
+  h1 { font-size:27px; font-weight:700; letter-spacing:-.02em; margin:0 0 8px; }
+  h2 { font-size:19px; letter-spacing:-.01em; margin:44px 0 14px; }
+  p.lede { color:var(--text2); margin:0 0 8px; max-width:46em; }
+  ul { margin:8px 0; padding-left:1.4em; }
+  li { margin:3px 0; }
+
+  .mock { background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:18px; display:flex; flex-direction:column; gap:14px; align-items:flex-start; }
+  .mock-label { font-size:11px; letter-spacing:.08em; color:var(--text2); margin:2px 2px -8px; }
+
+  /* ウィンドウのクローム(一覧ウィンドウと同じ: 信号機の帯 + タイトルバー非表示) */
+  .win { background:var(--menu-bg); color:var(--text); border-radius:11px;
+    box-shadow:0 10px 34px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.12); font-size:13px; overflow:hidden; }
+  .titlebar { display:flex; align-items:center; gap:6px; padding:8px 10px 4px; }
+  .tl { width:11px; height:11px; border-radius:50%; }
+  .tl.r { background:#ff5f57; } .tl.y { background:#febc2e; } .tl.g { background:#28c840; }
+
+  .toolbar { display:flex; align-items:center; gap:6px; padding:4px 10px 8px; }
+  .search { display:flex; align-items:center; gap:6px; flex:1; padding:5px 9px;
+    background:rgba(127,127,127,.14); border-radius:7px; color:var(--menu-text2); font-size:12px; }
+  .search .q { color:var(--text); }
+  .caret { display:inline-block; width:1px; height:12px; background:var(--text); margin-left:1px; vertical-align:-2px; }
+  .rbtn { padding:4px 8px; border-radius:7px; background:rgba(127,127,127,.14); color:var(--menu-text2); font-size:12px; }
+
+  .rows { padding:0 6px 8px; }
+  .mi { display:block; padding:8px 11px; border-radius:7px; }
+  .mi .t1 { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mi .sub { display:block; font-size:11px; color:var(--menu-text2); line-height:1.4; font-weight:400; margin-top:1px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mi.sel { background:var(--sel); color:#fff; }
+  .mi.sel .sub { color:rgba(255,255,255,.78); }
+  .run { font-style:normal; opacity:.85; }
+
+  .findbar { display:flex; align-items:center; gap:8px; padding:4px 10px; font-size:11px; color:var(--menu-text2);
+    border-bottom:1px solid var(--line); }
+  .findbar .nav { padding:1px 7px; border-radius:5px; background:rgba(127,127,127,.14); }
+  .chat { flex:1; padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; overflow:hidden; }
+  .msg .who { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--menu-text2); }
+  .msg .body { font-size:12px; line-height:1.5; color:var(--text); }
+  .msg.you .body { color:var(--text2); }
+  .hl { background:var(--hl); border-radius:2px; }
+  .hlcur { background:var(--hlcur); border-radius:2px; }
+  .expand { font-size:11px; color:var(--sel); }
+  .actions { display:flex; justify-content:flex-end; gap:8px; padding:0 12px 12px; }
+  .btn { background:var(--sel); color:#fff; border-radius:6px; padding:4px 16px; font-size:12px; font-weight:600; }
+  .statusline { padding:6px 12px 10px; color:var(--menu-text2); font-size:11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">shiibar-cc — 確定デザイン</div>
+  <h1>Conversations ウィンドウ表示仕様</h1>
+  <p class="lede">見た目の正はこのファイル。挙動(索引・検索・状態規則・CLI 契約)の正は DESIGN.md §4.6 / §4.4。
+    会話の履歴を眺め・探し・読み、必要なら新しい iTerm2 ウィンドウで再開する画面。</p>
+
+  <h2>デザイン原則</h2>
+  <ul>
+    <li><strong>2 ペインのマスター・ディテール</strong>: 左で選ぶ、右で読む、右下で再開。
+      右ペインは会話の全文(下端 = 最新)で、読む活動に幅を割く</li>
+    <li><strong>表示が変わるのは利用者が動かしたときだけ</strong>: 開く・打鍵・⟳・自分の Resume。
+      勝手に更新されない(DESIGN.md §4.6)</li>
+    <li><strong>実行中の会話は文字の印で示す</strong>: 2 行目に <code>running</code>。Agents ビューの
+      状態記号(スピナー・!)は使わない — この画面の live 印の鮮度は最後の検索実行時点であり、
+      「いまの状態」を主張しない。色も使わない(赤 = unreviewed の専用色はこの画面に存在しない)</li>
+    <li><strong>クロームは一覧ウィンドウと同じ</strong>: タイトルバー非表示 + 信号機の帯。
+      行の文法(1 行目 = 主内容 / 2 行目 = ラベル · 経過時間)もドロップダウンと同じ</li>
+  </ul>
+
+  <h2>browse(空クエリ): 最近の会話を眺める</h2>
+  <ul>
+    <li>開いた直後の姿。全会話が新しい順(実行中は <code>running</code> 印付きで自然に上位に混ざる)</li>
+    <li>行は「1 行目 = タイトル(無ければフォルダラベル)/ 2 行目 = フォルダラベル · 経過時間」</li>
+    <li>右は選択中の会話の全文。下端(最新)から上へスクロールして読む</li>
+    <li>Resume ボタンは past の行だけ。live の行を選ぶとボタンは出ない(読むだけ)</li>
+    <li>ステータス行は <code>N conversations (M running)</code></li>
+  </ul>
+  <div class="mock">
+    <div class="mock-label">空クエリ・past の行を選択中(下端まで読んだ状態)</div>
+    <div class="win" style="width:640px">
+      <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+      <div style="display:flex; align-items:stretch; min-height:300px">
+        <div style="width:280px; border-right:1px solid var(--line); display:flex; flex-direction:column">
+          <div class="toolbar"><span class="search">🔍 Search (2+ characters)</span><span class="rbtn">⟳</span></div>
+          <div class="rows" style="flex:1">
+            <div class="mi"><span class="t1">メニューバー表示の実装相談</span><span class="sub">my/shiibar-cc · 20m · <span class="run">running</span></span></div>
+            <div class="mi sel"><span class="t1">導入段落の推敲</span><span class="sub">Documents/blog · 3h</span></div>
+            <div class="mi"><span class="t1">認証ミドルウェアの設計</span><span class="sub">demo/api-server · 2d</span></div>
+            <div class="mi"><span class="t1">演習 3 章のレビュー</span><span class="sub">example/backend-ts-book · 1w</span></div>
+          </div>
+          <div class="statusline" style="border-top:1px solid var(--line)">12 conversations (1 running)</div>
+        </div>
+        <div style="flex:1; display:flex; flex-direction:column">
+          <div style="font-weight:650; padding:10px 12px 0">導入段落の推敲</div>
+          <div style="font-size:11px; color:var(--menu-text2); padding:0 12px 6px">~/Documents/blog · 3h ago</div>
+          <div class="chat">
+            <div class="msg you"><span class="who">You</span><div class="body">導入がまわりくどい気がする。もっと短くできる?</div></div>
+            <div class="msg"><span class="who">Claude</span><div class="body">3 文に削りました。ツールの動機(通知を見逃す)→ 何をするか(メニューバーで見張って飛ぶ)→ 導入コマンド、の順です。</div></div>
+            <div class="msg you"><span class="who">You</span><div class="body">いいね。その調子で「使い方」の節もお願い</div></div>
+          </div>
+          <div class="actions"><span class="btn">Resume</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>search(2 文字以上): ヒットナビゲーション付きの全文</h2>
+  <ul>
+    <li>行の形は browse と同じ(スニペットは出さない — 選択すれば即座に全文とヒットが見えるため)</li>
+    <li>複数語(空白区切り)は AND — 全語を含む会話に絞り込む。ハイライトは全語同色・
+      現在位置のみ濃く(DESIGN.md §4.6)</li>
+    <li>行を選ぶと、取得した全文に対して語の出現をアプリが計算し、<strong>本文にヒットが 1 件以上ある
+      ときだけ</strong>右ペインの上に<strong>検索バー行</strong>(文書順カウンタ + ▲ = 古い方へ /
+      ▼ = 新しい方へ)を出す(0 件なら出さない)。初期位置は<strong>最新のヒット</strong>。
+      全出現をハイライトし、現在位置は濃く</li>
+    <li>500 文字を超えるメッセージは畳み(<code>Show full message</code>)。畳み内のヒットもカウンタに
+      数え、▲▼ でジャンプしたら自動展開</li>
+    <li>絞り込み中のステータス行は <code>N of M conversations</code></li>
+  </ul>
+  <div class="mock">
+    <div class="mock-label">「worktree」で検索・1 件目を選択中(最新ヒット = 8/8 に位置)</div>
+    <div class="win" style="width:640px">
+      <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+      <div style="display:flex; align-items:stretch; min-height:300px">
+        <div style="width:280px; border-right:1px solid var(--line); display:flex; flex-direction:column">
+          <div class="toolbar"><span class="search">🔍 <span class="q">worktree</span><span class="caret"></span></span><span class="rbtn">⟳</span></div>
+          <div class="rows" style="flex:1">
+            <div class="mi sel"><span class="t1">Keep on Top トグルの実装</span><span class="sub">my/shiibar-cc · 2d</span></div>
+            <div class="mi"><span class="t1">リリース手順の確認</span><span class="sub">my/shiibar-cc · 4d</span></div>
+            <div class="mi"><span class="t1">シェル関数の整理</span><span class="sub">Documents/dotfiles · 1w</span></div>
+          </div>
+          <div class="statusline" style="border-top:1px solid var(--line)">3 of 12 conversations</div>
+        </div>
+        <div style="flex:1; display:flex; flex-direction:column">
+          <div style="font-weight:650; padding:10px 12px 0">Keep on Top トグルの実装</div>
+          <div style="font-size:11px; color:var(--menu-text2); padding:0 12px 6px">~/Documents/my/shiibar-cc · 2d ago</div>
+          <div class="findbar"><span>8/8</span><span class="nav">▲</span><span class="nav">▼</span></div>
+          <div class="chat">
+            <div class="msg you"><span class="who">You</span><div class="body">じゃあ次の作業も <span class="hl">worktree</span> を分けてやろうか</div></div>
+            <div class="msg"><span class="who">Claude</span><div class="body">今回の差分は app/ にほぼ閉じるので、<span class="hlcur">worktree</span> は分けずに main で進めるのが軽いと思います。<span class="expand">Show full message</span></div></div>
+          </div>
+          <div class="actions"><span class="btn">Resume</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>初回構築中の見え方</h2>
+  <ul>
+    <li>ウィンドウを開くと `conversations index` の進捗が来る。全構築中は<strong>検索欄を無効</strong>にし、
+      ステータス行に <code>Indexing 340 of 4,200…</code>。完了したら一覧が出る(一覧が徐々に埋まる演出はしない)</li>
+    <li>回る <code>✻</code> は使わない — グリフ循環スピナーは製品内で「working」の意味を持つ(menubar-design.html)</li>
+    <li>エラー時: index のエラーは一覧を出さずにエラー表示、search のエラーは前回結果を維持して
+      ステータス行にエラー表示(DESIGN.md §4.6)</li>
+  </ul>
+
+  <h2>実装ノート</h2>
+  <ul>
+    <li>初期サイズ 640×480pt(左ペイン 280pt)。縦横リサイズ可・サイズと位置を記憶(DESIGN.md §9)</li>
+    <li>行・検索欄・選択色・ホバーの作法はドロップダウン(menubar-design.html)と共通。
+      本ページの CSS 値(ハイライト色含む)は誌面上の例示で、実装はシステムの色・素材に追従させる</li>
+    <li>右ペインのヘッダの 2 行目は<strong>ホーム相対のフルパス</strong>(<code>~/Documents/blog</code> 形式)+
+      経過時間 — 行の 2 要素ラベルより詳しくするのは、再開先のフォルダをここで確定できるようにするため</li>
+    <li>発話ラベルは <strong>You / Claude</strong> の 2 種のみ。メッセージ間のツール実行は何も描かない(DESIGN.md §4.6)</li>
+    <li>一覧の差分描画・選択・スクロール記憶のキーは session_id(更新でちらつかない・選択が飛ばない)</li>
+    <li>UI 文言は英語。行・本文の中身(タイトル・発話)はユーザーデータそのまま</li>
+    <li>空状態(会話ゼロ)は「No conversations」、検索 0 件は「No matching conversations」の一行 +
+      ステータス行 <code>0 of M conversations</code></li>
+  </ul>
+</div>
+</body>
+</html>

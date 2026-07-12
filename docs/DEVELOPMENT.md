@@ -164,6 +164,9 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   アタッチするので、手動 daemon と併用しても壊れない。ただしアプリを Quit すると
   daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
+- Conversations の会話索引(DESIGN.md §4.6)は状態ディレクトリ内の `conversations-index.db`。
+  派生データなので、表示がおかしいときは消してよい — 次の `shiibar-cc conversations index`
+  (ウィンドウを開くだけでも走る)で全再構築される(手動の再インデックス UI は無い。§8.34)
 - **README のスクリーンショット**(`docs/assets/`)の撮り直しは `scripts/dev-demo.sh` で:
   `stage` が偽 hook 再生(上記「hooks の検証」と同じ技法)で waiting / working / idle の
   3 状態を実 daemon に並べる(**定期 reconcile が約 60 秒で偽セッションを掃除する**ので、
