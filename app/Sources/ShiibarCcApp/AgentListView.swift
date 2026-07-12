@@ -185,7 +185,7 @@ struct AgentListView: View {
         GeometryReader { geo in
             Color.clear
                 .onAppear { naturalListHeight = geo.size.height }
-                .onChange(of: geo.size.height) { naturalListHeight = $0 }
+                .onChange(of: geo.size.height) { _, newValue in naturalListHeight = newValue }
         }
     }
 
@@ -282,7 +282,7 @@ struct AgentListView: View {
         // visible height — measured). `nil` for the window container and
         // before the first measurement; AppState ignores nil.
         .onAppear { state.setDropdownDesiredPanelHeight(desiredPanelHeight) }
-        .onChange(of: desiredPanelHeight) { state.setDropdownDesiredPanelHeight($0) }
+        .onChange(of: desiredPanelHeight) { _, newValue in state.setDropdownDesiredPanelHeight(newValue) }
     }
 }
 
@@ -427,7 +427,22 @@ private struct AgentListTopBar: View {
             makeItem(
                 "Open as Window",
                 action: #selector(VMenuHandler.openAsWindow),
-                isEnabled: NSApp.activationPolicy() != .regular
+                isEnabled: !state.isAgentsWindowOpen
+            )
+        )
+        // Conversations… (§4.5/§4.6, M35 T8): directly below Open as Window,
+        // NO extra separator — the last group stays "window verbs + Quit".
+        // Disabled while the Conversations window exists (same "disabled when
+        // meaningless" convention as Open as Window; raising it is Dock click
+        // / ⌘Tab's job). The window-open signal is per-window now
+        // (`AppState.openRegularWindowTitles`) because BOTH windows share the
+        // regular-app activation policy — activation policy alone can no
+        // longer tell them apart (M35 T3).
+        menu.addItem(
+            makeItem(
+                "Conversations…",
+                action: #selector(VMenuHandler.openConversations),
+                isEnabled: !state.isConversationsWindowOpen
             )
         )
         menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
@@ -541,6 +556,15 @@ private final class VMenuHandler: NSObject {
         state?.dismissDropdown()
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: AgentsWindow.id)
+    }
+    /// Conversations… (§4.5/§4.6, M35 T8): same open pattern as
+    /// `openSetupCheck` / `openSettings` — dismiss the dropdown, bring the
+    /// app forward (LSUIElement requirement), open the window. Only reachable
+    /// while no Conversations window exists (the item is disabled otherwise).
+    @objc func openConversations(_ sender: Any?) {
+        state?.dismissDropdown()
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow?(id: ConversationsWindow.id)
     }
     @objc func quit(_ sender: Any?) { state?.quit() }
 }

@@ -107,7 +107,10 @@ final class AgentsWindowViewModel: ObservableObject {
     private func noteWindowBecameKey() {
         guard !isVisible else { return }
         isVisible = true
-        switchToRegularApp()
+        // §4.5/§8.30: report to the shared policy owner (AppState), which
+        // flips the app to regular. Both the Agents and Conversations
+        // windows report there so one owner decides the policy (M35 T3).
+        state?.noteRegularWindowOpened(title: AgentsWindow.title)
         refreshElapsedBase()
         // Keep on Top (§4.5/§8.33, M30): re-apply the remembered window
         // level on every open — this open detection is the designated
@@ -128,42 +131,10 @@ final class AgentsWindowViewModel: ObservableObject {
         // stored value is applied on every open and must therefore always
         // reflect the last state the user saw).
         AgentsWindowHeightMemory.save(frameHeight)
-        // §4.5/§8.30 (M27 T1): the Dock icon, ⌘Tab entry and app menu
-        // exist only while the Agents window does — back to the resident
-        // accessory the moment it closes. No activation dance is needed on
-        // the way down: the system hands focus (and the menu bar) to
-        // another app by itself.
-        NSApp.setActivationPolicy(.accessory)
-    }
-
-    /// While the Agents window exists the app is a regular app — Dock,
-    /// ⌘Tab, app menu (§4.5/§8.30, M27 T1). Only the Agents window flips
-    /// this: Settings / Setup Check opened on their own never reach this
-    /// code (this view model's observers are title-filtered).
-    ///
-    /// Ordering measured on-device (macOS 14 harness, M27): after flipping
-    /// an already-active app to `.regular` — and "Open as Window" always
-    /// happens while active, the user just clicked the dropdown — the menu
-    /// bar keeps showing the PREVIOUS app's menus even though
-    /// `NSApp.isActive` is true. Neither activate-after-policy (a no-op
-    /// while active), deactivate+activate, nor a next-turn activate
-    /// refreshes it. The one reliable order: set the policy, hand
-    /// activation to another app (the Dock — always running, shows no menu
-    /// bar of its own), then take it back a beat later.
-    private func switchToRegularApp() {
-        NSApp.setActivationPolicy(.regular)
-        if let dock = NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.apple.dock").first {
-            dock.activate(options: [])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        } else {
-            // No Dock process to bounce through (not seen in practice) —
-            // degrade to a plain activate: the app still becomes regular,
-            // at worst the menu bar lags until the next app switch.
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        // §4.5/§8.30 (M27 T1, M35 T3): report the close to the shared policy
+        // owner, which returns the app to accessory only once the LAST
+        // regular window (Agents or Conversations) is gone.
+        state?.noteRegularWindowClosed(title: AgentsWindow.title)
     }
 
     /// Re-settle the elapsed-time base (§4.5: at open, then every

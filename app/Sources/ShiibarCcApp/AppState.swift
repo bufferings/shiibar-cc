@@ -108,6 +108,20 @@ final class AppState: ObservableObject {
     /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
     /// AppKit-only and can't move there.
     private var periodicReconcileScheduler: NSBackgroundActivityScheduler?
+    /// Drives the Conversations index warming (§4.6/§8.22/§9): kicked once at
+    /// launch and then ~every 10 minutes so a `conversations search`'s
+    /// catch-up stays small (interval/tolerance in `ConversationsIndexWarming`,
+    /// ShiibarCcCore). NO FSEvents (§4.6).
+    private var conversationsIndexScheduler: NSBackgroundActivityScheduler?
+    /// Titles of the currently-open windows that put the app in regular mode
+    /// (§8.30, extended by §4.5 to "the agent list window OR the
+    /// Conversations window"). The app is regular while this is non-empty and
+    /// accessory the moment it empties. Both windows' view models report
+    /// their open/close here so a single owner decides the activation policy
+    /// — two independent writers would race (one closing while the other is
+    /// still open would wrongly drop the app to accessory). Also the enabled
+    /// state for each window's menu verb (Open as Window / Conversations…).
+    @Published private(set) var openRegularWindowTitles: Set<String> = []
 
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
 
@@ -168,6 +182,72 @@ final class AppState: ObservableObject {
         }
         workingAnimationTimer?.invalidate()
         periodicReconcileScheduler?.invalidate()
+        conversationsIndexScheduler?.invalidate()
+    }
+
+    // MARK: - Regular-app windows (§4.5/§8.30)
+
+    /// True while the Agents (Open as Window) window exists — gates the ⌄
+    /// menu's "Open as Window" item (disabled while it's open, §4.5).
+    var isAgentsWindowOpen: Bool {
+        openRegularWindowTitles.contains(AgentsWindow.title)
+    }
+
+    /// True while the Conversations window exists — gates both menus'
+    /// "Conversations…" item (disabled while it's open, §4.5).
+    var isConversationsWindowOpen: Bool {
+        openRegularWindowTitles.contains(ConversationsWindow.title)
+    }
+
+    /// Report that a regular-mode window (Agents or Conversations) has
+    /// opened. The first one flips the app to regular (§8.30); a second one
+    /// opening while already regular is a no-op switch.
+    func noteRegularWindowOpened(title: String) {
+        let wasEmpty = openRegularWindowTitles.isEmpty
+        openRegularWindowTitles.insert(title)
+        if wasEmpty {
+            switchToRegularApp()
+        }
+    }
+
+    /// Report that a regular-mode window has closed. The app returns to
+    /// accessory only once the LAST such window is gone (§4.5's extended
+    /// §8.30 condition).
+    func noteRegularWindowClosed(title: String) {
+        openRegularWindowTitles.remove(title)
+        if openRegularWindowTitles.isEmpty {
+            // §8.30 (M27 T1): back to the resident accessory the moment the
+            // last regular window closes. No activation dance on the way
+            // down — the system hands focus (and the menu bar) to another
+            // app by itself.
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    /// Flip the app to a regular app for as long as a window exists
+    /// (§4.5/§8.30, M27 T1). Ordering measured on-device (macOS 14 harness,
+    /// M27): after flipping an already-active app to `.regular` the menu bar
+    /// keeps showing the PREVIOUS app's menus even though `NSApp.isActive` is
+    /// true. Neither activate-after-policy (a no-op while active),
+    /// deactivate+activate, nor a next-turn activate refreshes it. The one
+    /// reliable order: set the policy, hand activation to another app (the
+    /// Dock — always running, shows no menu bar of its own), then take it
+    /// back a beat later. (Moved here from `AgentsWindowViewModel` so the
+    /// Agents and Conversations windows share one policy owner.)
+    private func switchToRegularApp() {
+        NSApp.setActivationPolicy(.regular)
+        if let dock = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.dock").first {
+            dock.activate(options: [])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        } else {
+            // No Dock process to bounce through (not seen in practice) —
+            // degrade to a plain activate: the app still becomes regular,
+            // at worst the menu bar lags until the next app switch.
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`) every time the
@@ -326,6 +406,8 @@ final class AppState: ObservableObject {
         }
         lifecycle.start()
         schedulePeriodicReconcile()
+        scheduleConversationsIndexWarming()
+        kickConversationsIndexWarming()
     }
 
     /// Start the §4.5/§8.22 periodic reconcile: an `NSBackgroundActivityScheduler`
@@ -361,6 +443,58 @@ final class AppState: ObservableObject {
             }
         }
         periodicReconcileScheduler = scheduler
+    }
+
+    /// Start the §4.6/§8.22 Conversations index warming: an
+    /// `NSBackgroundActivityScheduler` (interval/tolerance from
+    /// `ConversationsIndexWarming`, ShiibarCcCore) that runs
+    /// `conversations index` on the §9 ~10-minute cadence so a search's
+    /// catch-up stays small. Same flow as `schedulePeriodicReconcile` above;
+    /// the OS scheduler owns "don't run while asleep" (§8.22). NO FSEvents —
+    /// display freshness is driven by user actions, not file watching (§4.6).
+    private func scheduleConversationsIndexWarming() {
+        let scheduler = NSBackgroundActivityScheduler(identifier: "cc.shiibar.menubar.conversations-index")
+        scheduler.interval = ConversationsIndexWarming.intervalSeconds
+        scheduler.tolerance = ConversationsIndexWarming.toleranceSeconds
+        scheduler.repeats = true
+        scheduler.qualityOfService = .utility
+        scheduler.schedule { [weak self] completionHandler in
+            guard let self else {
+                completionHandler(.finished)
+                return
+            }
+            Task { @MainActor in
+                self.runConversationsIndexWarming { completionHandler(.finished) }
+            }
+        }
+        conversationsIndexScheduler = scheduler
+    }
+
+    /// Kick one index warming right at launch (§4.6: "at app launch"),
+    /// independent of the scheduler's first fire.
+    private func kickConversationsIndexWarming() {
+        runConversationsIndexWarming(completion: nil)
+    }
+
+    /// Run `conversations index` (no `--json` — this is background warming,
+    /// not a progress-reporting open). Failure is quiet: log only (§4.6). The
+    /// window's own open flow runs `index --json` for visible progress.
+    /// `completion` is called after the subprocess finishes so the scheduler
+    /// can hand `NSBackgroundActivityScheduler` its completion handler.
+    private func runConversationsIndexWarming(completion: (() -> Void)?) {
+        DispatchQueue.global(qos: .utility).async { [helpersDirectory] in
+            // Both exit 0 (indexed) and 1 (build failed) are acceptable
+            // outcomes for a silent warmer — neither should error-log beyond
+            // CLIRunner's own line, so mark both expected.
+            _ = CLIRunner.run(
+                ["conversations", "index"],
+                helpersDirectory: helpersDirectory,
+                expectedExitCodes: [0, 1]
+            )
+            if let completion {
+                Task { @MainActor in completion() }
+            }
+        }
     }
 
     func handle(event: SubscribeEvent) {

@@ -1,0 +1,130 @@
+// Client-side search logic for the Conversations window (DESIGN.md §4.6):
+// deciding when a typed query becomes a real `conversations search` (vs
+// staying on the browse list), and computing in-body hit locations for the
+// preview's hit navigation. The subprocess call and the SwiftUI rendering
+// live in ShiibarCcApp; the decisions and the offset math live here so they
+// can be unit-tested table-style.
+
+import Foundation
+
+/// Tunable numbers for the Conversations window, pinned to DESIGN.md §9 by a
+/// test. The `NSBackgroundActivityScheduler`/subprocess wiring lives in
+/// ShiibarCcApp (AppKit, not unit-testable in this target).
+public enum ConversationsConstants {
+    /// §9: UI search debounce — the delay before the keystroke launches a
+    /// `conversations search` subprocess (200ms).
+    public static let searchDebounceSeconds: Double = 0.2
+    /// §9: a message longer than this many characters is folded behind
+    /// `Show full message` (the DB still holds the full text).
+    public static let messageFoldCharacterLimit: Int = 500
+}
+
+/// The query-term rules the app shares with the CLI search (§4.6): trim
+/// surrounding whitespace (ASCII and full-width), split on whitespace into
+/// words, and keep only words of 2+ characters. If nothing valid remains,
+/// the app stays on the browse list and issues no search (§4.6 — "don't
+/// silently return zero results", so an all-too-short query is browse, not
+/// an empty search).
+public enum ConversationsQuery {
+    /// Valid search terms (2+ characters) in the raw query, in order.
+    public static func validTerms(_ raw: String) -> [String] {
+        raw.split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { $0.count >= 2 }
+    }
+
+    /// Whether a real `conversations search <query>` should be issued for
+    /// this raw query. False = stay on browse (empty-query list).
+    public static func shouldIssueSearch(_ raw: String) -> Bool {
+        !validTerms(raw).isEmpty
+    }
+}
+
+/// One occurrence of a search term in the preview body.
+public struct ConversationHit: Equatable {
+    /// Index into the displayed `messages` array (document order).
+    public let messageIndex: Int
+    /// Character offset of the match start within that message's text.
+    public let start: Int
+    /// Match length in characters.
+    public let length: Int
+
+    public init(messageIndex: Int, start: Int, length: Int) {
+        self.messageIndex = messageIndex
+        self.start = start
+        self.length = length
+    }
+}
+
+/// In-body hit navigation math (§4.6): after `show`, the app computes every
+/// occurrence of each term itself (case-insensitive partial match, the same
+/// meaning as the CLI), in document order. All terms highlight in one color;
+/// only the current position is emphasized. Folding a long message doesn't
+/// hide its hits from the counter — a hit past the fold is still counted and
+/// the fold auto-expands when navigated to.
+public enum ConversationHits {
+    /// Every occurrence of every term across `messageTexts`, in document
+    /// order (message order, then character offset). Case-insensitive,
+    /// no accent folding (Swift's `.caseInsensitive` matches the CLI's
+    /// "case-insensitive partial match, accents distinct" — §7-6).
+    /// Overlapping matches of a single term are counted non-overlapping
+    /// (advance past each match); identical spans produced by two terms are
+    /// de-duplicated.
+    public static func locations(messageTexts: [String], terms: [String]) -> [ConversationHit] {
+        var hits: [ConversationHit] = []
+        for (messageIndex, text) in messageTexts.enumerated() {
+            var perMessage: [ConversationHit] = []
+            for term in terms where !term.isEmpty {
+                perMessage.append(contentsOf: occurrences(of: term, in: text, messageIndex: messageIndex))
+            }
+            // Order this message's hits by start, then length, and drop
+            // exact-span duplicates from overlapping terms.
+            perMessage.sort { ($0.start, $0.length) < ($1.start, $1.length) }
+            var seen = Set<Int>() // start*1_000_003 + length, cheap span key
+            for hit in perMessage {
+                let key = hit.start &* 1_000_003 &+ hit.length
+                if seen.insert(key).inserted {
+                    hits.append(hit)
+                }
+            }
+        }
+        return hits
+    }
+
+    /// Whether navigating to `hit` needs the message expanded first: the
+    /// message is folded and the hit does not fit entirely within the
+    /// visible prefix (§4.6 — folded hits auto-expand on ▲▼ jump).
+    public static func requiresExpansion(hit: ConversationHit, messageText: String) -> Bool {
+        guard isFolded(messageText) else { return false }
+        return hit.start + hit.length > ConversationsConstants.messageFoldCharacterLimit
+    }
+
+    /// Whether a message is folded (longer than the §9 limit).
+    public static func isFolded(_ text: String) -> Bool {
+        text.count > ConversationsConstants.messageFoldCharacterLimit
+    }
+
+    /// The visible prefix of a folded message (first `limit` characters).
+    public static func foldedPrefix(_ text: String) -> String {
+        String(text.prefix(ConversationsConstants.messageFoldCharacterLimit))
+    }
+
+    private static func occurrences(of term: String, in text: String, messageIndex: Int) -> [ConversationHit] {
+        guard !term.isEmpty, !text.isEmpty else { return [] }
+        var result: [ConversationHit] = []
+        var searchStart = text.startIndex
+        let termLength = term.count
+        while searchStart < text.endIndex,
+              let range = text.range(
+                  of: term,
+                  options: .caseInsensitive,
+                  range: searchStart..<text.endIndex
+              ) {
+            let start = text.distance(from: text.startIndex, to: range.lowerBound)
+            result.append(ConversationHit(messageIndex: messageIndex, start: start, length: termLength))
+            // Non-overlapping: continue past this match's end.
+            searchStart = range.upperBound > range.lowerBound ? range.upperBound : text.index(after: range.lowerBound)
+        }
+        return result
+    }
+}

@@ -102,6 +102,22 @@ struct ShiibarCcMenuBarApp: App {
             RemoveStandardMenusCommands()
             RemoveStandardMenusCommands.Extra()
         }
+
+        // Conversations window (§4.6, M35): browse / search / read / resume
+        // the conversation history across folders. Opened via the ⌄ menu and
+        // the app menu's "Conversations…" (disabled while it exists, §4.5).
+        // Same hidden-title-bar chrome as the Agents window (traffic-light
+        // band, `title` = "Conversations"); unlike the Agents window it
+        // remembers BOTH size and position (§9), via the window's own
+        // `setFrameAutosaveName` set in `ConversationsWindowViewModel`.
+        // Read-only over the `shiibar-cc conversations` CLI — no transcript
+        // parsing / SQLite in Swift (§4.6).
+        Window(ConversationsWindow.title, id: ConversationsWindow.id) {
+            ConversationsWindowView(state: appDelegate.state)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultSize(width: ConversationsWindow.defaultWidth, height: ConversationsWindow.defaultHeight)
     }
 }
 
@@ -132,6 +148,19 @@ enum SettingsWindow {
 enum AgentsWindow {
     static let id = "agents"
     static let title = "Agents"
+}
+
+/// The Conversations `Window` scene's stable id/title (§4.6, M35), shared
+/// between the scene declaration above, the `openWindow(id:)` call sites (⌄
+/// menu / app menu), and the window-lifecycle title filter in
+/// `ConversationsWindowViewModel`. Initial size 640×480pt, left pane 280pt
+/// (§9); resizable both axes, size and position remembered.
+enum ConversationsWindow {
+    static let id = "conversations"
+    static let title = "Conversations"
+    static let defaultWidth: CGFloat = 640
+    static let defaultHeight: CGFloat = 480
+    static let leftPaneWidth: CGFloat = 280
 }
 
 @MainActor
@@ -179,13 +208,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Dock-icon click (and any other reopen event) while the app is
-    /// regular brings the Agents window forward (§4.5/§8.30, M27 T1).
+    /// regular brings a regular-mode window forward (§4.5/§8.30, M27 T1).
     /// Reopen can only happen while the app is regular, and the app is
-    /// regular exactly while the Agents window exists — so the target is
-    /// always that window. ⌘Tab needs no code here: activating the app
-    /// raises its visible windows on its own.
+    /// regular exactly while the Agents OR Conversations window exists
+    /// (§4.5, M35 T3) — raise whichever ones are present. ⌘Tab needs no code
+    /// here: activating the app raises its visible windows on its own.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) {
+        let regularTitles = [AgentsWindow.title, ConversationsWindow.title]
+        for window in NSApp.windows where regularTitles.contains(window.title) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
         }

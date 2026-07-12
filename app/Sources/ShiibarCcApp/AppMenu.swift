@@ -47,6 +47,17 @@ final class AppMenuModel: ObservableObject {
     /// facade like the other two, so agent churn can never invalidate the
     /// menu through it.
     @Published private(set) var keepOnTop: Bool
+    /// Whether the Conversations window exists (§4.6, M35 T8) — gates the app
+    /// menu's "Conversations…" item. Routed through this facade like the
+    /// others; window open/close is infrequent, so an invalidation on a real
+    /// change is fine, and agent churn (which never touches it) can't reach
+    /// the menu through it.
+    @Published private(set) var conversationsWindowOpen: Bool
+    /// Whether the Agents (list) window exists (§4.5, M35 T3) — gates "Keep
+    /// on Top", which is Agents-window-only and meaningless when that window
+    /// is absent. Reachable now that the Conversations window can also raise
+    /// the app menu with no Agents window present.
+    @Published private(set) var agentsWindowOpen: Bool
 
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -54,6 +65,8 @@ final class AppMenuModel: ObservableObject {
         hasUnreviewed = state.hasUnreviewed
         sortMode = state.sortMode
         keepOnTop = state.keepAgentsWindowOnTop
+        conversationsWindowOpen = state.isConversationsWindowOpen
+        agentsWindowOpen = state.isAgentsWindowOpen
         // `$agents` emits the NEW array (willSet timing), so deriving from
         // the emitted value — not from `state.hasUnreviewed`, which still
         // reads the old array at that instant — is load-bearing.
@@ -69,6 +82,16 @@ final class AppMenuModel: ObservableObject {
         state.$keepAgentsWindowOnTop
             .removeDuplicates()
             .sink { [weak self] in self?.keepOnTop = $0 }
+            .store(in: &subscriptions)
+        state.$openRegularWindowTitles
+            .map { $0.contains(ConversationsWindow.title) }
+            .removeDuplicates()
+            .sink { [weak self] in self?.conversationsWindowOpen = $0 }
+            .store(in: &subscriptions)
+        state.$openRegularWindowTitles
+            .map { $0.contains(AgentsWindow.title) }
+            .removeDuplicates()
+            .sink { [weak self] in self?.agentsWindowOpen = $0 }
             .store(in: &subscriptions)
     }
 }
@@ -135,10 +158,19 @@ struct AppMenuCommands: Commands {
                 get: { menuModel.keepOnTop },
                 set: { state.setKeepAgentsWindowOnTop($0) }
             ))
+            // §4.5/M35 T3: Agents-window-only — disabled when the list window
+            // is absent (the app menu can now also be raised by the
+            // Conversations window, which has no window level to pin).
+            .disabled(!menuModel.agentsWindowOpen)
             // §4.5: standard close-the-key-window behavior. Lives in the
             // app menu because there is no File menu to host ⌘W.
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w")
+            // Conversations… (§4.5/§4.6, M35 T8): below Close Window, above
+            // Quit — identical to the ⌄ menu's item. Disabled while the
+            // Conversations window exists (via the deduped facade).
+            Button("Conversations…") { openWindow(id: ConversationsWindow.id) }
+                .disabled(menuModel.conversationsWindowOpen)
             // §4.5/§8.8: same Quit path as the ⌄ item — waits for the
             // daemon's shutdown ack (with `AppState.quit`'s hard deadline),
             // never a bare `terminate`.

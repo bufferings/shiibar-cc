@@ -33,6 +33,28 @@ another, grows as tall as you like, and while it's open the app shows up in
 the Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you
 can also switch the appearance between System, Light and Dark).
 
+### Conversations
+
+Alongside the live status view, Shiibar CC keeps a searchable index of your
+Claude Code conversation history across every folder. Open it from the `⌄`
+menu (or the app menu) → Conversations…: a two-pane window where you can
+**browse** recent conversations, **search** their full text across folders,
+**read** any one from the bottom (latest) up, and **resume** a past one in a
+new iTerm2 window. Search is incremental and matches whole words of two or
+more characters; multiple words are AND-ed.
+
+The same search is available from scripts, so you don't need the window to
+find a conversation:
+
+```sh
+shiibar-cc conversations search "auth middleware"   # add --json for a stable
+                                                     # machine-readable shape
+```
+
+Conversations reads Claude Code's transcripts, an undocumented internal
+format; a Claude Code update may break the list or preview until Shiibar CC
+catches up.
+
 <img src="docs/assets/menubar-dropdown.png" width="500"
      alt="The Shiibar CC dropdown, grouped by status: two sessions waiting
           on permission (one unreviewed, with a red badge), one working,
@@ -78,7 +100,7 @@ specific feature — nothing is requested speculatively.
 
 ### Homebrew (recommended)
 
-**Requirements**: macOS 13 (Ventura) or later, Apple Silicon, and
+**Requirements**: macOS 14 (Sonoma) or later, Apple Silicon, and
 [Homebrew](https://brew.sh). Intel Macs are not supported — see the source
 build below.
 
@@ -127,7 +149,7 @@ Building from source is a development setup, not an Intel-Mac substitute
 for the Homebrew cask — there is no Intel build, and none is planned (there
 is no Intel Mac or CI runner to verify one on).
 
-**Requirements**: macOS 13 or later, a Rust toolchain via
+**Requirements**: macOS 14 (Sonoma) or later, a Rust toolchain via
 [rustup](https://rustup.rs) (the pinned version in `rust-toolchain.toml` is
 installed automatically), and Xcode Command Line Tools for building the app
 (`swift build`). Running the app's own test suite (`swift test`, not

@@ -20,7 +20,7 @@ cask "shiibar-cc" do
   desc "Menu bar app that tracks Claude Code status and jumps to its iTerm2 tab"
   homepage "https://github.com/bufferings/shiibar-cc"
 
-  depends_on macos: :ventura
+  depends_on macos: :sonoma
   depends_on arch:  :arm64
 
   app "Shiibar CC.app"
