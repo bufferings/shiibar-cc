@@ -33,6 +33,7 @@ fn main() {
         Some("reconcile") => cmd_reconcile(&rest),
         Some("remove") => cmd_remove(&rest),
         Some("seen") => cmd_seen(&rest),
+        Some("resume") => cmd_resume(&rest),
         Some("doctor") => cmd_doctor(&rest),
         _ => {
             print_usage();
@@ -44,7 +45,7 @@ fn main() {
 
 fn print_usage() {
     eprintln!(
-        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|seen|doctor> ..."
+        "usage: shiibar-cc <report|list|wait|watch|focus|focused|reconcile|remove|seen|resume|doctor> ..."
     );
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
@@ -192,6 +193,22 @@ fn cmd_seen(args: &[String]) -> i32 {
         eprintln!("{e}");
     }
     code
+}
+
+fn cmd_resume(args: &[String]) -> i32 {
+    let parsed = match shiibar_cc::resume_cmd::parse_resume_args(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let runner = Osascript;
+    let report = shiibar_cc::resume_cmd::run_resume(&parsed.cwd, &parsed.session_id, &runner);
+    if let Some(m) = report.message {
+        eprintln!("{m}");
+    }
+    report.exit_code
 }
 
 fn cmd_doctor(args: &[String]) -> i32 {

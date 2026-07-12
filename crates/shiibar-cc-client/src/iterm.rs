@@ -128,6 +128,26 @@ fn escape_as_string_literal(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Wrap `s` in POSIX shell single quotes, safe against any byte the shell
+/// treats specially (spaces, `$`, backticks, double quotes, `;`, ...):
+/// single quotes make everything between them literal except a single
+/// quote itself, so each embedded `'` is closed, escaped as `\'`, and
+/// reopened (`'\''`). Used by `build_resume_script` (DESIGN.md §4.3) for
+/// the `cd`/`claude --resume` command line sent to the new window's shell.
+fn escape_shell_single_quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 // ---------------------------------------------------------------------
 // Pure: AppleScript generation
 // ---------------------------------------------------------------------
@@ -226,6 +246,61 @@ end if
     .to_string()
 }
 
+/// The `cd <cwd> && claude --resume <session_id>` shell command line run in
+/// the new window (DESIGN.md §4.3). Each argument is POSIX single-quote
+/// escaped independently — `cwd` may contain spaces, quotes, or `$`, and
+/// `session_id` is expected to be a UUID but is escaped the same way rather
+/// than trusted (§4.3: "escape it, don't validate it").
+fn build_resume_shell_command(cwd: &str, session_id: &str) -> String {
+    format!(
+        "cd {} && claude --resume {}",
+        escape_shell_single_quoted(cwd),
+        escape_shell_single_quoted(session_id)
+    )
+}
+
+/// AppleScript that opens a *new* iTerm2 window and runs
+/// `claude --resume <session_id>` there, `cd`-ed into `cwd` (DESIGN.md
+/// §4.3, task brief T1). Unlike `build_focus_script`, this does NOT guard
+/// on `application "iTerm2" is running`: a bare `tell application "iTerm2"`
+/// launches iTerm2 if it's not already running, which is the wanted
+/// behavior here (a verb that opens a new window has nothing to fail to
+/// find, unlike `focus` scanning for an existing session).
+///
+/// Launch method: `write text` into the new window's session, rather than
+/// `create window with default profile command "..."`. `write text` types
+/// into the session's normal interactive login shell, which sources the
+/// user's shell rc files and so sees the same PATH the user's own terminal
+/// sees — this matters because `claude` is commonly reachable only through
+/// a PATH assembled by rc-file logic (a version manager shim, an alias,
+/// etc.), whereas `create window ... command "..."` runs the given command
+/// directly as the session's process, bypassing login-shell PATH setup.
+/// This choice could not be confirmed on a real machine in this environment
+/// (no TCC Automation grant / no iTerm2 available) — it is the provisional
+/// method the task brief calls for in that case; the owner's real-machine
+/// smoke test is what confirms or overturns it (see M33 completion report).
+///
+/// The shell command line is embedded as an AppleScript string literal, so
+/// it goes through `escape_as_string_literal` on top of
+/// `escape_shell_single_quoted` — the double escaping the task brief flags
+/// (AppleScript string quoting, then shell quoting inside that string).
+/// Prints `OK` as the last line of stdout on success.
+pub fn build_resume_script(cwd: &str, session_id: &str) -> String {
+    let shell_command = build_resume_shell_command(cwd, session_id);
+    let escaped_command = escape_as_string_literal(&shell_command);
+    format!(
+        r#"tell application "iTerm2"
+    activate
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
+        write text "{escaped_command}"
+    end tell
+end tell
+return "OK"
+"#
+    )
+}
+
 // ---------------------------------------------------------------------
 // Pure: osascript output parsing
 // ---------------------------------------------------------------------
@@ -301,6 +376,22 @@ pub fn parse_probe_output(output: &AppleScriptOutput) -> ItermResult<ProbeOutcom
     }
 }
 
+/// Parse `build_resume_script`'s output. There's no "no match" outcome here
+/// (unlike `parse_focus_output`) — `open_resume_window` always creates a
+/// new window, it never searches for an existing one.
+pub fn parse_resume_output(output: &AppleScriptOutput) -> ItermResult<()> {
+    if is_permission_denied(output) {
+        return Err(ItermError::PermissionDenied);
+    }
+    if !output.success {
+        return Err(ItermError::Other(output.stderr.trim().to_string()));
+    }
+    match output.stdout.trim() {
+        "OK" => Ok(()),
+        other => Err(bad_output(other)),
+    }
+}
+
 // ---------------------------------------------------------------------
 // Impure: wire pure generation/parsing to a runner
 // ---------------------------------------------------------------------
@@ -334,6 +425,24 @@ pub fn probe(runner: &dyn AppleScriptRunner) -> ItermResult<ProbeOutcome> {
         .run(&build_probe_script())
         .map_err(|e| ItermError::Other(e.to_string()))?;
     parse_probe_output(&output)
+}
+
+/// `open_resume_window(cwd, session_id)` (DESIGN.md §4.3): open a new
+/// iTerm2 window and run `claude --resume <session_id>` there, `cd`-ed into
+/// `cwd`. Called by `shiibar-cc resume` (§4.4), which is what Conversations'
+/// Resume button shells out to (§4.6). `cwd` and `session_id` are taken as
+/// given and escaped, not validated — `shiibar-cc resume` is responsible for
+/// checking `cwd` is an absolute, existing directory before this is called.
+pub fn open_resume_window(
+    cwd: &str,
+    session_id: &str,
+    runner: &dyn AppleScriptRunner,
+) -> ItermResult<()> {
+    let script = build_resume_script(cwd, session_id);
+    let output = runner
+        .run(&script)
+        .map_err(|e| ItermError::Other(e.to_string()))?;
+    parse_resume_output(&output)
 }
 
 // ---------------------------------------------------------------------
@@ -627,6 +736,115 @@ mod tests {
         assert!(script.contains("NOT_RUNNING"));
     }
 
+    // ---- escape_shell_single_quoted ----
+
+    #[test]
+    fn escape_shell_single_quoted_wraps_plain_text() {
+        assert_eq!(escape_shell_single_quoted("plain"), "'plain'");
+    }
+
+    #[test]
+    fn escape_shell_single_quoted_handles_spaces_and_dollar_and_backticks() {
+        // Single-quoting makes the shell treat these as plain bytes; no
+        // separate handling needed for any of them.
+        assert_eq!(
+            escape_shell_single_quoted("has space $VAR `cmd`"),
+            "'has space $VAR `cmd`'"
+        );
+    }
+
+    #[test]
+    fn escape_shell_single_quoted_escapes_embedded_single_quotes() {
+        assert_eq!(escape_shell_single_quoted("it's"), r#"'it'\''s'"#);
+    }
+
+    #[test]
+    fn escape_shell_single_quoted_handles_empty_string() {
+        assert_eq!(escape_shell_single_quoted(""), "''");
+    }
+
+    // ---- build_resume_script ----
+
+    #[test]
+    fn resume_script_launches_iterm2_without_a_running_guard() {
+        // Unlike build_focus_script, this must NOT gate on "is running" —
+        // open_resume_window is expected to launch iTerm2 (DESIGN.md §4.3).
+        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        assert!(!script.contains("is running"));
+        assert!(script.contains(r#"tell application "iTerm2""#));
+        assert!(script.contains("create window"));
+    }
+
+    #[test]
+    fn resume_script_contains_the_cd_and_resume_command() {
+        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        assert!(script.contains("cd '/Users/example/project'"));
+        assert!(script.contains("claude --resume 'SESSION-1'"));
+        assert!(script.contains("write text"));
+        assert!(script.contains("\"OK\""));
+    }
+
+    #[test]
+    fn resume_script_double_escapes_a_cwd_with_spaces_and_quotes() {
+        // A cwd like `/Users/example/My "great" project` needs shell
+        // single-quote escaping first (a no-op here: double quotes need no
+        // escaping inside a shell single-quoted string), then AppleScript
+        // string-literal escaping on top of that (task brief T1: "double
+        // escaping") — which is what turns the embedded `"` into `\"`.
+        let script = build_resume_script(r#"/Users/example/My "great" project"#, "SESSION-1");
+        assert!(script.contains(r#"cd '/Users/example/My \"great\" project'"#));
+    }
+
+    #[test]
+    fn resume_script_escapes_a_cwd_containing_a_single_quote() {
+        // Shell layer: `O'Brien` -> `O'\''Brien` (close quote, escaped
+        // quote, reopen quote). AppleScript layer then doubles that
+        // sequence's one backslash into two, since the shell-escaped text
+        // is itself embedded as an AppleScript string literal.
+        let script = build_resume_script("/Users/example/O'Brien", "SESSION-1");
+        assert!(script.contains(r#"cd '/Users/example/O'\\''Brien'"#));
+    }
+
+    #[test]
+    fn resume_script_escapes_a_session_id_needing_shell_escaping() {
+        // session_id is expected to be a UUID, but is escaped rather than
+        // trusted (task brief T1). Same double-escaping as the cwd case.
+        let script = build_resume_script("/Users/example/project", "weird'id");
+        assert!(script.contains(r#"claude --resume 'weird'\\''id'"#));
+    }
+
+    // ---- parse_resume_output ----
+
+    #[test]
+    fn parse_resume_output_ok() {
+        assert_eq!(parse_resume_output(&out(true, "OK\n", "")), Ok(()));
+    }
+
+    #[test]
+    fn parse_resume_output_permission_denied() {
+        let stderr = "Not authorized to send Apple events to iTerm2. (-1743)";
+        assert_eq!(
+            parse_resume_output(&out(false, "", stderr)),
+            Err(ItermError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn parse_resume_output_other_failure() {
+        assert_eq!(
+            parse_resume_output(&out(false, "", "some other osascript error")),
+            Err(ItermError::Other("some other osascript error".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_resume_output_unexpected_stdout_is_an_error() {
+        assert!(matches!(
+            parse_resume_output(&out(true, "garbage", "")),
+            Err(ItermError::Other(_))
+        ));
+    }
+
     // ---- osascript output parsing ----
 
     fn out(success: bool, stdout: &str, stderr: &str) -> AppleScriptOutput {
@@ -783,6 +1001,32 @@ mod tests {
             output: out(true, "NOT_RUNNING\n", ""),
         };
         assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
+    }
+
+    #[test]
+    fn open_resume_window_success_end_to_end_with_fake_runner() {
+        let runner = FakeRunner {
+            output: out(true, "OK\n", ""),
+        };
+        assert_eq!(
+            open_resume_window("/Users/example/project", "SESSION-1", &runner),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn open_resume_window_permission_denied_end_to_end_with_fake_runner() {
+        let runner = FakeRunner {
+            output: out(
+                false,
+                "",
+                "Not authorized to send Apple events to iTerm2. (-1743)",
+            ),
+        };
+        assert_eq!(
+            open_resume_window("/Users/example/project", "SESSION-1", &runner),
+            Err(ItermError::PermissionDenied)
+        );
     }
 
     // ---- iterm_targets: build_iterm_targets_script / parsing ----
