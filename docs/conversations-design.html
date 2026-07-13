@@ -81,6 +81,10 @@
   .ans p { margin:0 0 8px; }
   .ans pre { margin:0 0 8px; background:var(--codebg); border-radius:8px; padding:9px 12px; overflow-x:auto;
     font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.55; }
+  .tbl { border:1px solid var(--line); border-radius:8px; overflow-x:auto; margin:0 0 8px; max-width:100%; width:fit-content; }
+  .tbl table { border-collapse:collapse; font-size:13px; line-height:1.5; white-space:nowrap; }
+  .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line); vertical-align:top; }
+  .tbl th { border-top:0; font-weight:600; background:var(--card); }
   .expand { font-size:11px; color:var(--sel); }
   .expand .cnt { color:var(--text); background:var(--hl); border-radius:4px; padding:0 5px; font-size:10px; font-weight:600; }
   .hl { background:var(--hl); border-radius:2px; }
@@ -196,6 +200,11 @@ scripts/release.sh draft</pre>
     <li><strong>Claude の返答 = Markdown を描画</strong>(描画範囲は DESIGN.md §4.6):
       コードブロックはモノスペース + 淡い背景 + 横スクロール、インラインコード・強調・見出し・
       箇条書きも描画</li>
+    <li><strong>パイプ表はグリッドで描画</strong>: ヘッダ行はセミボールド + 淡い背景、行間に罫線、
+      全列左揃え(列揃え指定は無視)。セルの中のインライン(コード・強調)も効く。
+      表は内容幅のまま(本文幅いっぱいに伸ばさない)で、広い表はコードブロックと同じく
+      表の中だけ横スクロール。等幅整形の器に載せる形は採らない — 日本語のグリフ幅が
+      モノスペースで揃わず、列が崩れる(DESIGN.md §8.37)</li>
     <li><strong>返答の先頭に ⏺ マーカー(ぶら下げ)</strong>: 1 つの指示に返答が連発しても境目が
       読めるよう、すべての Claude の返答の先頭に淡い二次色の小さな ⏺ を付ける(Claude Code の
       ターミナルと同じ文法。連発時だけの条件分岐はしない)。マーカーは本文の左に<strong>ぶら下げ</strong>、
@@ -204,9 +213,23 @@ scripts/release.sh draft</pre>
       ビューの状態記号とは別物・色分けしない)。⏺ は描画後テキストに含めない
       (ヒット計算・畳み境界の対象外 — DESIGN.md §4.6)</li>
     <li><strong>読む幅の上限</strong>: 本文の行長は約 60em で頭打ち。ウィンドウを広げても行が
-      間延びしない(コードブロックはこの上限の内側で横スクロール)</li>
+      間延びしない(コードブロック・表はこの上限の内側で横スクロール)</li>
     <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt</li>
   </ul>
+  <div class="mock">
+    <div class="mock-label">表の描画(グリッド・セル内のインラインも効く)</div>
+    <div class="strip" style="max-width:640px; background:var(--panebg)">
+      <div class="ans" style="padding:0"><span class="dot">⏺</span><div class="body">
+        <p>I found two broken links (both return <code>000</code>):</p>
+        <div class="tbl"><table>
+          <tr><th>Post</th><th>Broken link</th><th>Status</th></tr>
+          <tr><td>postgres-indexes</td><td><code>http://wiki.postgresql.org.example/Index_Maintenance</code></td><td>Real page exists ✅</td></tr>
+          <tr><td>rust-error-handling</td><td><code>http://blog.defunct-site.example/rust-errors</code></td><td>Dead site, <strong>no snapshot</strong> ❌</td></tr>
+        </table></div>
+        <p>The Postgres link is unambiguous — I'll fix that now.</p>
+      </div></div>
+    </div>
+  </div>
 
   <h2>search(2 文字以上): ヒットは「どこにあるか」まで見せる</h2>
   <ul>
