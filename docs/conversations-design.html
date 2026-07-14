@@ -93,9 +93,16 @@
   .hl { background:var(--hl); border-radius:2px; }
   .hlcur { background:var(--hlcur); border-radius:2px; }
 
-  .ticks { position:absolute; top:0; bottom:0; right:1px; width:8px; pointer-events:none; }
-  .tick { position:absolute; right:0; width:8px; height:3px; border-radius:1.5px; background:var(--hl); }
-  .tick.cur { background:var(--hlcur); }
+  .mm { position:absolute; top:0; bottom:0; right:0; width:20px; }
+  .mm .m { position:absolute; left:4px; right:4px; border-radius:1px; }
+  .mm .band { background:rgba(127,127,127,.34); }
+  .mm .txt { background:rgba(127,127,127,.16); }
+  .mm .codeb { background:rgba(127,127,127,.24); }
+  .mm .hit { left:2px; right:2px; height:2px; background:var(--hl); }
+  .mm .hit.cur { background:var(--hlcur); }
+  .mm .thumb { left:0; right:0; border-radius:5px; background:rgba(127,127,127,.22); }
+  .endcap { display:flex; align-items:center; gap:10px; color:var(--menu-text2); font-size:11px; margin:14px 16px 4px; }
+  .endcap::before, .endcap::after { content:""; flex:1; height:1px; background:var(--line); }
   .actions { display:flex; justify-content:flex-end; gap:8px; padding:10px 16px 12px; border-top:1px solid var(--line); }
   .btn { background:var(--sel); color:#fff; border-radius:6px; padding:4px 16px; font-size:12px; font-weight:600; }
 
@@ -186,6 +193,16 @@ scripts/release.sh draft</pre>
               <p>はい。hooks が無変更でも <code>check-version.sh</code> の三点一致検査があるので、
                 <code>plugin.json</code> も 0.4.0 に上げます。</p>
             </div></div>
+            <div class="endcap">Latest message · 3h ago</div>
+          </div>
+          <div class="mm">
+            <span class="m band" style="top:2%; height:2.5%"></span>
+            <span class="m txt" style="top:6%; height:22%"></span>
+            <span class="m codeb" style="top:29%; height:9%"></span>
+            <span class="m txt" style="top:40%; height:18%"></span>
+            <span class="m band" style="top:61%; height:2.5%"></span>
+            <span class="m txt" style="top:65%; height:31%"></span>
+            <span class="m thumb" style="top:62%; height:38%"></span>
           </div>
           <div class="actions"><span class="btn">Resume</span></div>
         </div>
@@ -225,7 +242,15 @@ scripts/release.sh draft</pre>
       (ヒット計算・畳み境界の対象外 — DESIGN.md §4.6)</li>
     <li><strong>読む幅の上限</strong>: 本文の行長は約 60em で頭打ち。ウィンドウを広げても行が
       間延びしない(コードブロックと、折り返してもなお溢れる表は、この上限の内側で横スクロール)</li>
-    <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt</li>
+    <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt。
+      <strong>行間・段落間・ブロック間隔・帯の余白は本ページの CSS 値が実装の正</strong>(DESIGN.md §8.39)</li>
+    <li><strong>ミニマップ = スクロールバー</strong>(右端・常時・幅 20pt): 会話全体の略図
+      (帯 = 濃い縞・本文 = 淡い塊・コード = 中間。文字は描かない)+ 半透明グレーのつまみ。
+      ドラッグでスクロール・ホバーで濃く・地のクリックでジャンプ。右ペイン内の OS スクロールバーは
+      出さない(DESIGN.md §4.6 / §8.39)</li>
+    <li><strong>下端の手がかり</strong>: 最後のメッセージの下に終端マーカー
+      <code>Latest message · 3h ago</code>(罫線ではさんだ淡い一行)。上に続きがある間だけ
+      ヘッダ下に薄いスクロールシャドウ(最上部で消える)</li>
   </ul>
   <div class="mock">
     <div class="mock-label">表の描画(グリッド・セル内のインラインも効く)</div>
@@ -254,15 +279,14 @@ scripts/release.sh draft</pre>
       前(‹・⇧⌘G)= 古い方へ。端まで行ったら反対側へ折り返す。
       ヒットが 1 件でも押下のたびに現在のヒットへスクロールする。
       初期位置は<strong>最新のヒット</strong></li>
-    <li><strong>スクロールバーのヒット目盛り</strong>: 右端に、会話全体のどこにヒットが散っているかの
-      目盛りを重ねる(現在位置だけ濃い色)。画面外・畳みの中のヒットの存在がここで見える。
-      位置はヒットを含むメッセージ単位の近似でよい</li>
+    <li><strong>ヒットの分布はミニマップに乗る</strong>: ヒットの線(現在位置だけ濃い色)が
+      ミニマップに重なる。画面外・畳みの中のヒットの存在がここで見える</li>
     <li>畳まれたメッセージ(下記)の見えない部分にヒットがあるときは、展開ボタンに
       <strong>件数バッジ</strong>(<code>N matches</code>・ハイライト色)を付ける</li>
     <li>絞り込み中のステータス行は <code>N of M conversations</code></li>
   </ul>
   <div class="mock">
-    <div class="mock-label">「tag」で検索・1/4 に位置。畳みの中に 2 件・右端が目盛り</div>
+    <div class="mock-label">「tag」で検索・1 of 4 に位置。畳みの中に 2 件・右端がミニマップ(ヒットの線つき)</div>
     <div class="win">
       <div class="cols">
         <div class="side">
@@ -291,11 +315,18 @@ scripts/release.sh draft</pre>
                 publish 前スモークの詳細は… <span class="expand">Show full message <span class="cnt">2 matches</span></span></p>
             </div></div>
           </div>
-          <div class="ticks">
-            <span class="tick cur" style="top:44%"></span>
-            <span class="tick" style="top:46%"></span>
-            <span class="tick" style="top:73%"></span>
-            <span class="tick" style="top:76%"></span>
+          <div class="mm">
+            <span class="m band" style="top:2%; height:2.5%"></span>
+            <span class="m txt" style="top:6%; height:10%"></span>
+            <span class="m codeb" style="top:17%; height:8%"></span>
+            <span class="m hit cur" style="top:19%"></span>
+            <span class="m hit" style="top:22%"></span>
+            <span class="m txt" style="top:27%; height:22%"></span>
+            <span class="m hit" style="top:40%"></span>
+            <span class="m hit" style="top:44%"></span>
+            <span class="m band" style="top:52%; height:2.5%"></span>
+            <span class="m txt" style="top:56%; height:40%"></span>
+            <span class="m thumb" style="top:1%; height:38%"></span>
           </div>
           <div class="actions"><span class="btn">Resume</span></div>
         </div>
