@@ -67,7 +67,9 @@
   .hdr .hp { font-size:11px; color:var(--menu-text2); margin-top:1px; }
   .findbar { display:flex; align-items:center; gap:8px; padding:4px 16px; font-size:11px; color:var(--menu-text2);
     border-bottom:1px solid var(--line); }
-  .findbar .nav { padding:1px 7px; border-radius:5px; background:rgba(127,127,127,.14); }
+  .findbar .seg { display:inline-flex; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .findbar .nav { padding:1px 9px; background:rgba(127,127,127,.14); }
+  .findbar .nav + .nav { border-left:1px solid var(--line); }
 
   .doc { flex:1; padding:12px 0 16px; overflow:hidden; }
   .prompt { display:flex; gap:9px; font-size:13.5px; line-height:1.6;
@@ -244,8 +246,11 @@ scripts/release.sh draft</pre>
     <li>行の形は browse と同じ(スニペットは出さない — 選択すれば即座に全文とヒットが見えるため)</li>
     <li>複数語(空白区切り)は AND。ハイライトは全語同色・現在位置のみ濃く(DESIGN.md §4.6)</li>
     <li>行を選ぶと、描画後のテキストに対して語の出現をアプリが計算し、<strong>本文にヒットが 1 件以上ある
-      ときだけ</strong>右ペインの上に<strong>検索バー行</strong>(文書順カウンタ + ▲ = 古い方へ /
-      ▼ = 新しい方へ)を出す(0 件なら出さない)。初期位置は<strong>最新のヒット</strong></li>
+      ときだけ</strong>右ペインの上に<strong>検索バー行</strong>を出す(0 件なら出さない)。
+      形は macOS 標準の文書内検索: カウンタ <code>N of M</code> + <strong>‹ › の
+      セグメンテッドコントロール</strong>(ツールチップ付き)。次(›・⌘G)= 新しい方へ /
+      前(‹・⇧⌘G)= 古い方へ。ヒットが 1 件でも押下のたびに現在のヒットへスクロールする。
+      初期位置は<strong>最新のヒット</strong></li>
     <li><strong>スクロールバーのヒット目盛り</strong>: 右端に、会話全体のどこにヒットが散っているかの
       目盛りを重ねる(現在位置だけ濃い色)。画面外・畳みの中のヒットの存在がここで見える。
       位置はヒットを含むメッセージ単位の近似でよい</li>
@@ -268,7 +273,7 @@ scripts/release.sh draft</pre>
         </div>
         <div class="main">
           <div class="hdr"><div class="ht">v0.4.0 リリースの段取り</div><div class="hp">~/Documents/my/shiibar-cc · 3h ago</div></div>
-          <div class="findbar"><span>1/4</span><span class="nav">▲</span><span class="nav">▼</span></div>
+          <div class="findbar"><span>1 of 4</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
           <div class="doc">
             <div class="prompt"><span class="g">❯</span><span>v0.4.0 のリリース手順を教えて</span></div>
             <div class="ans"><span class="dot">⏺</span><div class="body">
@@ -302,7 +307,7 @@ scripts/release.sh draft</pre>
     <li>展開したメッセージの末尾には <code>Show less</code> — クリックで畳み直す
       (畳み直したら視点がそのメッセージから飛ばないようスクロールを寄せる)。
       展開状態は会話の選択を切り替えたら破棄</li>
-    <li>▲▼ で畳みの中のヒットへジャンプしたら自動で展開(DESIGN.md §4.6)</li>
+    <li>‹ › で畳みの中のヒットへジャンプしたら自動で展開(DESIGN.md §4.6)</li>
   </ul>
 
   <h2>文字サイズ</h2>
@@ -336,7 +341,8 @@ scripts/release.sh draft</pre>
     <li><strong>右ペインのメッセージ面は WKWebView</strong>(DESIGN.md §4.6 / §8.38)。本ページの
       メッセージ面の CSS(帯・⏺・コードブロック・表・ハイライト)は誌面の例示であると同時に、
       実装のスタイルシートの下敷きでもある。ヘッダ・検索バー行・Resume・一覧はネイティブ</li>
-    <li>初期サイズ 640×480pt(サイドバー 250pt)。縦横リサイズ可・サイズと位置を記憶(DESIGN.md §9)</li>
+    <li>初期サイズ 640×480pt。縦横リサイズ可・サイズと位置を記憶。サイドバー幅は境界の
+      ドラッグで可変(初期 250pt・200〜400pt)・幅を記憶(DESIGN.md §9)</li>
     <li>検索欄・選択色・ホバーの作法はドロップダウン(menubar-design.html)と共通。
       本ページの CSS 値(ハイライト色・帯の明度含む)は誌面上の例示で、実装はシステムの色・素材に追従させる
       (サイドバーは NSVisualEffectView のサイドバー素材相当)</li>
