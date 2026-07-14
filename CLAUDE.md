@@ -23,6 +23,10 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
   a path built at runtime from a temp dir. Fixtures and tests must be portable across machines.
 - Tests must mirror DESIGN.md §3.4 exactly (table-driven). Never weaken a test or the spec to make an implementation pass.
 - All state paths go through the state dir (`SHIIBAR_CC_STATE_DIR` override, default `~/.local/state/shiibar-cc/`). Tests MUST use a temp state dir and never touch the real one.
+- More generally, tests must never touch machine state outside their sandbox: no real browser
+  launches (`NSWorkspace.open`), no `NSPasteboard.general`, no network access, no real state dir
+  or home. Make outward actions injectable and verify them with spies. Fixture URLs use a
+  reserved, non-resolving domain (e.g. `https://example.invalid/`).
 - iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-cc-client` (design principle 2).
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
 
