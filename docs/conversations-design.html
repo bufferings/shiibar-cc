@@ -25,7 +25,7 @@
   p.lede { color:var(--text2); margin:0 0 8px; max-width:46em; }
   ul { margin:8px 0; padding-left:1.4em; }
   li { margin:3px 0; }
-  code { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.88em; background:var(--card); padding:1px 5px; border-radius:4px; }
+  code { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.88em; background:var(--card); padding:2px 5px; border-radius:4px; }
   kbd { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:11px; background:var(--card);
     border:1px solid var(--line); border-radius:4px; padding:0 5px; }
 
@@ -82,8 +82,9 @@
   .ans pre { margin:0 0 8px; background:var(--codebg); border-radius:8px; padding:9px 12px; overflow-x:auto;
     font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.55; }
   .tbl { border:1px solid var(--line); border-radius:8px; overflow-x:auto; margin:0 0 8px; max-width:100%; width:fit-content; }
-  .tbl table { border-collapse:collapse; font-size:13px; line-height:1.5; white-space:nowrap; }
-  .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line); vertical-align:top; }
+  .tbl table { border-collapse:collapse; font-size:13px; line-height:1.5; }
+  .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line); vertical-align:top;
+    max-width:28em; overflow-wrap:break-word; }
   .tbl th { border-top:0; font-weight:600; background:var(--card); }
   .expand { font-size:11px; color:var(--sel); }
   .expand .cnt { color:var(--text); background:var(--hl); border-radius:4px; padding:0 5px; font-size:10px; font-weight:600; }
@@ -202,9 +203,15 @@ scripts/release.sh draft</pre>
       箇条書きも描画</li>
     <li><strong>パイプ表はグリッドで描画</strong>: ヘッダ行はセミボールド + 淡い背景、行間に罫線、
       全列左揃え(列揃え指定は無視)。セルの中のインライン(コード・強調)も効く。
-      表は内容幅のまま(本文幅いっぱいに伸ばさない)で、広い表はコードブロックと同じく
-      表の中だけ横スクロール。等幅整形の器に載せる形は採らない — 日本語のグリフ幅が
+      表は内容幅のまま(本文幅いっぱいに伸ばさない)。<strong>セルは幅の上限(約 28em)で
+      折り返し</strong>、それでも溢れる表だけコードブロックと同じく表の中で横スクロール
+      (DESIGN.md §8.38)。等幅整形の器に載せる形は採らない — 日本語のグリフ幅が
       モノスペースで揃わず、列が崩れる(DESIGN.md §8.37)</li>
+    <li><strong>選択とコピー</strong>: メッセージをまたぐ連続選択ができる。⏺ マーカー・
+      展開/畳みボタンなどの操作部品は選択・コピーに含めない。右クリックは
+      <strong>Copy(⌘C)/ Copy as Markdown(⇧⌘C)</strong>の 2 項目(ショートカット併記)。
+      Copy = 表示どおり、Copy as Markdown = 選択が触れているメッセージの原文を丸ごと。
+      選択が無いときは Copy は disabled、Copy as Markdown はカーソル下のメッセージ(DESIGN.md §4.6)</li>
     <li><strong>返答の先頭に ⏺ マーカー(ぶら下げ)</strong>: 1 つの指示に返答が連発しても境目が
       読めるよう、すべての Claude の返答の先頭に淡い二次色の小さな ⏺ を付ける(Claude Code の
       ターミナルと同じ文法。連発時だけの条件分岐はしない)。マーカーは本文の左に<strong>ぶら下げ</strong>、
@@ -213,7 +220,7 @@ scripts/release.sh draft</pre>
       ビューの状態記号とは別物・色分けしない)。⏺ は描画後テキストに含めない
       (ヒット計算・畳み境界の対象外 — DESIGN.md §4.6)</li>
     <li><strong>読む幅の上限</strong>: 本文の行長は約 60em で頭打ち。ウィンドウを広げても行が
-      間延びしない(コードブロック・表はこの上限の内側で横スクロール)</li>
+      間延びしない(コードブロックと、折り返してもなお溢れる表は、この上限の内側で横スクロール)</li>
     <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt</li>
   </ul>
   <div class="mock">
@@ -325,6 +332,9 @@ scripts/release.sh draft</pre>
 
   <h2>実装ノート</h2>
   <ul>
+    <li><strong>右ペインのメッセージ面は WKWebView</strong>(DESIGN.md §4.6 / §8.38)。本ページの
+      メッセージ面の CSS(帯・⏺・コードブロック・表・ハイライト)は誌面の例示であると同時に、
+      実装のスタイルシートの下敷きでもある。ヘッダ・検索バー行・Resume・一覧はネイティブ</li>
     <li>初期サイズ 640×480pt(サイドバー 250pt)。縦横リサイズ可・サイズと位置を記憶(DESIGN.md §9)</li>
     <li>検索欄・選択色・ホバーの作法はドロップダウン(menubar-design.html)と共通。
       本ページの CSS 値(ハイライト色・帯の明度含む)は誌面上の例示で、実装はシステムの色・素材に追従させる
