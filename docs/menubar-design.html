@@ -124,7 +124,7 @@
   <ul>
     <li>最上部: <strong>⌄ ボタン</strong>(共通項目の並び順は一覧ウィンドウ表示中のアプリメニューと同一。
       窓の項目(Keep on Top / Close Window)はアプリメニューのみ。
-      DESIGN.md §4.5/§8.30) —
+      DESIGN.md §4.5/§8.30/§8.40) —
       <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/ ─── /
       <strong>Settings…</strong>(実行項目。クリックで独立した Settings ウィンドウを開く)/
       <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ)/ ─── /
@@ -132,18 +132,20 @@
       <strong>Clear badges</strong>(全セッションの unreviewed フラグを一括で消す。未読が 1 つも無ければ disabled。
       通知センターの配信済み通知は触らない)/
       <strong>Sort by</strong>(サブメニュー・ラジオ 2 択: Grouped ✓ / Newest session)/ ─── /
-      <strong>Open as Window</strong>(一覧ウィンドウを開く。⌄ 固有の項目 —
-      アプリメニューで Close Window が占める位置。窓が存在する間は disabled)/
+      <strong>Agents…</strong>(一覧(Agents)ウィンドウを開く。旧称 Open as Window — DESIGN.md §8.40。
+      窓が存在する間は disabled)/
+      <strong>Conversations…</strong>(会話のウィンドウを開く。同じく窓が存在する間は disabled)/ ─── /
       <strong>Quit</strong>。項目はすべてクリックで閉じる(Sort by のラジオも —
       閉じるとドロップダウン一覧に並び替え結果がすぐ映る)。
       <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
-    <li><strong>一覧ウィンドウ</strong>(⌄ → Open as Window。DESIGN.md §4.5/§8.30):
+    <li><strong>一覧ウィンドウ</strong>(⌄ → Agents…。DESIGN.md §4.5/§8.30):
       ドロップダウンと同じ一覧を、タイトルバー非表示(<code>hiddenTitleBar</code>)の普通のウィンドウで
       出しっぱなしにできる。上端は信号機ボタンだけの細い帯(ドラッグ領域)、その下に同じ見た目の一覧。
       幅は固定・縦はリサイズ可で高さを記憶(中身の増減では伸縮しない。DESIGN.md §8.32)。
       <strong>topbar(⌄)は置かない</strong> — 窓がある間はアプリが通常アプリになり、操作は画面上端の
-      アプリメニュー 1 個(About / Settings… ⌘, / Setup Check… / Rescan ⌘R / Clear badges /
-      Sort by / Keep on Top(トグル・既定 OFF。ON の間だけ最前面) / Close Window ⌘W / Quit ⌘Q)に出る</li>
+      アプリメニュー 1 個(About / Settings… ⌘, / Setup Check… / セクション見出し「Agents」+
+      Rescan ⌘R / Clear badges / Sort by / Keep on Top(トグル・既定 OFF。ON の間だけ最前面)/
+      Agents… / Conversations… / Close Window ⌘W(閉じられる窓が無ければ disabled)/ Quit ⌘Q)に出る</li>
     <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
       閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
       2 グループ — <strong>General</strong>: Start at Login(トグル)/

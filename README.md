@@ -27,8 +27,8 @@ a glance:
 Click a session in the dropdown (or a notification) and it jumps to that
 session's iTerm2 tab.
 
-The dropdown can also be pinned as a small ordinary window (`⌄` → Open as
-Window): it stays put while you click through waiting sessions one after
+The dropdown can also be pinned as a small ordinary window (`⌄` →
+Agents…): it stays put while you click through waiting sessions one after
 another, grows as tall as you like, and while it's open the app shows up in
 the Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you
 can also switch the appearance between System, Light and Dark).
