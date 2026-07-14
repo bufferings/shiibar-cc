@@ -44,7 +44,12 @@ final class ConversationsViewModel: ObservableObject {
     @Published private(set) var selectedSessionID: String?
     /// The loaded conversation (full text, oldest-first).
     @Published private(set) var detail: ConversationDetail?
-    /// All in-body hits for the current query, document order.
+    /// The messages prepared for display (§4.6 rendering grammar): Markdown
+    /// blocks plus the rendered text that hit offsets and the fold boundary
+    /// are counted on. Always parallel to `detail.messages`.
+    @Published private(set) var renderedMessages: [RenderedMessage] = []
+    /// All in-body hits for the current query, document order. Offsets are
+    /// in each message's rendered text (§4.6).
     @Published private(set) var hits: [ConversationHit] = []
     /// Index into `hits` of the current position (nil = no hits / no bar).
     @Published private(set) var currentHitIndex: Int?
@@ -275,6 +280,9 @@ final class ConversationsViewModel: ObservableObject {
             }
             errorText = nil
             detail = loaded
+            // Render once per load (§4.6): blocks + rendered text drive the
+            // display, the hit offsets, and the fold boundary.
+            renderedMessages = loaded.messages.map { RenderedMessage(role: $0.role, text: $0.text) }
             recomputeHits()
             restoreScroll(sessionID: sessionID)
             refreshStatus()
@@ -293,6 +301,7 @@ final class ConversationsViewModel: ObservableObject {
 
     private func clearPreview() {
         detail = nil
+        renderedMessages = []
         hits = []
         currentHitIndex = nil
         expandedMessageSeqs = []
@@ -302,18 +311,20 @@ final class ConversationsViewModel: ObservableObject {
 
     // MARK: - Hit navigation (T5)
 
-    /// Recompute hits for the current query over the loaded conversation
-    /// (§4.6). Called after `show` and whenever the query changes. Sets the
-    /// current position to the LATEST hit; the caller decides whether to move
-    /// the scroll (it moves on select/restore, not on a query re-type).
+    /// Recompute hits for the current query over the loaded conversation's
+    /// RENDERED texts (§4.6: positioning uses the displayed characters, not
+    /// the raw transcript). Called after `show` and whenever the query
+    /// changes. Sets the current position to the LATEST hit; the caller
+    /// decides whether to move the scroll (it moves on select/restore, not on
+    /// a query re-type).
     private func recomputeHits() {
-        guard let detail else {
+        guard detail != nil else {
             hits = []
             currentHitIndex = nil
             return
         }
         let terms = ConversationsQuery.validTerms(query)
-        hits = ConversationHits.locations(messageTexts: detail.messages.map(\.text), terms: terms)
+        hits = ConversationHits.locations(messageTexts: renderedMessages.map(\.renderedText), terms: terms)
         currentHitIndex = hits.isEmpty ? nil : hits.count - 1
     }
 
@@ -340,10 +351,14 @@ final class ConversationsViewModel: ObservableObject {
         guard hits.indices.contains(index), let detail else { return }
         currentHitIndex = index
         let hit = hits[index]
-        guard detail.messages.indices.contains(hit.messageIndex) else { return }
+        guard detail.messages.indices.contains(hit.messageIndex),
+              renderedMessages.indices.contains(hit.messageIndex) else { return }
         let message = detail.messages[hit.messageIndex]
-        // §4.6: a folded hit auto-expands on ▲▼ jump.
-        if ConversationHits.requiresExpansion(hit: hit, messageText: message.text) {
+        // §4.6: a folded hit auto-expands on ▲▼ jump (fold boundary counted
+        // on rendered text).
+        if ConversationHits.requiresExpansion(
+            hit: hit, messageText: renderedMessages[hit.messageIndex].renderedText
+        ) {
             expandedMessageSeqs.insert(message.seq)
         }
         scrolledMessageID = message.seq
@@ -352,6 +367,35 @@ final class ConversationsViewModel: ObservableObject {
     /// `Show full message` tap for one message (§4.6/§9 fold).
     func expandMessage(seq: Int64) {
         expandedMessageSeqs.insert(seq)
+    }
+
+    /// `Show less` tap (§4.6): re-fold, and pull the scroll back to this
+    /// message so the viewpoint doesn't jump away from it.
+    func collapseMessage(seq: Int64) {
+        expandedMessageSeqs.remove(seq)
+        scrolledMessageID = seq
+    }
+
+    // MARK: - Hit tick marks (§4.6)
+
+    /// Tick fractions (0...1), one per hit in `hits` order, for the right-
+    /// edge distribution overlay while the find bar is visible. Message-level
+    /// approximation weighted by what each message currently displays.
+    var tickFractions: [Double] {
+        ConversationTicks.fractions(hits: hits, visibleMessageLengths: visibleMessageLengths)
+    }
+
+    /// What each message currently occupies, in rendered characters: the fold
+    /// prefix while folded, the full rendered length otherwise.
+    private var visibleMessageLengths: [Int] {
+        guard let detail else { return [] }
+        let limit = ConversationsConstants.messageFoldCharacterLimit
+        return renderedMessages.enumerated().map { index, rendered in
+            let total = rendered.renderedText.count
+            guard total > limit else { return total }
+            let seq = detail.messages[index].seq
+            return expandedMessageSeqs.contains(seq) ? total : limit
+        }
     }
 
     // MARK: - Resume (T6)
@@ -410,10 +454,13 @@ final class ConversationsViewModel: ObservableObject {
         if let remembered = scrollMemory[sessionID] {
             scrolledMessageID = remembered
         } else if let index = currentHitIndex, hits.indices.contains(index),
-                  let detail, detail.messages.indices.contains(hits[index].messageIndex) {
+                  let detail, detail.messages.indices.contains(hits[index].messageIndex),
+                  renderedMessages.indices.contains(hits[index].messageIndex) {
             let hit = hits[index]
             let message = detail.messages[hit.messageIndex]
-            if ConversationHits.requiresExpansion(hit: hit, messageText: message.text) {
+            if ConversationHits.requiresExpansion(
+                hit: hit, messageText: renderedMessages[hit.messageIndex].renderedText
+            ) {
                 expandedMessageSeqs.insert(message.seq)
             }
             scrolledMessageID = message.seq

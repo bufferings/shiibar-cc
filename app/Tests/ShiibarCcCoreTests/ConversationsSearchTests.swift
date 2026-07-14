@@ -79,18 +79,12 @@ final class ConversationsSearchTests: XCTestCase {
         XCTAssertEqual(hits, [ConversationHit(messageIndex: 0, start: 3, length: 8)])
     }
 
-    // MARK: - Folding (§9)
+    // MARK: - Folding (§9, counted on rendered text)
 
     func testIsFoldedAtBoundary() {
         let limit = ConversationsConstants.messageFoldCharacterLimit
         XCTAssertFalse(ConversationHits.isFolded(String(repeating: "a", count: limit)))
         XCTAssertTrue(ConversationHits.isFolded(String(repeating: "a", count: limit + 1)))
-    }
-
-    func testFoldedPrefixIsFirstLimitCharacters() {
-        let limit = ConversationsConstants.messageFoldCharacterLimit
-        let text = String(repeating: "a", count: limit) + "TAIL"
-        XCTAssertEqual(ConversationHits.foldedPrefix(text).count, limit)
     }
 
     func testRequiresExpansionForHitPastFold() {
@@ -113,5 +107,71 @@ final class ConversationsSearchTests: XCTestCase {
             hit: ConversationHit(messageIndex: 0, start: 0, length: 2),
             messageText: "short"
         ))
+    }
+
+    // MARK: - Hidden-hit count and badge (§4.6)
+
+    func testHiddenHitCountCountsHitsPastVisibleLimit() {
+        let hits = [
+            ConversationHit(messageIndex: 1, start: 0, length: 3), // fully visible
+            ConversationHit(messageIndex: 1, start: 98, length: 5), // straddles the boundary — hidden
+            ConversationHit(messageIndex: 1, start: 200, length: 3), // fully hidden
+            ConversationHit(messageIndex: 2, start: 300, length: 3), // other message — ignored
+        ]
+        XCTAssertEqual(ConversationHits.hiddenHitCount(hits: hits, messageIndex: 1, visibleLimit: 100), 2)
+    }
+
+    func testHiddenHitCountBoundaryIsExclusive() {
+        // A hit ending exactly at the visible limit is fully visible.
+        let hits = [ConversationHit(messageIndex: 0, start: 95, length: 5)]
+        XCTAssertEqual(ConversationHits.hiddenHitCount(hits: hits, messageIndex: 0, visibleLimit: 100), 0)
+        XCTAssertEqual(ConversationHits.hiddenHitCount(hits: hits, messageIndex: 0, visibleLimit: 99), 1)
+    }
+
+    func testMatchBadgeTextSingularPluralAndNone() {
+        // §4.6: "N matches", singular "1 match", no badge for zero.
+        XCTAssertNil(ConversationHits.matchBadgeText(count: 0))
+        XCTAssertEqual(ConversationHits.matchBadgeText(count: 1), "1 match")
+        XCTAssertEqual(ConversationHits.matchBadgeText(count: 2), "2 matches")
+    }
+
+    // MARK: - Hit tick marks (§4.6)
+
+    func testTickFractionsUseContainingMessagePosition() {
+        // Four messages of equal visible length: a hit in message 0 sits at
+        // the center of the first quarter, one in message 3 at the center of
+        // the last quarter.
+        let hits = [
+            ConversationHit(messageIndex: 0, start: 0, length: 2),
+            ConversationHit(messageIndex: 3, start: 0, length: 2),
+        ]
+        let fractions = ConversationTicks.fractions(hits: hits, visibleMessageLengths: [100, 100, 100, 100])
+        XCTAssertEqual(fractions, [0.125, 0.875])
+    }
+
+    func testTickFractionsHitsInOneMessageOverlap() {
+        // §4.6: ticks for multiple hits in one message may overlap — the
+        // approximation is per message, so they are identical.
+        let hits = [
+            ConversationHit(messageIndex: 1, start: 0, length: 2),
+            ConversationHit(messageIndex: 1, start: 50, length: 2),
+        ]
+        let fractions = ConversationTicks.fractions(hits: hits, visibleMessageLengths: [100, 100])
+        XCTAssertEqual(fractions[0], fractions[1])
+        XCTAssertEqual(fractions[0], 0.75)
+    }
+
+    func testTickFractionsWeightedByVisibleLengths() {
+        // A long first message pushes the second message's tick down.
+        let hits = [ConversationHit(messageIndex: 1, start: 0, length: 2)]
+        let fractions = ConversationTicks.fractions(hits: hits, visibleMessageLengths: [300, 100])
+        XCTAssertEqual(fractions, [0.875]) // (300 + 50) / 400
+    }
+
+    func testTickFractionsEmptyAndOutOfRangeAreSafe() {
+        XCTAssertEqual(ConversationTicks.fractions(hits: [], visibleMessageLengths: []), [])
+        // An out-of-range message index degrades to mid-document, not a crash.
+        let hits = [ConversationHit(messageIndex: 9, start: 0, length: 2)]
+        XCTAssertEqual(ConversationTicks.fractions(hits: hits, visibleMessageLengths: [100]), [0.5])
     }
 }

@@ -7,11 +7,14 @@
 // General (Start at Login, reusing AppState's existing SMAppService
 // read/write; Appearance = System / Light / Dark, §8.30/M27 T5) and Sounds
 // (Mute sound / Waiting sound / Done sound, Waiting above Done per the
-// product's own waiting > working > idle priority).
-// Values are all UserDefaults-backed via `NotificationManager` (§4.5) — this
-// view only wires them to SwiftUI and previews a pick via `NSSound(named:)`
-// (direct playback, not through a notification — the pick is a user-
-// initiated action, not an event, §4.5).
+// product's own waiting > working > idle priority), and Conversations
+// (Text size stepper — §4.5/§4.6, the same live value the Conversations
+// window's cmd-plus / cmd-minus / cmd-0 shortcuts read and write, via the
+// shared `ConversationsTextSizeStore`).
+// Values are all UserDefaults-backed via `NotificationManager` (§4.5) or the
+// text-size store — this view only wires them to SwiftUI and previews a
+// sound pick via `NSSound(named:)` (direct playback, not through a
+// notification — the pick is a user-initiated action, not an event, §4.5).
 
 import AppKit
 import ShiibarCcCore
@@ -97,13 +100,18 @@ final class SettingsViewModel: ObservableObject {
 
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
+    /// The shared Conversations body-size store (§4.5/§4.6): observed
+    /// directly (not snapshotted into the view model) so a cmd-shortcut
+    /// change from the Conversations window moves this stepper live.
+    @ObservedObject private var conversationsTextSize: ConversationsTextSizeStore
 
     init(
         notificationManager: NotificationManager,
         loginItemEnabledProvider: @escaping () -> Bool,
         toggleLoginItem: @escaping () -> Void,
         appearanceSetting: AppearanceSetting,
-        setAppearance: @escaping (AppearanceSetting) -> Void
+        setAppearance: @escaping (AppearanceSetting) -> Void,
+        conversationsTextSize: ConversationsTextSizeStore
     ) {
         _viewModel = StateObject(wrappedValue: SettingsViewModel(
             notificationManager: notificationManager,
@@ -112,6 +120,7 @@ struct SettingsView: View {
             appearanceSetting: appearanceSetting,
             setAppearance: setAppearance
         ))
+        self.conversationsTextSize = conversationsTextSize
     }
 
     var body: some View {
@@ -175,6 +184,27 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(viewModel.muted)
+            }
+
+            // Conversations below Sounds (§4.5): the Text size stepper moves
+            // the Conversations window's body size 11-18pt (§9), the exact
+            // value cmd-plus / cmd-minus / cmd-0 adjust on the window itself.
+            Section("Conversations") {
+                Stepper(
+                    value: Binding(
+                        get: { conversationsTextSize.size },
+                        set: { conversationsTextSize.set($0) }
+                    ),
+                    in: ConversationsTextSize.minimum...ConversationsTextSize.maximum,
+                    step: ConversationsTextSize.step
+                ) {
+                    HStack {
+                        Text("Text size")
+                        Spacer()
+                        Text("\(Int(conversationsTextSize.size)) pt")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .formStyle(.grouped)

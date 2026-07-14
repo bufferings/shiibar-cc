@@ -85,6 +85,11 @@ final class AppState: ObservableObject {
     private var workingAnimationTimer: Timer?
 
     let notificationManager: NotificationManager
+    /// The Conversations body text size (§4.6/§4.5): a single shared store so
+    /// the Conversations window's cmd shortcuts and the Settings window's
+    /// stepper read/write the same live value. Owned here because both
+    /// windows are created from AppState's surroundings.
+    let conversationsTextSize = ConversationsTextSizeStore()
     private let lifecycle: DaemonLifecycleManager
     /// Not `private`: the Setup Check window (§4.5, M5 T5) also needs it to
     /// run `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /

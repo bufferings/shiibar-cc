@@ -27,6 +27,11 @@ final class ConversationsWindowViewModel: ObservableObject {
     let content: ConversationsViewModel
     private var observers: [NSObjectProtocol] = []
     private var didSetAutosaveName = false
+    /// Local key-down monitor for cmd-plus / cmd-minus / cmd-0 (§4.6): the
+    /// text-size shortcuts apply ONLY while the Conversations window is key,
+    /// so they are matched here against the event's own window instead of
+    /// being app-wide menu commands (the app menu stays as §4.5 defines it).
+    private var textSizeKeyMonitor: Any?
 
     /// UserDefaults autosave name for the window frame (§9: remember size and
     /// position). AppKit persists the frame under this key on every
@@ -37,6 +42,7 @@ final class ConversationsWindowViewModel: ObservableObject {
         self.appState = appState
         self.content = ConversationsViewModel(appState: appState)
         observeWindowLifecycle()
+        installTextSizeKeyMonitor()
     }
 
     deinit {
@@ -44,6 +50,40 @@ final class ConversationsWindowViewModel: ObservableObject {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let textSizeKeyMonitor {
+            NSEvent.removeMonitor(textSizeKeyMonitor)
+        }
+    }
+
+    /// cmd-plus / cmd-minus / cmd-0 adjust the right pane's body size
+    /// (§4.6, 11-18pt, reset to the default). Handled events are consumed;
+    /// everything else — and anything aimed at another window — passes
+    /// through untouched, so no other window's behavior changes.
+    private func installTextSizeKeyMonitor() {
+        textSizeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.handleTextSizeShortcut(event) else { return event }
+            return nil
+        }
+    }
+
+    private func handleTextSizeShortcut(_ event: NSEvent) -> Bool {
+        guard event.window?.title == ConversationsWindow.title else { return false }
+        // Command required; shift tolerated ("+" is shift-"=" on most
+        // layouts); option/control mean some other chord — pass through.
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.subtracting(.shift) == .command else { return false }
+        guard let store = appState?.conversationsTextSize else { return false }
+        switch event.charactersIgnoringModifiers {
+        case "+", "=":
+            store.increase()
+        case "-":
+            store.decrease()
+        case "0":
+            store.reset()
+        default:
+            return false
+        }
+        return true
     }
 
     private func observeWindowLifecycle() {
@@ -101,7 +141,7 @@ struct ConversationsWindowView: View {
     }
 
     var body: some View {
-        ConversationsContentView(viewModel: windowState.content)
+        ConversationsContentView(viewModel: windowState.content, textSize: state.conversationsTextSize)
             // Minimum content size; the window is resizable both axes from
             // here up (§9). The traffic-light band is added on top by AppKit
             // (`.hiddenTitleBar`), same as the Agents window.

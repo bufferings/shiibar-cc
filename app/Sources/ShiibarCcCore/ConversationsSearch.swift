@@ -40,11 +40,14 @@ public enum ConversationsQuery {
     }
 }
 
-/// One occurrence of a search term in the preview body.
+/// One occurrence of a search term in the preview body. Offsets are in the
+/// message's RENDERED text — the characters visible after Markdown
+/// consumption (§4.6): the CLI filters conversations on raw text; positioning
+/// within the document uses the displayed text.
 public struct ConversationHit: Equatable {
     /// Index into the displayed `messages` array (document order).
     public let messageIndex: Int
-    /// Character offset of the match start within that message's text.
+    /// Character offset of the match start within that message's rendered text.
     public let start: Int
     /// Match length in characters.
     public let length: Int
@@ -58,15 +61,19 @@ public struct ConversationHit: Equatable {
 
 /// In-body hit navigation math (§4.6): after `show`, the app computes every
 /// occurrence of each term itself (case-insensitive partial match, the same
-/// meaning as the CLI), in document order. All terms highlight in one color;
-/// only the current position is emphasized. Folding a long message doesn't
-/// hide its hits from the counter — a hit past the fold is still counted and
-/// the fold auto-expands when navigated to.
+/// meaning as the CLI), in document order, over each message's RENDERED text
+/// (the characters visible after Markdown consumption — §4.6; a conversation
+/// whose only match was in consumed Markdown syntax correctly shows zero
+/// in-body hits). All terms highlight in one color; only the current position
+/// is emphasized. Folding a long message doesn't hide its hits from the
+/// counter — a hit past the fold is still counted and the fold auto-expands
+/// when navigated to.
 public enum ConversationHits {
-    /// Every occurrence of every term across `messageTexts`, in document
-    /// order (message order, then character offset). Case-insensitive,
-    /// no accent folding (Swift's `.caseInsensitive` matches the CLI's
-    /// "case-insensitive partial match, accents distinct" — §7-6).
+    /// Every occurrence of every term across `messageTexts` (the rendered
+    /// texts, §4.6), in document order (message order, then character
+    /// offset). Case-insensitive, no accent folding (Swift's
+    /// `.caseInsensitive` matches the CLI's "case-insensitive partial match,
+    /// accents distinct" — §7-6).
     /// Overlapping matches of a single term are counted non-overlapping
     /// (advance past each match); identical spans produced by two terms are
     /// de-duplicated.
@@ -94,19 +101,31 @@ public enum ConversationHits {
     /// Whether navigating to `hit` needs the message expanded first: the
     /// message is folded and the hit does not fit entirely within the
     /// visible prefix (§4.6 — folded hits auto-expand on ▲▼ jump).
+    /// `messageText` is the message's rendered text (§4.6).
     public static func requiresExpansion(hit: ConversationHit, messageText: String) -> Bool {
         guard isFolded(messageText) else { return false }
         return hit.start + hit.length > ConversationsConstants.messageFoldCharacterLimit
     }
 
-    /// Whether a message is folded (longer than the §9 limit).
+    /// Whether a message is folded: its rendered text (§4.6) is longer than
+    /// the §9 limit.
     public static func isFolded(_ text: String) -> Bool {
         text.count > ConversationsConstants.messageFoldCharacterLimit
     }
 
-    /// The visible prefix of a folded message (first `limit` characters).
-    public static func foldedPrefix(_ text: String) -> String {
-        String(text.prefix(ConversationsConstants.messageFoldCharacterLimit))
+    /// How many of a folded message's hits are (at least partly) in the
+    /// hidden part — hits whose span extends past the visible prefix of
+    /// `visibleLimit` rendered characters. Drives the §4.6 count badge next
+    /// to "Show full message".
+    public static func hiddenHitCount(hits: [ConversationHit], messageIndex: Int, visibleLimit: Int) -> Int {
+        hits.filter { $0.messageIndex == messageIndex && $0.start + $0.length > visibleLimit }.count
+    }
+
+    /// The §4.6 badge text for hidden hits: "N matches", singular "1 match",
+    /// nil when nothing is hidden (no badge).
+    public static func matchBadgeText(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count == 1 ? "1 match" : "\(count) matches"
     }
 
     private static func occurrences(of term: String, in text: String, messageIndex: Int) -> [ConversationHit] {
@@ -126,5 +145,36 @@ public enum ConversationHits {
             searchStart = range.upperBound > range.lowerBound ? range.upperBound : text.index(after: range.lowerBound)
         }
         return result
+    }
+}
+
+/// Hit tick-mark math (§4.6): while the find bar is visible, the right pane
+/// overlays one tick per hit near its right edge, showing the hit
+/// distribution over the whole conversation. Positions are a message-level
+/// approximation — the containing message's vertical position ratio,
+/// estimated by the messages' VISIBLE rendered lengths (a folded message
+/// counts its visible prefix only). Ticks of hits in one message may overlap
+/// (§4.6 allows it); only the current hit's tick uses the stronger color
+/// (the view's job, keyed by hit index).
+public enum ConversationTicks {
+    /// One fraction (0...1) per hit, in `hits` order: the vertical center of
+    /// the containing message over the total, weighted by
+    /// `visibleMessageLengths` (one entry per displayed message, in document
+    /// order). Zero-length messages weigh 1 so every message occupies some
+    /// vertical extent.
+    public static func fractions(hits: [ConversationHit], visibleMessageLengths: [Int]) -> [Double] {
+        let weights = visibleMessageLengths.map { Double(max($0, 1)) }
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return hits.map { _ in 0.5 } }
+        var starts: [Double] = []
+        var cursor = 0.0
+        for weight in weights {
+            starts.append(cursor)
+            cursor += weight
+        }
+        return hits.map { hit in
+            guard weights.indices.contains(hit.messageIndex) else { return 0.5 }
+            return (starts[hit.messageIndex] + weights[hit.messageIndex] / 2) / total
+        }
     }
 }

@@ -56,7 +56,8 @@ struct ShiibarCcMenuBarApp: App {
                 loginItemEnabledProvider: { appDelegate.state.loginItemEnabled },
                 toggleLoginItem: { appDelegate.state.toggleLoginItem() },
                 appearanceSetting: appDelegate.state.appearanceSetting,
-                setAppearance: { appDelegate.state.setAppearanceSetting($0) }
+                setAppearance: { appDelegate.state.setAppearanceSetting($0) },
+                conversationsTextSize: appDelegate.state.conversationsTextSize
             )
         }
         .windowResizability(.contentSize)
@@ -106,10 +107,12 @@ struct ShiibarCcMenuBarApp: App {
         // Conversations window (§4.6, M35): browse / search / read / resume
         // the conversation history across folders. Opened via the ⌄ menu and
         // the app menu's "Conversations…" (disabled while it exists, §4.5).
-        // Same hidden-title-bar chrome as the Agents window (traffic-light
-        // band, `title` = "Conversations"); unlike the Agents window it
-        // remembers BOTH size and position (§9), via the window's own
-        // `setFrameAutosaveName` set in `ConversationsWindowViewModel`.
+        // Hidden-title-bar chrome (`title` = "Conversations") drawn as a
+        // full-height sidebar: the traffic lights sit over the sidebar
+        // material, which `ConversationsContentView` extends to the window
+        // top (§4.6/§8.35). Unlike the Agents window it remembers BOTH size
+        // and position (§9), via the window's own `setFrameAutosaveName` set
+        // in `ConversationsWindowViewModel`.
         // Read-only over the `shiibar-cc conversations` CLI — no transcript
         // parsing / SQLite in Swift (§4.6).
         Window(ConversationsWindow.title, id: ConversationsWindow.id) {
@@ -153,14 +156,14 @@ enum AgentsWindow {
 /// The Conversations `Window` scene's stable id/title (§4.6, M35), shared
 /// between the scene declaration above, the `openWindow(id:)` call sites (⌄
 /// menu / app menu), and the window-lifecycle title filter in
-/// `ConversationsWindowViewModel`. Initial size 640×480pt, left pane 280pt
+/// `ConversationsWindowViewModel`. Initial size 640×480pt, sidebar 250pt
 /// (§9); resizable both axes, size and position remembered.
 enum ConversationsWindow {
     static let id = "conversations"
     static let title = "Conversations"
     static let defaultWidth: CGFloat = 640
     static let defaultHeight: CGFloat = 480
-    static let leftPaneWidth: CGFloat = 280
+    static let leftPaneWidth: CGFloat = 250
 }
 
 @MainActor
