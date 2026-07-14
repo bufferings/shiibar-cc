@@ -209,11 +209,10 @@ scripts/release.sh draft</pre>
       モノスペースで揃わず、列が崩れる(DESIGN.md §8.37)</li>
     <li><strong>選択とコピー</strong>: メッセージをまたぐ連続選択ができる。⏺ マーカー・
       展開/畳みボタンなどの操作部品は選択・コピーに含めない。右クリックは
-      <strong>Copy(⌘C)/ Copy as Markdown(⇧⌘C)の 2 項目だけ</strong>(ショートカット併記。
-      Copy は WebKit 標準の項目を流用し、それ以外の標準項目は取り除く)。
-      Copy = 表示どおり、Copy as Markdown = <strong>選択範囲を Markdown に直列化</strong>
-      (選択したものが Markdown として出てくる)。選択が無いときはカーソル下のメッセージの
-      原文を丸ごと(DESIGN.md §4.6)</li>
+      <strong>Copy(⌘C)/ Copy as Markdown(⇧⌘C)の 2 項目だけ</strong>(ショートカット併記・
+      選択が無い間は両方 disabled)。Copy = 表示どおり(書式も WebKit 標準のコピーに任せる)、
+      Copy as Markdown = <strong>選択範囲を Markdown に直列化</strong>(選択したものが
+      Markdown として出てくる)。<strong>選択が無ければ何もコピーできない</strong>(DESIGN.md §4.6)</li>
     <li><strong>返答の先頭に ⏺ マーカー(ぶら下げ)</strong>: 1 つの指示に返答が連発しても境目が
       読めるよう、すべての Claude の返答の先頭に淡い二次色の小さな ⏺ を付ける(Claude Code の
       ターミナルと同じ文法。連発時だけの条件分岐はしない)。マーカーは本文の左に<strong>ぶら下げ</strong>、
