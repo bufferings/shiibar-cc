@@ -383,7 +383,10 @@ scripts/release.sh draft</pre>
       ステータス行に <code>Refreshing…</code>、完了後は <code>Updated · N conversations</code> を
       2 秒(DESIGN.md §4.6 / §9)</li>
     <li>running の会話でも下部パネルは常に同じ高さで出す — Resume を disabled にし、
-      左に <code>This conversation is running</code> を淡く(DESIGN.md §4.6)</li>
+      左に <code>This conversation is running</code> を淡く。disabled は<strong>標準の灰色の器</strong>
+      (prominent のまま淡くしない)。通常の Resume はホバー・押下の状態を持つ(DESIGN.md §4.6 / §8.42)</li>
+    <li>⟳ ボタンは状態を持つ: ホバーで浮く / 押下で沈む / 実行中は矢印グリフが回転して disabled
+      (working の ✻ スピナーとは別文法。DESIGN.md §8.42)</li>
     <li>検索欄・選択色・ホバーの作法はドロップダウン(menubar-design.html)と共通。
       本ページの CSS 値(ハイライト色・帯の明度含む)は誌面上の例示で、実装はシステムの色・素材に追従させる
       (サイドバーは NSVisualEffectView のサイドバー素材相当)</li>
