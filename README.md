@@ -40,8 +40,9 @@ Claude Code conversation history across every folder. Open it from the `⌄`
 menu (or the app menu) → Conversations…: a two-pane window where you can
 **browse** recent conversations, **search** their full text across folders,
 **read** any one from the bottom (latest) up, and **resume** a past one in a
-new iTerm2 window. Search is incremental and matches whole words of two or
-more characters; multiple words are AND-ed.
+new iTerm2 window. Search is incremental; each word of two or more
+characters matches as a case-insensitive substring ("auth" finds
+"authentication"), and multiple words are AND-ed.
 
 The same search is available from scripts, so you don't need the window to
 find a conversation:
@@ -93,8 +94,11 @@ specific feature — nothing is requested speculatively.
   install (below); either way it's two `claude plugin` commands and it
   coexists with whatever hooks you already have.
 - **A state directory** (`~/.local/state/shiibar-cc/`): holds the daemon's
-  Unix socket, its persisted session state, and its log file. Nothing here
-  leaves your machine.
+  Unix socket, its persisted session state, its log file, and — for the
+  Conversations feature — a local search index (`conversations-index.db`)
+  containing the full text of your Claude Code conversations. Nothing here
+  leaves your machine, and the directory is safe to delete: the daemon
+  recreates its files and the search index is rebuilt on demand.
 
 ## Install / Uninstall
 
@@ -205,19 +209,22 @@ flowchart LR
 - The daemon holds all session state in memory (and persists it to
   `~/.local/state/shiibar-cc/state.json`) and pushes changes to every
   connected subscriber.
-- The `shiibar-cc` CLI is internal glue, not a user-facing surface:
-  hooks call `shiibar-cc report`, and the app shells out to it for
-  jumping (`focus`), self-repair (`reconcile`), and the Setup Check
-  (`doctor`). You never need to run it yourself except `doctor` when
-  troubleshooting.
+- The `shiibar-cc` CLI is mostly internal glue: hooks call
+  `shiibar-cc report`, and the app shells out to it for jumping (`focus`),
+  self-repair (`reconcile`), the Setup Check (`doctor`), and the
+  Conversations index. The exceptions you may want to run yourself are
+  `doctor` (troubleshooting) and `conversations search` (scripted search,
+  above).
 - Jumping to a session ("focus") drives iTerm2 with AppleScript. iTerm2 is
   the only terminal app Shiibar CC knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on
   demand via Rescan (in the `⌄` menu, or ⌘R while the window is open).
-- All local state — the daemon's socket, its persisted session state, and
-  its log — lives under `~/.local/state/shiibar-cc/`.
+- All local state — the daemon's socket, its persisted session state, its
+  log, and the Conversations search index (the full text of your
+  conversations, kept only on your machine) — lives under
+  `~/.local/state/shiibar-cc/`.
 
 ## License
 

@@ -5,7 +5,9 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
 ## Source of truth
 
 - **Behavior spec**: `docs/DESIGN.md`. The state transition table (§3.4) IS the test spec. Protocol wire format is §4.2. Constants are §9.
-- **Visual spec**: `docs/menubar-design.html` (menu bar / dropdown design).
+- **Visual spec**: `docs/menubar-design.html` (menu bar / dropdown) and `docs/conversations-design.html`
+  (Conversations window; its typography/spacing CSS values are normative — DESIGN.md §8.39 —
+  while colors follow the system).
 - **Dev procedures**: `docs/DEVELOPMENT.md`.
 - **Decision log**: `docs/DESIGN.md` §8. Read it BEFORE "improving" anything. The non-goals (tmux support, other agents, terminal abstraction layers, config files, launchd) are deliberate decisions with recorded reconsideration conditions. Do not implement them, even if it seems helpful.
 

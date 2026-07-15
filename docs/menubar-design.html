@@ -149,12 +149,14 @@
       Agents… / Conversations… / Close Window ⌘W(閉じられる窓が無ければ disabled)/ Quit ⌘Q)に出る</li>
     <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
       閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
-      2 グループ — <strong>General</strong>: Start at Login(トグル)/
+      3 グループ — <strong>General</strong>: Start at Login(トグル)/
       Appearance(ポップアップ: System ✓ / Light / Dark — アプリ全体の外観)/ <strong>Sounds</strong>: Mute sound
       (トグル。hint「Notifications arrive silently」)/ <strong>Waiting sound</strong>・<strong>Done sound</strong>
       (ポップアップ 2 つ、Waiting が上。候補は <code>/System/Library/Sounds</code> の標準サウンドを実行時に列挙、
       拡張子抜きの名前をソートして表示。既定はどちらも Glass)。Mute sound が ON の間、音種 2 つは disabled。
-      音種を選んだ瞬間にその音を 1 回プレビュー再生する</li>
+      音種を選んだ瞬間にその音を 1 回プレビュー再生する /
+      <strong>Conversations</strong>: Text size(ポップアップ — 会話ウィンドウの本文サイズ。
+      conversations-design.html・DESIGN.md §4.5/§9)</li>
     <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
       (一覧の下。一覧ウィンドウでも同じく一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
       クリック動作なし(切り分けは <code>doctor</code>)</li>

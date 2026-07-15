@@ -1,7 +1,9 @@
 # 開発メモ
 
 日々の開発・ドッグフーディングで使う手順のメモ。仕様の正は [DESIGN.md](DESIGN.md)、
-メニューバーの見た目の正は [menubar-design.html](menubar-design.html)。
+メニューバーの見た目の正は [menubar-design.html](menubar-design.html)、
+Conversations ウィンドウの見た目の正は [conversations-design.html](conversations-design.html)
+(タイポグラフィ・余白の CSS 値は規範 — DESIGN.md §8.39。色はシステム追従)。
 
 ## レビュー・検証体制
 
@@ -167,6 +169,16 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 - Conversations の会話索引(DESIGN.md §4.6)は状態ディレクトリ内の `conversations-index.db`。
   派生データなので、表示がおかしいときは消してよい — 次の `shiibar-cc conversations index`
   (ウィンドウを開くだけでも走る)で全再構築される(手動の再インデックス UI は無い。§8.34)
+- **アプリ側の診断ログ**(daemon の `SHIIBAR_CC_LOG` とは別系統): Conversations の配信・描画は
+  unified log に**異常系だけ**を既定レベルで出す(正常系の毎回のログや会話内容は記録しない —
+  DESIGN.md §4.6)。右ペインが白い・表示が来ない等の調査は:
+
+  ```sh
+  log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "webpane"'
+  ```
+
+  category は `webpane`(右ペインの配信異常)/ `conversations`(CLI 呼び出しの異常)ほか
+  ソース内の `Logger(subsystem:category:)` を参照
 - **README のスクリーンショット**(`docs/assets/`)の撮り直しは `scripts/dev-demo.sh` で:
   `stage` が偽 hook 再生(上記「hooks の検証」と同じ技法)で waiting / working / idle の
   3 状態を実 daemon に並べる(**定期 reconcile が約 60 秒で偽セッションを掃除する**ので、
