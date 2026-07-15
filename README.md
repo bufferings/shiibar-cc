@@ -27,6 +27,18 @@ a glance:
 Click a session in the dropdown (or a notification) and it jumps to that
 session's iTerm2 tab.
 
+<img src="docs/assets/menubar-dropdown.png" width="500"
+     alt="The Shiibar CC dropdown, grouped by status: one session waiting
+          on a permission prompt (unreviewed, with a red badge), one
+          working, one idle">
+
+Notifications carry the outcome, not just an alert — which session
+finished, and what its agent last said:
+
+<img src="docs/assets/notification-banner.png" width="450"
+     alt="A macOS notification: 'Done — projects/shiibar-cc', with the
+          agent's final message about the finished screenshot update">
+
 The dropdown can also be pinned as a small ordinary window (`⌄` →
 Agents…): it stays put while you click through waiting sessions one after
 another, grows as tall as you like, and while it's open the app shows up in
@@ -44,6 +56,12 @@ new iTerm2 window. Search is incremental; each word of two or more
 characters matches as a case-insensitive substring ("auth" finds
 "authentication"), and multiple words are AND-ed.
 
+<img src="docs/assets/conversations-window.png" width="700"
+     alt="The Conversations window: a sidebar listing four conversations
+          across different project folders, and the selected conversation
+          rendered as Markdown — prompt bands, a table of broken links, an
+          inline code suggestion, and a Resume button in the corner">
+
 The same search is available from scripts, so you don't need the window to
 find a conversation:
 
@@ -55,18 +73,6 @@ shiibar-cc conversations search "auth middleware"   # add --json for a stable
 Conversations reads Claude Code's transcripts, an undocumented internal
 format; a Claude Code update may break the list or preview until Shiibar CC
 catches up.
-
-<img src="docs/assets/menubar-dropdown.png" width="500"
-     alt="The Shiibar CC dropdown, grouped by status: two sessions waiting
-          on permission (one unreviewed, with a red badge), one working,
-          one idle">
-
-Notifications carry the outcome, not just an alert — which session
-finished, and what its agent last said:
-
-<img src="docs/assets/notification-banner.png" width="450"
-     alt="A macOS notification: 'Done — demo/blog', with the agent's final
-          message about the completed link check">
 
 ## Permissions
 
