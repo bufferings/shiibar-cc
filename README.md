@@ -144,8 +144,9 @@ To remove it:
 
 ```sh
 brew uninstall --cask shiibar-cc   # add --zap to also remove the state
-                                    # directory, saved preferences, and
-                                    # saved app state
+                                    # directory (including the local
+                                    # conversations index), saved
+                                    # preferences, and saved app state
 claude plugin uninstall shiibar-cc
 ```
 
