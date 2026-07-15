@@ -1853,7 +1853,9 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
 
 依存は少数の主要クレート(serde / serde_json / tokio / anyhow / tempfile、
 M34 から rusqlite + libsqlite3-sys — 会話索引 §4.6。**システム同梱の libsqlite3 に
-リンクし、`bundled` は使わない** — SQLite 本体をサプライチェーンに持ち込まない)のみ。現状は
+リンクし、`bundled` は使わない** — SQLite 本体をサプライチェーンに持ち込まない。
+M39 から unicode-normalization — 検索の NFC 正規化 §8.38(12)。正準正規化表は自作しない類いの
+もので、unicode-rs の標準実装・推移依存は tinyvec と tinyvec_macros の 2 つ)のみ。現状は
 `Cargo.lock` をコミット済み。過剰にはせず、**適用済み**と明記したもの以外は
 シグナル待ちで段階導入する:
 
