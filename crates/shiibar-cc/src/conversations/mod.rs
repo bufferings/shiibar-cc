@@ -170,7 +170,13 @@ pub enum Query {
 }
 
 pub fn parse_query(query: &str) -> Query {
-    let trimmed = query.trim();
+    // NFC before anything else (4.6 / 8.38(12)): IME input arrives in the
+    // decomposed form on macOS, and the corpus is stored composed - both
+    // sides of the match normalize (the app also normalizes before dispatch;
+    // this covers every other entry path, e.g. a terminal).
+    use unicode_normalization::UnicodeNormalization;
+    let normalized: String = query.nfc().collect();
+    let trimmed = normalized.trim();
     if trimmed.is_empty() {
         return Query::Browse;
     }
@@ -393,6 +399,16 @@ fn ensure_state_dir(db_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parse_query_normalizes_to_nfc() {
+        // 4.6 / 8.38(12): a decomposed query (hi + U+3099) parses to the
+        // composed term (bi), so matching is composition-form independent.
+        match super::parse_query("\u{30D2}\u{3099}\u{30B9}") {
+            super::Query::Terms(terms) => assert_eq!(terms, vec!["\u{30D3}\u{30B9}".to_string()]),
+            other => panic!("expected terms, got {other:?}"),
+        }
+    }
+
     use super::*;
 
     #[test]

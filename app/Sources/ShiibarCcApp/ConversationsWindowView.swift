@@ -55,33 +55,41 @@ final class ConversationsWindowViewModel: ObservableObject {
         }
     }
 
-    /// cmd-plus / cmd-minus / cmd-0 adjust the right pane's body size
-    /// (§4.6, 11-18pt, reset to the default). Handled events are consumed;
-    /// everything else — and anything aimed at another window — passes
-    /// through untouched, so no other window's behavior changes.
+    /// Window-scoped commands (§4.6): cmd-plus / cmd-minus / cmd-0 adjust
+    /// the right pane's body size, cmd-G / shift-cmd-G move the find-bar
+    /// position (§8.38(7)). Handled events are consumed; everything else —
+    /// including ⌘C for the pane, and anything aimed at another window —
+    /// passes through untouched. The key-to-command decision lives in Core
+    /// (`ConversationsKeyCommands`), pinned by tests.
     private func installTextSizeKeyMonitor() {
         textSizeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.handleTextSizeShortcut(event) else { return event }
+            guard let self, self.handleWindowShortcut(event) else { return event }
             return nil
         }
     }
 
-    private func handleTextSizeShortcut(_ event: NSEvent) -> Bool {
+    private func handleWindowShortcut(_ event: NSEvent) -> Bool {
         guard event.window?.title == ConversationsWindow.title else { return false }
-        // Command required; shift tolerated ("+" is shift-"=" on most
-        // layouts); option/control mean some other chord — pass through.
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.subtracting(.shift) == .command else { return false }
-        guard let store = appState?.conversationsTextSize else { return false }
-        switch event.charactersIgnoringModifiers {
-        case "+", "=":
-            store.increase()
-        case "-":
-            store.decrease()
-        case "0":
-            store.reset()
-        default:
-            return false
+        guard let command = ConversationsKeyCommands.command(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            hasCommand: flags.contains(.command),
+            hasShift: flags.contains(.shift),
+            hasOtherModifiers: !flags.subtracting([.command, .shift]).isEmpty
+        ) else { return false }
+        switch command {
+        case .increaseTextSize:
+            appState?.conversationsTextSize.increase()
+        case .decreaseTextSize:
+            appState?.conversationsTextSize.decrease()
+        case .resetTextSize:
+            appState?.conversationsTextSize.reset()
+        case .nextMatch:
+            content.navigateToNewerHit()
+        case .previousMatch:
+            content.navigateToOlderHit()
+        case .focusSearch:
+            content.focusSearchField()
         }
         return true
     }

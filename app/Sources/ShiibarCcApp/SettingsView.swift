@@ -8,7 +8,7 @@
 // read/write; Appearance = System / Light / Dark, §8.30/M27 T5) and Sounds
 // (Mute sound / Waiting sound / Done sound, Waiting above Done per the
 // product's own waiting > working > idle priority), and Conversations
-// (Text size stepper — §4.5/§4.6, the same live value the Conversations
+// (Text size popup — §4.5/§4.6, the same live value the Conversations
 // window's cmd-plus / cmd-minus / cmd-0 shortcuts read and write, via the
 // shared `ConversationsTextSizeStore`).
 // Values are all UserDefaults-backed via `NotificationManager` (§4.5) or the
@@ -123,6 +123,16 @@ struct SettingsView: View {
         self.conversationsTextSize = conversationsTextSize
     }
 
+    /// The §9 body-size range (10-20pt) enumerated in one-point steps for the
+    /// Text size popup.
+    private var textSizeOptions: [Double] {
+        Array(stride(
+            from: ConversationsTextSize.minimum,
+            through: ConversationsTextSize.maximum,
+            by: ConversationsTextSize.step
+        ))
+    }
+
     var body: some View {
         // A grouped `Form` (DESIGN.md §4.5: the look is a SwiftUI Form +
         // .formStyle(.grouped)) — macOS renders native switch toggles,
@@ -186,23 +196,19 @@ struct SettingsView: View {
                 .disabled(viewModel.muted)
             }
 
-            // Conversations below Sounds (§4.5): the Text size stepper moves
-            // the Conversations window's body size 11-18pt (§9), the exact
+            // Conversations below Sounds (§4.5): the Text size popup sets
+            // the Conversations window's body size 10-20pt (§9), the same
             // value cmd-plus / cmd-minus / cmd-0 adjust on the window itself.
+            // A popup (same control family as the sound pickers above) lets
+            // the owner jump straight to a size while watching the preview
+            // (§8.44).
             Section("Conversations") {
-                Stepper(
-                    value: Binding(
-                        get: { conversationsTextSize.size },
-                        set: { conversationsTextSize.set($0) }
-                    ),
-                    in: ConversationsTextSize.minimum...ConversationsTextSize.maximum,
-                    step: ConversationsTextSize.step
-                ) {
-                    HStack {
-                        Text("Text size")
-                        Spacer()
-                        Text("\(Int(conversationsTextSize.size)) pt")
-                            .foregroundStyle(.secondary)
+                Picker("Text size", selection: Binding(
+                    get: { conversationsTextSize.size },
+                    set: { conversationsTextSize.set($0) }
+                )) {
+                    ForEach(textSizeOptions, id: \.self) { size in
+                        Text("\(Int(size)) pt").tag(size)
                     }
                 }
             }

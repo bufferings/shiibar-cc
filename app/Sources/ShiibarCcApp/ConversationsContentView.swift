@@ -3,14 +3,16 @@
 // sidebar: left = search + list + status line on sidebar material that
 // reaches the window top (the traffic lights sit over it), right = the
 // selected conversation on the normal window background — the reading
-// surface (§8.35). User messages are full-width bands (the "what did I ask"
-// table of contents); Claude messages render their Markdown. All decisions
-// (query rules, block splitting, hit offsets, fold boundary, tick math) live
-// in `ConversationsViewModel` / ShiibarCcCore; this file is presentation
-// only. UI strings are English; conversation content (titles, message text)
-// is user data shown verbatim.
+// surface (§8.35). The message flow itself renders in the bundled page
+// (WKWebView — §4.6 rendering engine, §8.38, ConversationsWebPaneKit);
+// header, find bar, and Resume stay native. All decisions (query rules,
+// block splitting, hit offsets, fold boundary) live in
+// `ConversationsViewModel` / ShiibarCcCore; this file is presentation only.
+// UI strings are English; conversation content (titles, message text) is
+// user data shown verbatim.
 
 import AppKit
+import ConversationsWebPaneKit
 import ShiibarCcCore
 import SwiftUI
 
@@ -20,24 +22,60 @@ struct ConversationsContentView: View {
     /// and the Settings stepper re-render the right pane immediately.
     @ObservedObject var textSize: ConversationsTextSizeStore
 
+    /// Sidebar width (§9: initial 250pt, drag-clamped 200-400pt, remembered
+    /// in UserDefaults — the same discipline as the window frame autosave).
+    @AppStorage("cc.shiibar.conversationsSidebarWidth")
+    private var sidebarWidth: Double = ConversationsConstants.sidebarInitialWidth
+    /// The width when the current divider drag began.
+    @State private var dragStartWidth: Double?
+    /// The pointer is over the divider grab strip (§8.38(8): the line
+    /// strengthens as the affordance).
+    @State private var dividerHovered = false
+
     var body: some View {
         HStack(spacing: 0) {
             leftPane
-                .frame(width: ConversationsWindow.leftPaneWidth)
+                .frame(width: ConversationsConstants.clampSidebarWidth(sidebarWidth))
                 .background(
                     // Full-height sidebar (§4.6/§8.35): sidebar material up
                     // to the window top — `.ignoresSafeArea` extends it under
                     // the hidden-title-bar traffic-light band — with a 1pt
-                    // separator against the reading pane.
+                    // separator against the reading pane. The material is
+                    // bound to the pane frame, so it stays correct while the
+                    // divider drags.
                     SidebarBackgroundView()
                         .overlay(alignment: .trailing) {
-                            Color(nsColor: .separatorColor).frame(width: 1)
+                            Color(nsColor: dividerHovered ? .tertiaryLabelColor : .separatorColor)
+                                .frame(width: dividerHovered ? 2 : 1)
                         }
                         .ignoresSafeArea()
                 )
+                .overlay(alignment: .trailing) { sidebarDragHandle }
             rightPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// An invisible 9pt grab strip straddling the sidebar boundary
+    /// (§8.38(7)(8): the divider drags; the fixed width became the initial
+    /// value). The resize cursor comes from AppKit cursor rects — SwiftUI's
+    /// onHover + NSCursor.push proved unreliable on-device — and the same
+    /// tracking area drives the stronger divider line while hovered.
+    private var sidebarDragHandle: some View {
+        ResizeCursorStrip(onHoverChanged: { dividerHovered = $0 })
+            .frame(width: 9)
+            .contentShape(Rectangle())
+            .offset(x: 4)
+            .gesture(
+                DragGesture(coordinateSpace: .global)
+                    .onChanged { value in
+                        if dragStartWidth == nil { dragStartWidth = sidebarWidth }
+                        sidebarWidth = ConversationsConstants.clampSidebarWidth(
+                            (dragStartWidth ?? sidebarWidth) + value.translation.width
+                        )
+                    }
+                    .onEnded { _ in dragStartWidth = nil }
+            )
     }
 
     // MARK: - Left pane
@@ -58,38 +96,25 @@ struct ConversationsContentView: View {
 
     private var toolbar: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 12))
-                TextField("Search (2+ characters)", text: $viewModel.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .disabled(viewModel.searchDisabled)
-                    .onChange(of: viewModel.query) {
-                        // List search is debounced (§9); preview highlights
-                        // recompute instantly and never move the scroll.
-                        viewModel.queryChanged()
-                        viewModel.queryChangedForPreview()
-                    }
+            // IME-aware NSSearchField (§4.6/§8.38(12)): no dispatch while
+            // marked text is active, guaranteed dispatch on commit, and the
+            // ⌘F focus target (§8.41). Its native rounded style matches the
+            // mock's search box.
+            ConversationsSearchField(
+                text: $viewModel.query,
+                isEnabled: !viewModel.searchDisabled,
+                focusToken: viewModel.searchFocusToken
+            )
+            .onChange(of: viewModel.query) {
+                // List search is debounced (§9); preview highlights
+                // recompute instantly and never move the scroll.
+                viewModel.queryChanged()
+                viewModel.queryChangedForPreview()
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Color.gray.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
 
-            Button {
+            RefreshButton(startTime: viewModel.refreshStartedAt, runEndTime: viewModel.refreshRunEndedAt) {
                 viewModel.refreshTapped()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color.gray.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .help("Refresh")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -157,6 +182,197 @@ private struct SidebarBackgroundView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// The find bar's back/forward control: a native momentary
+/// NSSegmentedControl (§4.6 — the standard find-bar look SwiftUI has no
+/// built-in equivalent for), with per-segment tooltips.
+private struct FindNavigationControl: NSViewRepresentable {
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPrevious: onPrevious, onNext: onNext)
+    }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        // Sizing behavior lives in the kit factory, pinned by a test
+        // (§8.38(8): it stretched across the pane in the owner's build).
+        FindBarControls.makeSegmentedControl(
+            target: context.coordinator,
+            action: #selector(Coordinator.segmentActivated(_:))
+        )
+    }
+
+    func updateNSView(_ nsView: NSSegmentedControl, context: Context) {
+        context.coordinator.onPrevious = onPrevious
+        context.coordinator.onNext = onNext
+    }
+
+    final class Coordinator: NSObject {
+        var onPrevious: () -> Void
+        var onNext: () -> Void
+
+        init(onPrevious: @escaping () -> Void, onNext: @escaping () -> Void) {
+            self.onPrevious = onPrevious
+            self.onNext = onNext
+        }
+
+        @objc func segmentActivated(_ sender: NSSegmentedControl) {
+            sender.selectedSegment == 0 ? onPrevious() : onNext()
+        }
+    }
+}
+
+/// The ⟳ button (§4.6/§8.42/§8.44 — feedback comes first from the operated
+/// control): hover raises the background, press sinks it, and in flight the
+/// single arrow GLYPH rotates continuously (deliberately NOT the
+/// glyph-cycling working spinner, which §4.5 reserves for agent status)
+/// while the button is disabled. Idle shows NO background so a static gray
+/// pill uniquely means "disabled" (§8.44). `startTime` is non-nil for
+/// exactly as long as the button spins; `runEndTime` is when the run's
+/// result landed (nil while still in flight).
+private struct RefreshButton: View {
+    let startTime: Date?
+    let runEndTime: Date?
+    let action: () -> Void
+    @State private var hovering = false
+
+    private var inFlight: Bool { startTime != nil }
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let startTime {
+                    // The rotation exists ONLY in this branch, and its phase
+                    // is anchored to `startTime` (not wall-clock), so it
+                    // always begins upright (0°) and the switch to the static
+                    // glyph lands at a whole-turn boundary — angle zero, no
+                    // visible jump (§4.6/§8.44). (A .repeatForever animation
+                    // is NOT cancelled by a plain property write — the
+                    // round-9 spinner never stopped on-device; a TimelineView
+                    // phase was probe-proven to animate and to settle
+                    // bit-identically to the idle frame — §8.42/§8.43.)
+                    TimelineView(.animation) { context in
+                        let elapsed = context.date.timeIntervalSince(startTime)
+                        let runEnd = runEndTime.map { $0.timeIntervalSince(startTime) }
+                        let angle = ConversationsRefreshSpin.isSpinning(
+                            elapsedSeconds: elapsed, runEndSeconds: runEnd
+                        ) ? ConversationsRefreshSpin.angleDegrees(elapsedSeconds: elapsed) : 0
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .rotationEffect(.degrees(angle))
+                    }
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(RefreshButtonStyle(hovering: hovering, inFlight: inFlight))
+        .disabled(inFlight)
+        .onHover { hovering = $0 }
+        .help("Refresh")
+    }
+}
+
+/// Idle / in-flight: no ground. Hover 0.20 (raised) / press 0.26 (sunken) —
+/// the same translucent-gray family as the list-row hover. Idle stays clear
+/// so a constant gray pill uniquely reads as "disabled" (§8.42/§8.44).
+private struct RefreshButtonStyle: ButtonStyle {
+    let hovering: Bool
+    let inFlight: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let opacity: Double
+        if configuration.isPressed {
+            opacity = 0.26 // sunken
+        } else if hovering && !inFlight {
+            opacity = 0.20 // raised
+        } else {
+            opacity = 0 // idle / in-flight: no ground (§8.44)
+        }
+        return configuration.label
+            .background(Color.gray.opacity(opacity))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+/// The enabled Resume verb at the mock's exact .btn metrics (§8.39
+/// normative CSS: 13px semibold, padding 5px 18px, radius 6, accent fill,
+/// white text) — .controlSize approximations read the wrong size
+/// on-device. Hover darkens slightly; press darkens more (§8.42).
+private struct ResumeButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button("Resume", action: action)
+            .buttonStyle(ResumeButtonStyle(hovering: hovering))
+            .onHover { hovering = $0 }
+    }
+}
+
+private struct ResumeButtonStyle: ButtonStyle {
+    let hovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 18)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlAccentColor)))
+            .brightness(configuration.isPressed ? -0.12 : (hovering ? -0.06 : 0))
+    }
+}
+
+/// The sidebar divider's cursor/hover surface: AppKit cursor rects (the
+/// reliable mechanism — resetCursorRects re-registers on geometry changes)
+/// plus a tracking area for the hover callback. hitTest returns nil so the
+/// SwiftUI drag gesture on the strip keeps receiving the clicks.
+private struct ResizeCursorStrip: NSViewRepresentable {
+    let onHoverChanged: (Bool) -> Void
+
+    func makeNSView(context: Context) -> StripView {
+        let view = StripView()
+        view.onHoverChanged = onHoverChanged
+        return view
+    }
+
+    func updateNSView(_ nsView: StripView, context: Context) {
+        nsView.onHoverChanged = onHoverChanged
+    }
+
+    final class StripView: NSView {
+        var onHoverChanged: ((Bool) -> Void)?
+        private var trackingArea: NSTrackingArea?
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingArea { removeTrackingArea(trackingArea) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                owner: self, userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func mouseEntered(with event: NSEvent) { onHoverChanged?(true) }
+        override func mouseExited(with event: NSEvent) { onHoverChanged?(false) }
+
+        /// Transparent to clicks: cursor rects and tracking areas work by
+        /// registered rects, not hit testing, so the SwiftUI gesture wins.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }
 
 // MARK: - List row
@@ -262,20 +478,54 @@ private struct ConversationPreview: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // §4.6/§8.38(8): the hairline under the header shows ALWAYS,
+            // find bar or not.
+            Divider()
             if !viewModel.hits.isEmpty {
                 findBar
                 Divider()
             }
             chat
-            if let summary, viewModel.canResume(summary) {
-                Divider()
-                HStack {
-                    Spacer()
-                    Button("Resume") { viewModel.resume(summary) }
-                        .buttonStyle(.borderedProminent)
+            actionPanel
+        }
+    }
+
+    /// The bottom panel keeps a constant presence and height for every
+    /// selected conversation (§4.6/§8.38(8)): a live row shows Resume
+    /// disabled with a faint note instead of dropping the panel.
+    private var actionPanel: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 8) {
+                Spacer()
+                // §4.6 (f970e29): the note clusters immediately LEFT OF THE
+                // BUTTON — not at the panel's left edge.
+                if summary?.live == true {
+                    Text("This conversation is running")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
-                .padding(12)
+                // §4.6/§8.42: the disabled state (running rows) wears the
+                // STANDARD gray container — never the washed prominent
+                // blue; the enabled verb stays prominent at the mock's .btn
+                // size (§8.39) and reacts to hover (press is built into the
+                // prominent style).
+                if summary.map(viewModel.canResume) ?? false {
+                    ResumeButton {
+                        if let summary { viewModel.resume(summary) }
+                    }
+                } else {
+                    // The disabled twin shares the enabled button's exact
+                    // metrics (constant panel height), in the standard gray.
+                    Text("Resume")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 18)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.16)))
+                }
             }
+            .padding(12)
         }
     }
 
@@ -297,23 +547,21 @@ private struct ConversationPreview: View {
         .padding(.bottom, 6)
     }
 
+    // §4.6/§8.38(7): the macOS standard in-document find grammar — an
+    // "N of M" counter and a momentary back/forward segmented control.
+    // Next (the right segment, ⌘G) = newer; Previous (left, ⇧⌘G) = older.
     private var findBar: some View {
         HStack(spacing: 8) {
-            Text("\((viewModel.currentHitIndex ?? 0) + 1)/\(viewModel.hits.count)")
+            Text("\((viewModel.currentHitIndex ?? 0) + 1) of \(viewModel.hits.count)")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            Button {
-                viewModel.navigateToOlderHit()
-            } label: {
-                Image(systemName: "chevron.up").font(.system(size: 10))
-            }
-            .buttonStyle(.plain)
-            Button {
-                viewModel.navigateToNewerHit()
-            } label: {
-                Image(systemName: "chevron.down").font(.system(size: 10))
-            }
-            .buttonStyle(.plain)
+            FindNavigationControl(
+                onPrevious: { viewModel.navigateToOlderHit() },
+                onNext: { viewModel.navigateToNewerHit() }
+            )
+            // §8.38(8): content-sized, never stretched across the bar — the
+            // representable takes the full width proposal without this.
+            .fixedSize()
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -321,544 +569,16 @@ private struct ConversationPreview: View {
     }
 
     private var chat: some View {
-        ScrollView {
-            // No horizontal padding on the stack: user bands span the full
-            // pane width (§4.6); Claude blocks carry their own insets.
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(detail.messages.enumerated()), id: \.element.seq) { index, message in
-                    MessageView(
-                        message: message,
-                        rendered: viewModel.renderedMessages.indices.contains(index)
-                            ? viewModel.renderedMessages[index]
-                            : RenderedMessage(role: message.role, text: message.text),
-                        messageIndex: index,
-                        isFirst: index == 0,
-                        hits: viewModel.hits,
-                        currentHitIndex: viewModel.currentHitIndex,
-                        isExpanded: viewModel.expandedMessageSeqs.contains(message.seq),
-                        bodySize: bodySize,
-                        onExpand: { viewModel.expandMessage(seq: message.seq) },
-                        onCollapse: { viewModel.collapseMessage(seq: message.seq) }
-                    )
-                    .id(message.seq)
-                }
+        // §4.6 rendering engine (§8.38): the message flow — bands, Markdown,
+        // fold controls, highlights, and the hit ticks — renders in the
+        // bundled page; header, find bar, and Resume stay native. Scroll
+        // default (bottom = latest), scroll memory, and jump-to-hit are
+        // driven through the bridge; the ⌘± text size flows into the page's
+        // CSS variable.
+        WebPaneView(controller: viewModel.webPane)
+            .onAppear { viewModel.webPane.setTextSize(bodySize) }
+            .onChange(of: bodySize) { _, newSize in
+                viewModel.webPane.setTextSize(newSize)
             }
-            .padding(.top, 12)
-            .padding(.bottom, 16)
-        }
-        // §4.6: read from the bottom (latest) by default; hit jumps and
-        // scroll memory drive `scrolledMessageID` (macOS 14 `scrollPosition`).
-        .defaultScrollAnchor(.bottom)
-        .scrollPosition(id: $viewModel.scrolledMessageID)
-        // §4.6: hit distribution tick marks near the right edge while the
-        // find bar is visible (message-level approximation; overlay, not the
-        // scroller itself).
-        .overlay {
-            if !viewModel.hits.isEmpty {
-                HitTicksOverlay(
-                    fractions: viewModel.tickFractions,
-                    currentIndex: viewModel.currentHitIndex
-                )
-            }
-        }
-    }
-}
-
-/// The §4.6 hit tick marks: one small bar per hit at its approximate
-/// vertical position over the chat viewport, the current hit in the stronger
-/// color (same hue family as the highlights). Purely decorative — never
-/// intercepts clicks or scrolling.
-private struct HitTicksOverlay: View {
-    let fractions: [Double]
-    let currentIndex: Int?
-
-    var body: some View {
-        GeometryReader { geometry in
-            ForEach(fractions.indices, id: \.self) { index in
-                Capsule()
-                    .fill(index == currentIndex
-                        ? ConversationHighlight.currentColor
-                        : ConversationHighlight.baseColor)
-                    .frame(width: 8, height: 3)
-                    .position(
-                        x: geometry.size.width - 5,
-                        y: min(max(fractions[index] * geometry.size.height, 4), max(geometry.size.height - 4, 4))
-                    )
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-/// The reading pane's two-column grid (§4.6 / conversations-design.html:
-/// a 16px inset, a 12.5px centered glyph column, and a 9px gap at the 13px
-/// default body size). The band's "\u{276F}" and every Claude message's
-/// "\u{23FA}" reply marker sit in the SAME glyph column, and the band text
-/// starts at the same x as the body text — both sections use these exact
-/// values, so the alignment holds at every ⌘± text size (the column is a
-/// fixed frame, not glyph metrics, so the band's +0.5pt font can't skew it).
-/// The glyph column scales with the body size (12.5/13 of an em, like the
-/// reference CSS); inset and gap stay fixed.
-private enum MessageGrid {
-    static let leadingInset: CGFloat = 16
-    static let trailingInset: CGFloat = 18
-    static let glyphGap: CGFloat = 9
-
-    static func glyphColumnWidth(bodySize: Double) -> CGFloat {
-        CGFloat(bodySize) * 12.5 / 13
-    }
-
-    /// Where the body/band text column starts, from the pane's left edge.
-    static func bodyColumnInset(bodySize: Double) -> CGFloat {
-        leadingInset + glyphColumnWidth(bodySize: bodySize) + glyphGap
-    }
-}
-
-/// The two highlight colors (§4.6: background-color only, never bold; the
-/// current position is the stronger one). Shared by in-text highlights, the
-/// hidden-hit badge, and the tick marks so they read as one system.
-private enum ConversationHighlight {
-    static let baseColor = Color(nsColor: .systemYellow).opacity(0.4)
-    static let currentColor = Color(nsColor: .systemOrange).opacity(0.6)
-}
-
-// MARK: - One message
-
-/// One message under the §4.6 rendering grammar: a user message is a
-/// full-width band (monospaced semibold "\u{276F}" glyph + the words verbatim at
-/// body +0.5pt, regular weight — the band is the heading, so the text is
-/// not); a Claude message is its Markdown blocks. No role label lines. Long
-/// messages fold at the §9 boundary (counted on rendered text, cut on the
-/// block sequence); "Show full message" carries a hidden-hit badge, expanded
-/// messages end with "Show less".
-private struct MessageView: View {
-    let message: ConversationMessage
-    let rendered: RenderedMessage
-    let messageIndex: Int
-    let isFirst: Bool
-    let hits: [ConversationHit]
-    let currentHitIndex: Int?
-    let isExpanded: Bool
-    let bodySize: Double
-    let onExpand: () -> Void
-    let onCollapse: () -> Void
-
-    private var isUser: Bool { message.role == "user" }
-
-    /// Whether the rendered text exceeds the fold boundary at all.
-    private var exceedsFold: Bool {
-        ConversationHits.isFolded(rendered.renderedText)
-    }
-
-    private var isFolded: Bool { exceedsFold && !isExpanded }
-
-    /// Per-block visible character counts while folded, nil when everything
-    /// is visible.
-    private var foldedVisibleLengths: [Int]? {
-        guard isFolded else { return nil }
-        return ConversationsRendering.foldedVisibleLengths(
-            blockLengths: rendered.blocks.map { $0.renderedText.count },
-            limit: ConversationsConstants.messageFoldCharacterLimit
-        )
-    }
-
-    /// Hits hidden behind the fold (badge count, §4.6).
-    private var hiddenHitCount: Int {
-        guard isFolded else { return 0 }
-        return ConversationHits.hiddenHitCount(
-            hits: hits,
-            messageIndex: messageIndex,
-            visibleLimit: ConversationsConstants.messageFoldCharacterLimit
-        )
-    }
-
-    /// The reading measure (§4.6): body lines cap at about 60em so a wide
-    /// window doesn't stretch them.
-    private var readingMeasure: CGFloat { CGFloat(bodySize) * 60 }
-
-    var body: some View {
-        Group {
-            if isUser {
-                userSection
-            } else {
-                assistantSection
-            }
-        }
-        // A band gets generous space before it (a section break, §4.6);
-        // plain body flows tighter. The first message starts flush.
-        .padding(.top, isFirst ? 0 : (isUser ? 22 : 12))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: User band
-
-    private var userSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: MessageGrid.glyphGap) {
-                Text("\u{276F}")
-                    .font(.system(size: bodySize + 0.5, weight: .semibold, design: .monospaced))
-                    .frame(width: MessageGrid.glyphColumnWidth(bodySize: bodySize))
-                Text(displayText(blockIndex: 0))
-                    .font(.system(size: bodySize + 0.5))
-                    .lineSpacing(bodySize * 0.3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.init(
-                top: 7, leading: MessageGrid.leadingInset, bottom: 7, trailing: MessageGrid.trailingInset
-            ))
-            .background(Color.gray.opacity(0.1))
-            foldControl
-                .padding(.leading, MessageGrid.bodyColumnInset(bodySize: bodySize))
-        }
-    }
-
-    // MARK: Claude blocks
-
-    private var assistantSection: some View {
-        // §4.6: every Claude message starts with a small faint reply marker
-        // hanging to the LEFT of its body — same glyph column as the band's
-        // "\u{276F}" — so consecutive replies to one prompt stay
-        // distinguishable. Unconditional (no "only when consecutive"
-        // branching), no state meaning, no color coding. The marker is a
-        // separate view, never part of the rendered text (hit computation
-        // and the fold boundary don't see it). Top alignment (not
-        // firstTextBaseline): the first block can be a code block, whose
-        // baseline would drag the marker to its bottom; a line-height frame
-        // centers the dot on the first text line instead.
-        HStack(alignment: .top, spacing: MessageGrid.glyphGap) {
-            Text("\u{23FA}")
-                .font(.system(size: bodySize * 0.7))
-                .foregroundStyle(.secondary)
-                .frame(
-                    width: MessageGrid.glyphColumnWidth(bodySize: bodySize),
-                    height: bodySize * 1.25
-                )
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(Array(rendered.blocks.enumerated()), id: \.offset) { index, block in
-                    if visibleLength(blockIndex: index) > 0 {
-                        blockView(block, blockIndex: index)
-                    }
-                }
-                foldControl
-            }
-            .frame(maxWidth: readingMeasure, alignment: .leading)
-        }
-        .padding(.leading, MessageGrid.leadingInset)
-        .padding(.trailing, MessageGrid.trailingInset)
-    }
-
-    @ViewBuilder
-    private func blockView(_ block: MessageBlock, blockIndex: Int) -> some View {
-        switch block.kind {
-        case .userText, .paragraph:
-            Text(displayText(blockIndex: blockIndex))
-                .font(.system(size: bodySize))
-                .lineSpacing(bodySize * 0.35)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        case .heading(let level):
-            Text(displayText(blockIndex: blockIndex))
-                .font(.system(size: headingSize(level), weight: .semibold))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
-        case .listItem(let indent):
-            Text(displayText(blockIndex: blockIndex))
-                .font(.system(size: bodySize))
-                .lineSpacing(bodySize * 0.35)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, CGFloat(indent) * 14)
-        case .codeBlock:
-            // §4.6: monospace + subtle background + horizontal scroll, body
-            // -1.5pt (§9), inside the reading measure.
-            ScrollView(.horizontal) {
-                Text(displayText(blockIndex: blockIndex))
-                    .font(.system(size: bodySize + ConversationsTextSize.codeDelta, design: .monospaced))
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-            }
-            .background(Color.gray.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        case .table(let rows):
-            tableView(rows: rows, blockIndex: blockIndex)
-        }
-    }
-
-    // MARK: Pipe table (§4.6/§8.37)
-
-    /// A pipe table as a native grid: header row semibold on a subtle
-    /// background, hairline separators between rows, all columns
-    /// left-aligned (alignment hints are ignored), rounded hairline border.
-    /// The table keeps its CONTENT width (never stretched to the reading
-    /// measure); a wide table scrolls horizontally inside itself — the code
-    /// block grammar (§4.6). `ViewThatFits` picks the plain content-width
-    /// grid when it fits the measure and the in-table scroller otherwise.
-    @ViewBuilder
-    private func tableView(rows: [[TableCell]], blockIndex: Int) -> some View {
-        ViewThatFits(in: .horizontal) {
-            tableChrome(tableGrid(rows: rows, blockIndex: blockIndex))
-            tableChrome(ScrollView(.horizontal) { tableGrid(rows: rows, blockIndex: blockIndex) })
-        }
-    }
-
-    /// Rounded hairline border + matching clip, shared by the fitting and
-    /// the scrolling variants (the html .tbl reference chrome).
-    private func tableChrome(_ content: some View) -> some View {
-        content
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color(nsColor: .separatorColor))
-            )
-    }
-
-    private func tableGrid(rows: [[TableCell]], blockIndex: Int) -> some View {
-        // Fold intersection (§4.6): when the fold cut lands mid-table, show
-        // only the cells within the rendered-text budget — the straddling
-        // cell shows its prefix, cells past the cut disappear (hidden cells
-        // are always a suffix of the table, so no grid column is skipped
-        // mid-row). When not folded, everything is visible, including
-        // genuinely empty cells, which keep their grid slot.
-        let isFoldedCut = foldedVisibleLengths != nil
-        let budget = visibleLength(blockIndex: blockIndex)
-        let blockStart = rendered.blockStartOffsets.indices.contains(blockIndex)
-            ? rendered.blockStartOffsets[blockIndex]
-            : 0
-        return Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-            ForEach(rows.indices, id: \.self) { rowIndex in
-                let row = rows[rowIndex]
-                if !isFoldedCut || row.contains(where: { cellIsWithinBudget($0, budget: budget) }) {
-                    GridRow {
-                        ForEach(row.indices, id: \.self) { columnIndex in
-                            let cell = row[columnIndex]
-                            if !isFoldedCut || cellIsWithinBudget(cell, budget: budget) {
-                                tableCellView(
-                                    cell,
-                                    isHeader: rowIndex == 0,
-                                    visibleCount: isFoldedCut
-                                        ? max(0, min(cell.renderedText.count, budget - cell.startOffset))
-                                        : cell.renderedText.count,
-                                    blockStart: blockStart
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Ideal (content) width in both ViewThatFits variants: never
-        // stretched to the measure, and inside the horizontal scroller the
-        // infinite proposal must not inflate the flexible cells.
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    /// While folded, a cell stays on screen exactly while the cut has not
-    /// passed its start: a straddling cell shows its prefix, an empty cell
-    /// inside the visible part keeps its slot, cells past the cut disappear.
-    private func cellIsWithinBudget(_ cell: TableCell, budget: Int) -> Bool {
-        cell.startOffset < budget
-    }
-
-    private func tableCellView(
-        _ cell: TableCell, isHeader: Bool, visibleCount: Int, blockStart: Int
-    ) -> some View {
-        Text(highlightedFragment(
-            cell.text,
-            visibleCount: visibleCount,
-            startOffsetInMessage: blockStart + cell.startOffset,
-            baseSize: bodySize
-        ))
-        .font(.system(size: bodySize, weight: isHeader ? .semibold : .regular))
-        .textSelection(.enabled)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(isHeader ? Color.gray.opacity(0.1) : Color.clear)
-        .overlay(alignment: .top) {
-            // CSS reference: a hairline above every data row (none above the
-            // header). Per-cell overlays tile into a continuous rule because
-            // the cells fill their columns with zero spacing.
-            if !isHeader {
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor))
-                    .frame(height: 1)
-            }
-        }
-    }
-
-    /// Heading sizes step down from level 1 to 6, relative to the body.
-    private func headingSize(_ level: Int) -> Double {
-        switch level {
-        case 1: return bodySize + 6
-        case 2: return bodySize + 4
-        case 3: return bodySize + 2
-        default: return bodySize + 1
-        }
-    }
-
-    // MARK: Fold controls (§4.6)
-
-    @ViewBuilder
-    private var foldControl: some View {
-        if isFolded {
-            HStack(spacing: 6) {
-                Button("Show full message", action: onExpand)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.accentColor)
-                if let badge = ConversationHits.matchBadgeText(count: hiddenHitCount) {
-                    Text(badge)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(ConversationHighlight.baseColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-            }
-        } else if exceedsFold {
-            Button("Show less", action: onCollapse)
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(Color.accentColor)
-        }
-    }
-
-    // MARK: Text assembly
-
-    /// Number of this block's rendered characters currently visible.
-    private func visibleLength(blockIndex: Int) -> Int {
-        guard rendered.blocks.indices.contains(blockIndex) else { return 0 }
-        if let visible = foldedVisibleLengths, visible.indices.contains(blockIndex) {
-            return visible[blockIndex]
-        }
-        return rendered.blocks[blockIndex].renderedText.count
-    }
-
-    /// One block's display text — `highlightedFragment` at block granularity
-    /// (table cells call it per cell instead).
-    private func displayText(blockIndex: Int) -> AttributedString {
-        guard rendered.blocks.indices.contains(blockIndex) else { return AttributedString() }
-        let block = rendered.blocks[blockIndex]
-        return highlightedFragment(
-            block.text,
-            visibleCount: visibleLength(blockIndex: blockIndex),
-            startOffsetInMessage: rendered.blockStartOffsets.indices.contains(blockIndex)
-                ? rendered.blockStartOffsets[blockIndex]
-                : 0,
-            baseSize: baseSize(for: block.kind)
-        )
-    }
-
-    /// One displayed fragment (a block, or one table cell): the (possibly
-    /// fold-truncated) content with inline intents mapped to concrete
-    /// styles, then a background-color highlight on every fully visible hit
-    /// (§4.6: background attribute only, never bold — bold would change
-    /// wrapping and break the "scroll doesn't move" rule; highlights come
-    /// LAST so they win over the inline-code background). The current
-    /// position gets the stronger color. Hit offsets are in the message's
-    /// joined rendered text; `startOffsetInMessage` maps them into this
-    /// fragment. A hit can't span fragments (terms contain no whitespace,
-    /// every join character is "\n").
-    private func highlightedFragment(
-        _ source: AttributedString,
-        visibleCount: Int,
-        startOffsetInMessage: Int,
-        baseSize: Double
-    ) -> AttributedString {
-        var attributed = source
-        let fullCount = attributed.characters.count
-        if visibleCount < fullCount {
-            let characters = attributed.characters
-            if let end = characters.index(
-                characters.startIndex, offsetBy: max(0, visibleCount), limitedBy: characters.endIndex
-            ) {
-                attributed = AttributedString(attributed[attributed.startIndex..<end])
-            }
-        }
-        attributed = styledInline(attributed, baseSize: baseSize)
-
-        for (globalIndex, hit) in hits.enumerated() where hit.messageIndex == messageIndex {
-            let localStart = hit.start - startOffsetInMessage
-            let localEnd = localStart + hit.length
-            // Only hits fully inside this fragment's visible part; a hit
-            // straddling the fold stays un-highlighted (it is counted in the
-            // hidden-hit badge instead).
-            guard localStart >= 0, localEnd <= visibleCount else { continue }
-            let characters = attributed.characters
-            guard let lower = characters.index(
-                characters.startIndex, offsetBy: localStart, limitedBy: characters.endIndex
-            ), let upper = characters.index(
-                lower, offsetBy: hit.length, limitedBy: characters.endIndex
-            ) else { continue }
-            attributed[lower..<upper].backgroundColor = globalIndex == currentHitIndex
-                ? ConversationHighlight.currentColor
-                : ConversationHighlight.baseColor
-        }
-        return attributed
-    }
-
-    /// Map Foundation's inline presentation intents (from the markdown
-    /// parse) to concrete SwiftUI attributes at the current body size:
-    /// bold/italic via font, inline code as monospaced with a subtle
-    /// background, strikethrough as a line style. Links keep the `.link`
-    /// attribute (SwiftUI styles and opens them); style is all §4.6 asks.
-    /// The intent attribute itself is cleared afterwards so the mapping here
-    /// is the single source of the styling. Spans are collected as character
-    /// offsets first and applied after — mutating attributes invalidates the
-    /// indices of the runs being walked.
-    /// The base font size of a block's plain runs — inline spans style
-    /// relative to it so e.g. a code span inside a heading keeps the
-    /// heading's size.
-    private func baseSize(for kind: MessageBlock.Kind) -> Double {
-        switch kind {
-        case .userText: return bodySize + 0.5
-        case .heading(let level): return headingSize(level)
-        case .codeBlock: return bodySize + ConversationsTextSize.codeDelta
-        case .paragraph, .listItem, .table: return bodySize
-        }
-    }
-
-    private func styledInline(_ source: AttributedString, baseSize: Double) -> AttributedString {
-        var spans: [(start: Int, length: Int, intent: InlinePresentationIntent)] = []
-        let sourceCharacters = source.characters
-        for run in source.runs {
-            guard let intent = run.inlinePresentationIntent else { continue }
-            spans.append((
-                start: sourceCharacters.distance(from: sourceCharacters.startIndex, to: run.range.lowerBound),
-                length: sourceCharacters.distance(from: run.range.lowerBound, to: run.range.upperBound),
-                intent: intent
-            ))
-        }
-        guard !spans.isEmpty else { return source }
-
-        var result = source
-        for span in spans {
-            let characters = result.characters
-            guard let lower = characters.index(
-                characters.startIndex, offsetBy: span.start, limitedBy: characters.endIndex
-            ), let upper = characters.index(
-                lower, offsetBy: span.length, limitedBy: characters.endIndex
-            ) else { continue }
-            if span.intent.contains(.code) {
-                result[lower..<upper].font = .system(size: baseSize, design: .monospaced)
-                result[lower..<upper].backgroundColor = Color.gray.opacity(0.12)
-            } else if span.intent.contains(.stronglyEmphasized) || span.intent.contains(.emphasized) {
-                var font: Font = .system(size: baseSize)
-                if span.intent.contains(.stronglyEmphasized) { font = font.weight(.semibold) }
-                if span.intent.contains(.emphasized) { font = font.italic() }
-                result[lower..<upper].font = font
-            }
-            if span.intent.contains(.strikethrough) {
-                result[lower..<upper].strikethroughStyle = .single
-            }
-            result[lower..<upper].inlinePresentationIntent = nil
-        }
-        return result
     }
 }

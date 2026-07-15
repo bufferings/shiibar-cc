@@ -1,5 +1,5 @@
 // Agents window periodic refresh tuning (DESIGN.md §4.5 "the agent list window", M26
-// T3): while the "Open as Window" list is visible, its elapsed-time base is
+// T3): while the Agents window's list is visible, its elapsed-time base is
 // re-taken once a minute (display is minute-granularity, so no per-second
 // ticking is needed — the dropdown's "reopen to refresh" idea, automated
 // because this container lives longer). The actual `Timer` that drives this

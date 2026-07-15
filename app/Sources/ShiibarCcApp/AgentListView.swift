@@ -345,7 +345,7 @@ private struct AgentListTopBar: View {
     /// ordering (§4.5/§8.30, M27 T4) is identical to the app menu
     /// (`AppMenuCommands`) — About / - / Settings… / Setup Check… / - /
     /// Rescan / Clear badges / Sort by / - / window verb / Quit. The last
-    /// group differs per container: the window verb swaps (Open as Window
+    /// group differs per container: the window verb swaps (Agents\u{2026}
     /// here — a ⌄-specific item, the Agents window has no ⌄ — vs Close
     /// Window in the app menu), and Keep on Top, being a property of the
     /// window, exists only in the app menu (§4.5/§8.33, M30).
@@ -358,7 +358,7 @@ private struct AgentListTopBar: View {
         guard let anchor = menuAnchor else { return }
         menuHandler.state = state
         menuHandler.openWindow = openWindow
-        // Only meaningful for `openAsWindow` — the dropdown panel's own
+        // Only meaningful for `openAgentsWindow` — the dropdown panel's own
         // NSWindow, read fresh on every click so the frame captured there
         // is current.
         menuHandler.containerWindow = anchor.window
@@ -400,51 +400,24 @@ private struct AgentListTopBar: View {
         menu.addItem(sort)
         menu.addItem(.separator())
 
-        // Open as Window (§4.5 "the agent list window", M26 T2 / M27 T4): sits
-        // where the app menu puts Close Window — both menus end their last
-        // group in "window verb + Quit", with the verb swapping per
-        // container (the app menu's Keep on Top above its verb is
-        // app-menu-only, §4.5/§8.33).
-        //
-        // Disabled while the Agents window exists (§4.5 — same "disabled
-        // when meaningless" convention as Clear badges; raising the open
-        // window is Dock click / ⌘Tab's job, and resetting its position is
-        // close + reopen). The "window exists" signal is the activation
-        // policy: `AgentsWindowViewModel` is the ONLY policy writer and
-        // flips it to `.regular` / `.accessory` on exactly this window's
-        // title-filtered open/close (M27 T1), so reading it back here is
-        // the same state machine with no second derivation to drift. It
-        // also gets the minimized case right for free: minimizing fires no
-        // `willClose`, so the policy stays `.regular` and the item stays
-        // disabled — whereas probing `NSApp.windows` would need the
-        // `isVisible || isMiniaturized` subtlety (`isVisible` is false
-        // while miniaturized) plus an assumption about whether SwiftUI
-        // keeps the closed NSWindow lingering in `NSApp.windows`. The gap
-        // between `openWindow(id:)` and the policy flip can't be observed
-        // from here: the dropdown (and this menu) is dismissed before the
-        // window opens.
+        // The window-verb island (§4.5/§8.40): Agents… / Conversations… —
+        // "object name + …" grammar, separated from Quit. Always enabled
+        // (§8.43): with the window already open the press RAISES it — the
+        // finger that opened the menu reaches the window — and only a fresh
+        // open uses the icon-anchored placement.
         menu.addItem(
             makeItem(
-                "Open as Window",
-                action: #selector(VMenuHandler.openAsWindow),
-                isEnabled: !state.isAgentsWindowOpen
+                "Agents\u{2026}",
+                action: #selector(VMenuHandler.openAgentsWindow)
             )
         )
-        // Conversations… (§4.5/§4.6, M35 T8): directly below Open as Window,
-        // NO extra separator — the last group stays "window verbs + Quit".
-        // Disabled while the Conversations window exists (same "disabled when
-        // meaningless" convention as Open as Window; raising it is Dock click
-        // / ⌘Tab's job). The window-open signal is per-window now
-        // (`AppState.openRegularWindowTitles`) because BOTH windows share the
-        // regular-app activation policy — activation policy alone can no
-        // longer tell them apart (M35 T3).
         menu.addItem(
             makeItem(
-                "Conversations…",
-                action: #selector(VMenuHandler.openConversations),
-                isEnabled: !state.isConversationsWindowOpen
+                "Conversations\u{2026}",
+                action: #selector(VMenuHandler.openConversations)
             )
         )
+        menu.addItem(.separator())
         menu.addItem(makeItem("Quit", action: #selector(VMenuHandler.quit)))
 
         // Position in SCREEN coordinates (in: nil) so the result doesn't
@@ -487,7 +460,7 @@ private final class VMenuHandler: NSObject {
     /// with re-assigning it each time, unlike `state` above).
     var openWindow: OpenWindowAction?
     /// The dropdown panel's own NSWindow (the ⌄ menu exists only in the
-    /// dropdown, §4.5/§8.30, M27 T3) — used by `openAsWindow` to read the
+    /// dropdown, §4.5/§8.30, M27 T3) — used by `openAgentsWindow` to read the
     /// panel's screen frame right before dismissing it.
     var containerWindow: NSWindow?
 
@@ -524,9 +497,10 @@ private final class VMenuHandler: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: SettingsWindow.id)
     }
-    /// Open as Window (§4.5 "the agent list window", M26 T2). Only reachable
-    /// while no Agents window exists — the menu item is disabled otherwise
-    /// (§4.5; see `presentMenu`), so this always opens a fresh window.
+    /// Agents… (§4.5 "the agent list window", M26 T2; renamed from Open as
+    /// Window — §8.40). §8.43: raises the existing window when there is
+    /// one (never re-anchoring it); otherwise opens fresh with the
+    /// icon-anchored placement.
     ///
     /// Steps, in this order: 1) read the dropdown panel's screen frame
     /// BEFORE dismissing it (dismissing/closing could otherwise change or
@@ -544,7 +518,11 @@ private final class VMenuHandler: NSObject {
     /// main-queue retry loop was measured to land after the reopen's first
     /// paint (SwiftUI shows its restored frame first), a visible jump. See
     /// `AgentsWindowPlacer` for the measurements.
-    @objc func openAsWindow(_ sender: Any?) {
+    @objc func openAgentsWindow(_ sender: Any?) {
+        if state?.raiseWindow(titled: AgentsWindow.title) == true {
+            state?.dismissDropdown()
+            return
+        }
         guard let panelWindow = containerWindow else { return }
         state?.expectAgentsWindowPlacement(
             topLeft: NSPoint(x: panelWindow.frame.minX, y: panelWindow.frame.maxY),
@@ -563,6 +541,7 @@ private final class VMenuHandler: NSObject {
     /// while no Conversations window exists (the item is disabled otherwise).
     @objc func openConversations(_ sender: Any?) {
         state?.dismissDropdown()
+        if state?.raiseWindow(titled: ConversationsWindow.title) == true { return }
         NSApp.activate(ignoringOtherApps: true)
         openWindow?(id: ConversationsWindow.id)
     }

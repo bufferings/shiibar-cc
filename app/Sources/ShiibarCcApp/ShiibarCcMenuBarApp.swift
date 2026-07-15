@@ -62,8 +62,9 @@ struct ShiibarCcMenuBarApp: App {
         }
         .windowResizability(.contentSize)
 
-        // Agents window (§4.5 "the agent list window", M26): the ⌄ menu's "Open as
-        // Window" (AgentListView's VMenuHandler.openAsWindow) opens this —
+        // Agents window (§4.5 "the agent list window", M26): the ⌄
+        // menu's "Agents…" (AgentListView's VMenuHandler.openAgentsWindow,
+        // renamed from Open as Window — §8.40) opens this —
         // same shared list content as the dropdown (`AgentListView`), an
         // ordinary window that stays open until closed instead of closing
         // on outside click. `windowResizability(.contentSize)` derives the
@@ -83,7 +84,7 @@ struct ShiibarCcMenuBarApp: App {
         // harness, macOS 14): the style keeps `.titled` in the styleMask,
         // keeps all three standard buttons, and still sets `NSWindow.title`
         // to the scene title below (only `titleVisibility` goes hidden) —
-        // so the title-based window lookup (`VMenuHandler.openAsWindow`),
+        // so the title-based window lookup (`VMenuHandler.openAgentsWindow`),
         // the lifecycle filter (`AgentsWindowViewModel`), and Mission
         // Control's listing keep working unchanged; the band also remains
         // the window's standard title-bar drag area.
@@ -144,7 +145,7 @@ enum SettingsWindow {
 
 /// The Agents `Window` scene's stable id/title (§4.5 "the agent list window", M26),
 /// shared between the scene declaration above, the `openWindow(id:)` +
-/// title-filter resolution in `AgentListView`'s `VMenuHandler.openAsWindow`,
+/// title-filter resolution in `AgentListView`'s `VMenuHandler.openAgentsWindow`,
 /// and `AgentsWindowViewModel`'s window-lifecycle title filter — the same
 /// title-filter idea `SetupCheckWindow.title` uses for
 /// `SetupCheckViewModel.observeWindowLifecycle` (M16).
@@ -156,14 +157,15 @@ enum AgentsWindow {
 /// The Conversations `Window` scene's stable id/title (§4.6, M35), shared
 /// between the scene declaration above, the `openWindow(id:)` call sites (⌄
 /// menu / app menu), and the window-lifecycle title filter in
-/// `ConversationsWindowViewModel`. Initial size 640×480pt, sidebar 250pt
-/// (§9); resizable both axes, size and position remembered.
+/// `ConversationsWindowViewModel`. Initial size 640×480pt; resizable both
+/// axes, size and position remembered. The sidebar width lives in
+/// `ConversationsConstants` (§9: initial 250pt, draggable 200-400pt,
+/// remembered — §8.38(7)).
 enum ConversationsWindow {
     static let id = "conversations"
     static let title = "Conversations"
     static let defaultWidth: CGFloat = 640
     static let defaultHeight: CGFloat = 480
-    static let leftPaneWidth: CGFloat = 250
 }
 
 @MainActor
@@ -185,6 +187,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state = AppState(helpersDirectory: helpersDirectory)
         appMenuModel = AppMenuModel(state: state)
         super.init()
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // §4.5/§8.42: keep the Edit menu to its standard text verbs. These
+        // two defaults suppress the system-injected items entirely —
+        // verified empirically with a probe app (with the keys registered
+        // before finishLaunching, "Start Dictation…" and "Emoji & Symbols"
+        // never appear; without them they do). `register` is non-persistent
+        // (the user's defaults DB stays clean) and launch-safe (plain
+        // UserDefaults, no NSApp). AutoFill and the standard group's Delete
+        // have no working suppression (probe-measured: hides and removals
+        // are reverted by SwiftUI's open-time menu rebuild; three candidate
+        // AutoFill defaults keys had no effect) and remain visible.
+        UserDefaults.standard.register(defaults: [
+            "NSDisabledDictationMenuItem": true,
+            "NSDisabledCharacterPaletteMenuItem": true,
+        ])
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

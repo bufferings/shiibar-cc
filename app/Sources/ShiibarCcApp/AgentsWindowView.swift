@@ -373,8 +373,8 @@ struct AgentsWindowView: View {
             // app: without it the window can open behind other apps, or
             // never gain key/focus at all (§4.5), same requirement as
             // Setup Check / Settings. Belt-and-braces only — the primary
-            // trigger is at the "Open as Window" click site itself
-            // (AgentListView's VMenuHandler.openAsWindow calls
+            // trigger is at the "Agents…" click site itself
+            // (AgentListView's VMenuHandler.openAgentsWindow calls
             // `NSApp.activate` on every click); `onAppear` fires only once
             // per app run for this `Window` scene (M16 precedent, see
             // `SetupCheckViewModel.observeWindowLifecycle`).

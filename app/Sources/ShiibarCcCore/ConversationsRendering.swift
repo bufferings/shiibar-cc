@@ -329,17 +329,22 @@ public enum ConversationsRendering {
     }
 
     /// Inline markdown (code / bold / italic / strikethrough / links) via
-    /// Foundation's parser, preserving whitespace and newlines. A parse
-    /// failure falls back to the literal text — a message never fails to
-    /// render (§4.6).
+    /// Foundation's parser, preserving whitespace and newlines, followed by
+    /// the conservative emphasis supplement (§4.6: markers the parser left
+    /// literal next to CJK punctuation become emphasis when the pairing is
+    /// unambiguous). The supplement runs HERE, before the block's rendered
+    /// text is derived, so hit and fold coordinates match the display. A
+    /// parse failure falls back to the literal text — a message never fails
+    /// to render (§4.6).
     private static func inlineAttributed(_ source: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        return (try? AttributedString(markdown: source, options: options))
+        let parsed = (try? AttributedString(markdown: source, options: options))
             ?? AttributedString(source)
+        return ConversationsEmphasisSupplement.apply(parsed)
     }
 
     /// An opening fence: up to 3 leading spaces, then 3+ backticks or tildes.

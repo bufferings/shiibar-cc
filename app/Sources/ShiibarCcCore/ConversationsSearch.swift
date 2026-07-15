@@ -17,6 +17,16 @@ public enum ConversationsConstants {
     /// §9: a message longer than this many characters is folded behind
     /// `Show full message` (the DB still holds the full text).
     public static let messageFoldCharacterLimit: Int = 500
+
+    /// §9: the sidebar starts at 250pt and drags between 200 and 400pt
+    /// (§8.38(7); the width is remembered in UserDefaults).
+    public static let sidebarInitialWidth: Double = 250
+    public static let sidebarMinimumWidth: Double = 200
+    public static let sidebarMaximumWidth: Double = 400
+
+    public static func clampSidebarWidth(_ width: Double) -> Double {
+        min(max(width, sidebarMinimumWidth), sidebarMaximumWidth)
+    }
 }
 
 /// The query-term rules the app shares with the CLI search (§4.6): trim
@@ -145,6 +155,31 @@ public enum ConversationHits {
             searchStart = range.upperBound > range.lowerBound ? range.upperBound : text.index(after: range.lowerBound)
         }
         return result
+    }
+}
+
+/// Find-bar navigation targets (§4.6/§8.38(7)(8)): WRAPPING at the ends
+/// (the ⌘G convention), and ALWAYS producing a target while hits exist —
+/// every press scrolls to the current hit even when the index lands on the
+/// same place (a single hit wraps onto itself; the round-4 defect was a
+/// guard that skipped the jump entirely when the index had nowhere to go).
+public enum ConversationsHitNavigation {
+    /// ⌘G / the › segment: toward newer hits, wrapping past the newest back
+    /// to the oldest.
+    public static func next(current: Int?, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        guard let current else { return count - 1 }
+        let clamped = min(max(current, 0), count - 1)
+        return (clamped + 1) % count
+    }
+
+    /// ⇧⌘G / the ‹ segment: toward older hits, wrapping past the oldest back
+    /// to the newest.
+    public static func previous(current: Int?, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        guard let current else { return count - 1 }
+        let clamped = min(max(current, 0), count - 1)
+        return (clamped - 1 + count) % count
     }
 }
 

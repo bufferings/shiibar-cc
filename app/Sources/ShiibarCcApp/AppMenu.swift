@@ -14,6 +14,7 @@
 //    Edit items (AutoFill / Start Dictation / Emoji & Symbols), and stacked
 //    separators where replaced-empty app-menu groups used to be.
 //  - `MainMenuPruner` (bottom) therefore HIDES everything but the app menu
+//    and Edit (§8.41 — standard text shortcuts need Edit's key equivalents)
 //    (and the surplus separators). Hiding, not removing, is load-bearing:
 //    removed items were re-added synchronously by every commands
 //    invalidation — including one landing while the user had the menu open,
@@ -47,26 +48,45 @@ final class AppMenuModel: ObservableObject {
     /// facade like the other two, so agent churn can never invalidate the
     /// menu through it.
     @Published private(set) var keepOnTop: Bool
-    /// Whether the Conversations window exists (§4.6, M35 T8) — gates the app
-    /// menu's "Conversations…" item. Routed through this facade like the
-    /// others; window open/close is infrequent, so an invalidation on a real
-    /// change is fine, and agent churn (which never touches it) can't reach
-    /// the menu through it.
-    @Published private(set) var conversationsWindowOpen: Bool
     /// Whether the Agents (list) window exists (§4.5, M35 T3) — gates "Keep
     /// on Top", which is Agents-window-only and meaningless when that window
     /// is absent. Reachable now that the Conversations window can also raise
     /// the app menu with no Agents window present.
     @Published private(set) var agentsWindowOpen: Bool
+    /// Whether ⌘W currently has something to close (§4.5/§8.40: Close
+    /// Window is disabled when there is no closable window — e.g. every
+    /// window minimized while the app stays regular). Tracked off the
+    /// NSWindow key notifications, sampled a tick later so the resign case
+    /// reads the NEXT key window, and deduped like everything else here.
+    ///
+    /// Starts FALSE — the launch-time truth (no windows exist yet) — and is
+    /// never read from global app state in init: this model is constructed
+    /// inside `AppDelegate.init`, which runs during the App struct's body
+    /// evaluation, BEFORE NSApplication exists. Reading the implicitly
+    /// unwrapped `NSApp` there trapped at every launch (the same
+    /// init-time-global lesson as `NotificationManager`'s lazy
+    /// `UNUserNotificationCenter`).
+    @Published private(set) var hasClosableWindow: Bool
 
     private var subscriptions: Set<AnyCancellable> = []
 
-    init(state: AppState) {
+    /// `keyWindowProvider` is only ever invoked from NSWindow notification
+    /// callbacks (post-launch by definition); the default reads
+    /// `NSApplication.shared` lazily and safely. Injectable for the
+    /// launch-safety regression test.
+    init(
+        state: AppState,
+        keyWindowProvider: @escaping () -> Bool = {
+            // Only ever called from NSWindow notifications delivered on the
+            // main thread (post-launch); assumeIsolated makes that explicit.
+            MainActor.assumeIsolated { NSApplication.shared.keyWindow != nil }
+        }
+    ) {
         hasUnreviewed = state.hasUnreviewed
         sortMode = state.sortMode
         keepOnTop = state.keepAgentsWindowOnTop
-        conversationsWindowOpen = state.isConversationsWindowOpen
         agentsWindowOpen = state.isAgentsWindowOpen
+        hasClosableWindow = false
         // `$agents` emits the NEW array (willSet timing), so deriving from
         // the emitted value — not from `state.hasUnreviewed`, which still
         // reads the old array at that instant — is load-bearing.
@@ -84,15 +104,23 @@ final class AppMenuModel: ObservableObject {
             .sink { [weak self] in self?.keepOnTop = $0 }
             .store(in: &subscriptions)
         state.$openRegularWindowTitles
-            .map { $0.contains(ConversationsWindow.title) }
-            .removeDuplicates()
-            .sink { [weak self] in self?.conversationsWindowOpen = $0 }
-            .store(in: &subscriptions)
-        state.$openRegularWindowTitles
             .map { $0.contains(AgentsWindow.title) }
             .removeDuplicates()
             .sink { [weak self] in self?.agentsWindowOpen = $0 }
             .store(in: &subscriptions)
+        let center = NotificationCenter.default
+        Publishers.MergeMany(
+            center.publisher(for: NSWindow.didBecomeKeyNotification),
+            center.publisher(for: NSWindow.didResignKeyNotification),
+            center.publisher(for: NSWindow.willCloseNotification),
+            center.publisher(for: NSWindow.didMiniaturizeNotification),
+            center.publisher(for: NSWindow.didDeminiaturizeNotification)
+        )
+        .receive(on: DispatchQueue.main) // sample after the transition lands
+        .map { _ in keyWindowProvider() }
+        .removeDuplicates()
+        .sink { [weak self] in self?.hasClosableWindow = $0 }
+        .store(in: &subscriptions)
     }
 }
 
@@ -134,43 +162,60 @@ struct AppMenuCommands: Commands {
         }
         CommandGroup(after: .appSettings) {
             Divider()
-            Button("Rescan") { state.runReconcile(showFeedback: true) }
-                .keyboardShortcut("r")
-            Button("Clear badges") { state.clearBadges() }
-                .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
-            Picker("Sort by", selection: Binding(
-                get: { menuModel.sortMode },
-                set: { state.setSortMode($0) }
-            )) {
-                ForEach(SortMode.allCases, id: \.self) { mode in
-                    Text(mode.menuTitle).tag(mode)
+            // §4.5/§8.40: the Agents-only items sit under a section header
+            // "Agents" (the macOS small gray header — SwiftUI `Section`
+            // renders it as the header-styled menu item) so their
+            // belonging reads without renaming each item.
+            Section("Agents") {
+                Button("Rescan") { state.runReconcile(showFeedback: true) }
+                    .keyboardShortcut("r")
+                Button("Clear badges") { state.clearBadges() }
+                    .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
+                Picker("Sort by", selection: Binding(
+                    get: { menuModel.sortMode },
+                    set: { state.setSortMode($0) }
+                )) {
+                    ForEach(SortMode.allCases, id: \.self) { mode in
+                        Text(mode.menuTitle).tag(mode)
+                    }
+                }
+                // Keep on Top (§4.5/§8.33, M30): a `Toggle` renders as a
+                // checkmarked menu item showing the current value. No
+                // shortcut (§4.5). ON keeps the Agents window at the
+                // floating level — level only, no Space following (§8.33);
+                // default OFF, remembered (`setKeepAgentsWindowOnTop`).
+                // Agents-window-only — disabled when the list window is
+                // absent (the app menu can also be raised by the
+                // Conversations window, which has no level to pin).
+                Toggle("Keep on Top", isOn: Binding(
+                    get: { menuModel.keepOnTop },
+                    set: { state.setKeepAgentsWindowOnTop($0) }
+                ))
+                .disabled(!menuModel.agentsWindowOpen)
+            }
+            Divider()
+            // The window-verb island (§4.5/§8.40): Agents… (renamed Open as
+            // Window, now in the app menu too) / Conversations… / Close
+            // Window — object-name grammar, separated from Quit. Always
+            // enabled (§8.43): raise the existing window, else open fresh.
+            Button("Agents\u{2026}") {
+                if !state.raiseWindow(titled: AgentsWindow.title) {
+                    openWindow(id: AgentsWindow.id)
                 }
             }
-        }
-        CommandGroup(replacing: .appTermination) {
-            // Keep on Top (§4.5/§8.33, M30): first item of the last group,
-            // above Close Window; a `Toggle` renders as a checkmarked menu
-            // item showing the current value. No shortcut (§4.5). ON keeps
-            // the Agents window at the floating level — level only, no
-            // Space following (§8.33); default OFF, remembered across
-            // opens and launches (`AppState.setKeepAgentsWindowOnTop`).
-            Toggle("Keep on Top", isOn: Binding(
-                get: { menuModel.keepOnTop },
-                set: { state.setKeepAgentsWindowOnTop($0) }
-            ))
-            // §4.5/M35 T3: Agents-window-only — disabled when the list window
-            // is absent (the app menu can now also be raised by the
-            // Conversations window, which has no window level to pin).
-            .disabled(!menuModel.agentsWindowOpen)
-            // §4.5: standard close-the-key-window behavior. Lives in the
-            // app menu because there is no File menu to host ⌘W.
+            Button("Conversations\u{2026}") {
+                if !state.raiseWindow(titled: ConversationsWindow.title) {
+                    openWindow(id: ConversationsWindow.id)
+                }
+            }
+            // §4.5: standard close-the-key-window behavior (no File menu to
+            // host ⌘W); disabled when nothing is closable (§8.40 — honest
+            // over a silent no-op).
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w")
-            // Conversations… (§4.5/§4.6, M35 T8): below Close Window, above
-            // Quit — identical to the ⌄ menu's item. Disabled while the
-            // Conversations window exists (via the deduped facade).
-            Button("Conversations…") { openWindow(id: ConversationsWindow.id) }
-                .disabled(menuModel.conversationsWindowOpen)
+                .disabled(!menuModel.hasClosableWindow)
+        }
+        CommandGroup(replacing: .appTermination) {
             // §4.5/§8.8: same Quit path as the ⌄ item — waits for the
             // daemon's shutdown ack (with `AppState.quit`'s hard deadline),
             // never a bare `terminate`.
@@ -180,18 +225,21 @@ struct AppMenuCommands: Commands {
     }
 }
 
-/// Empties the standard File/Edit/Format/View/Window/Help command groups
-/// (§4.5: no menus besides the app menu). `MainMenuPruner` removes the
-/// husk menus this leaves behind. Split in two because `CommandsBuilder`
-/// caps a block at 10 children.
+/// Empties the standard File/Format/View/Window/Help command groups.
+/// §4.5/§8.41: the EDIT menu stays — its standard Undo/Redo (`.undoRedo`)
+/// and Cut/Copy/Paste/Select All (`.pasteboard`) groups are deliberately
+/// NOT replaced, because macOS delivers those shortcuts through menu key
+/// equivalents: with no Edit menu, ⌘V/⌘A were dead in every text field
+/// (the text-field twin of the §8.38(5) WebView ⌘C hole). The items stay
+/// standard responder-chain targets — no custom handlers. `MainMenuPruner`
+/// hides the other husk menus. Split in two because `CommandsBuilder` caps
+/// a block at 10 children.
 struct RemoveStandardMenusCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {}
         CommandGroup(replacing: .saveItem) {}
         CommandGroup(replacing: .importExport) {}
         CommandGroup(replacing: .printItem) {}
-        CommandGroup(replacing: .undoRedo) {}
-        CommandGroup(replacing: .pasteboard) {}
         CommandGroup(replacing: .textEditing) {}
         CommandGroup(replacing: .toolbar) {}
         CommandGroup(replacing: .sidebar) {}
@@ -311,9 +359,21 @@ final class MainMenuPruner {
     /// `isHidden` untouched, open menus unaffected.
     private func prune() {
         guard let mainMenu = NSApp.mainMenu, let appMenuItem = mainMenu.items.first else { return }
-        for item in mainMenu.items.dropFirst() where !item.isHidden {
+        // §4.5/§8.41: the app menu AND Edit survive; everything else hides.
+        // The title match is safe because this app ships unlocalized
+        // (English-only UI strings — repo rule), so the standard menu is
+        // always titled "Edit".
+        for item in mainMenu.items.dropFirst() where !item.isHidden && item.title != "Edit" {
             item.isHidden = true
         }
+        // §4.5/§8.42: dictation and the character palette are suppressed by
+        // their UserDefaults keys (AppDelegate — behavior-verified). The
+        // Edit SUBMENU's remaining contents are deliberately left alone:
+        // SwiftUI's own menu delegate rebuilds them when the menu opens,
+        // reverting any hide OR removal (probe-measured — a pre-open clean
+        // held until didBeginTracking and was undone mid-open), so Delete,
+        // AutoFill, and the surplus separators cannot be pruned by any
+        // sanctioned mechanism from here.
         // Replaced-empty command groups leave their group separators behind
         // — hide the extras (leading runs and trailing) so the app menu
         // shows single separators exactly where §4.5 puts them.

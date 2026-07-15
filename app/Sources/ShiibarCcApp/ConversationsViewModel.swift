@@ -12,6 +12,7 @@
 
 import AppKit
 import Combine
+import ConversationsWebPaneKit
 import Foundation
 import os
 import ShiibarCcCore
@@ -36,6 +37,31 @@ final class ConversationsViewModel: ObservableObject {
     @Published private(set) var listEmptyMessage: String?
     /// Disable the search field during a full index build (§4.6/T7).
     @Published private(set) var searchDisabled = false
+    /// ⌘F focus requests (§4.6/§8.41): incremented per press; the search
+    /// field representable observes the change and takes first responder.
+    @Published private(set) var searchFocusToken = 0
+
+    /// ⌘F while the Conversations window is key: focus the search field.
+    func focusSearchField() {
+        searchFocusToken += 1
+    }
+    /// A ⟳ refresh is in flight (§4.6/§8.38(8)): the button disables and
+    /// the status line says so — a press always visibly reacts, and repeat
+    /// presses during the run are ignored.
+    @Published private(set) var isRefreshing = false
+    /// Post-refresh transient (§4.6/§9: "Updated · N conversations" for the
+    /// same 2 seconds as the Rescan transient), shown instead of the counts.
+    private var updatedTransientText: String?
+    private var updatedTransientTask: Task<Void, Never>?
+    /// When the current ⟳ run started (§8.44: the rotation's phase is
+    /// anchored here so it always begins upright). Non-nil for exactly as
+    /// long as the button spins; the view reads it to drive the rotation.
+    @Published private(set) var refreshStartedAt: Date?
+    /// When the current ⟳ run's result landed (§8.44): the rotation keeps
+    /// turning past this to the next whole-turn boundary before settling.
+    /// Nil while the run is still in flight.
+    @Published private(set) var refreshRunEndedAt: Date?
+    private var refreshCompletionTask: Task<Void, Never>?
 
     // MARK: - Preview (right pane)
 
@@ -53,17 +79,12 @@ final class ConversationsViewModel: ObservableObject {
     @Published private(set) var hits: [ConversationHit] = []
     /// Index into `hits` of the current position (nil = no hits / no bar).
     @Published private(set) var currentHitIndex: Int?
-    /// Messages the user (or a ▲▼ jump) has expanded past the §9 fold.
-    @Published private(set) var expandedMessageSeqs: Set<Int64> = []
-    /// Two-way scroll anchor (message seq) for `scrollPosition(id:)`. Every
-    /// change is remembered per conversation (§4.6 scroll memory).
-    @Published var scrolledMessageID: Int64? {
-        didSet {
-            if let selectedSessionID, let scrolledMessageID {
-                scrollMemory[selectedSessionID] = scrolledMessageID
-            }
-        }
-    }
+    /// The message page (§4.6 rendering engine / §8.38): renders the
+    /// conversation, owns fold/expand state and the in-page scroll, and
+    /// reports the scroll anchor back for §4.6 scroll memory. Core stays
+    /// authoritative — this view model passes it Core's computed hits,
+    /// boundaries, and badge inputs.
+    let webPane = WebPaneController()
 
     // MARK: - Private state
 
@@ -71,8 +92,9 @@ final class ConversationsViewModel: ObservableObject {
     private var helpersDirectory: URL? { appState?.helpersDirectory }
     var home: String? { appState?.home }
 
-    /// Per-conversation scroll memory (message granularity, §4.6). Discarded
-    /// when the window closes (`windowClosed`).
+    /// Per-conversation scroll memory (message granularity, §4.6), fed by
+    /// the page's anchor reports. Discarded when the window closes
+    /// (`windowClosed`).
     private var scrollMemory: [String: Int64] = [:]
 
     /// Whether the visible results came from a real search (filtering) vs
@@ -93,9 +115,22 @@ final class ConversationsViewModel: ObservableObject {
     private var searchGeneration = 0
     private var showGeneration = 0
 
-    init(appState: AppState) {
+    /// Injectable launcher for the list-search subprocess (M39 T7: the
+    /// search pipeline must be drivable by tests with a stubbed runner).
+    /// Production default is the real subprocess runner.
+    var searchProcessLauncher: (
+        _ arguments: [String],
+        _ helpersDirectory: URL?,
+        _ completion: @escaping @MainActor (CLIRunResult) -> Void
+    ) -> ConversationsProcess? = ConversationsRunner.run
+
+    init(appState: AppState?) {
         self.appState = appState
         refreshStatus()
+        webPane.onAnchor = { [weak self] seq in
+            guard let self, let selectedSessionID = self.selectedSessionID else { return }
+            self.scrollMemory[selectedSessionID] = seq
+        }
     }
 
     // MARK: - Lifecycle (window open/close)
@@ -181,7 +216,12 @@ final class ConversationsViewModel: ObservableObject {
     /// Keystroke handler: debounce, then search (§9 200ms). No effect while
     /// the field is disabled during a full build.
     func queryChanged() {
-        guard !searchDisabled else { return }
+        guard !searchDisabled else {
+            // Named in the field trail: a keystroke landing during a full
+            // index build issues no search (the post-build search covers it).
+            conversationsLog.notice("keystroke dropped: search disabled during index build")
+            return
+        }
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(ConversationsConstants.searchDebounceSeconds * 1_000_000_000))
@@ -191,8 +231,14 @@ final class ConversationsViewModel: ObservableObject {
     }
 
     /// ⟳ button (§4.6): re-run the same query immediately (picks up
-    /// conversations finished elsewhere). Same grammar as Rescan.
+    /// conversations finished elsewhere). Same grammar as Rescan. Repeat
+    /// presses while a run is in flight are ignored (§8.38(8)).
     func refreshTapped() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        refreshStartedAt = Date()
+        refreshRunEndedAt = nil
+        refreshStatus()
         debounceTask?.cancel()
         performSearch()
     }
@@ -201,29 +247,50 @@ final class ConversationsViewModel: ObservableObject {
     /// all-too-short query (no valid 2+ char term) browses instead of
     /// searching (§4.6). Cancels any in-flight search first.
     private func performSearch() {
-        let raw = query
+        // NFC before dispatch (§4.6/§8.38(12), defense in depth — the CLI
+        // normalizes too): IME text arrives decomposed on macOS, and the
+        // index stores the composed form.
+        let raw = query.precomposedStringWithCanonicalMapping
         let issue = ConversationsQuery.shouldIssueSearch(raw)
         searchProcess?.cancel()
         searchGeneration += 1
         let generation = searchGeneration
+        // M39 T7 instrumentation (default level, content-free): the owner's
+        // IME search miss did not reproduce in the pipeline tests, so the
+        // dispatch/result trail must name the failing stage in the field.
+        // Query CONTENT never enters the log — only shape.
+        conversationsLog.notice(
+            "search gen \(generation) dispatch chars=\(raw.count) terms=\(ConversationsQuery.validTerms(raw).count) browse=\(!issue)"
+        )
 
         var arguments = ["conversations", "search"]
         if issue { arguments.append(raw) }
         arguments.append("--json")
 
-        searchProcess = ConversationsRunner.run(
-            arguments: arguments,
-            helpersDirectory: helpersDirectory
-        ) { [weak self] result in
-            guard let self, generation == self.searchGeneration else { return }
+        searchProcess = searchProcessLauncher(arguments, helpersDirectory) { [weak self] result in
+            guard let self else { return }
+            guard generation == self.searchGeneration else {
+                conversationsLog.notice("search gen \(generation) result dropped as stale (current gen \(self.searchGeneration))")
+                return
+            }
+            conversationsLog.notice("search gen \(generation) result exit=\(result.exitCode) bytes=\(result.stdout.utf8.count)")
             self.handleSearchResult(result, filtered: issue)
         }
     }
 
     private func handleSearchResult(_ result: CLIRunResult, filtered: Bool) {
+        let finishedRefresh = isRefreshing
+        if !finishedRefresh, updatedTransientText != nil {
+            updatedTransientTask?.cancel()
+            updatedTransientText = nil
+        }
         guard result.exitCode == 0, let decoded = ConversationSearchResult.decode(result.stdout) else {
             // §4.6: a search error keeps the previous list and shows an error.
             errorText = "Search failed"
+            if finishedRefresh {
+                // §8.43: even the failure settles only after the full turn.
+                settleRefreshAtWholeTurn(successCount: nil)
+            }
             refreshStatus()
             return
         }
@@ -236,12 +303,54 @@ final class ConversationsViewModel: ObservableObject {
         listEmptyMessage = summaries.isEmpty
             ? (filtered ? "No matching conversations" : "No conversations")
             : nil
+        if finishedRefresh {
+            settleRefreshAtWholeTurn(successCount: summaries.count)
+        }
         // §4.6: clear the preview only when the selected conversation is no
         // longer in the results; otherwise the preview is untouched.
         if let selectedSessionID, !summaries.contains(where: { $0.sessionID == selectedSessionID }) {
             clearPreview()
         }
         refreshStatus()
+    }
+
+    /// §8.44: the search finishes in tens of milliseconds — too fast to
+    /// perceive — so the in-flight look (rotating glyph + disabled button +
+    /// "Refreshing…") persists until the rotation reaches its next whole-turn
+    /// boundary at or after max(run end, one turn) (§9), so the arrow always
+    /// settles upright with no visible jump. Only then does the button
+    /// re-enable and the "Updated · N conversations" transient (success) or
+    /// the error (nil count) take over. Re-clicks during the extended window
+    /// stay ignored because `isRefreshing` holds until here.
+    private func settleRefreshAtWholeTurn(successCount: Int?) {
+        guard let startedAt = refreshStartedAt else { return }
+        let now = Date()
+        refreshRunEndedAt = now
+        let runEndElapsed = now.timeIntervalSince(startedAt)
+        let stopElapsed = ConversationsRefreshSpin.stopElapsedSeconds(runEndSeconds: runEndElapsed)
+        let remaining = max(0, stopElapsed - runEndElapsed)
+        refreshCompletionTask?.cancel()
+        refreshCompletionTask = Task { [weak self] in
+            if remaining > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                if Task.isCancelled { return }
+            }
+            guard let self else { return }
+            self.isRefreshing = false
+            self.refreshStartedAt = nil
+            self.refreshRunEndedAt = nil
+            if let count = successCount {
+                self.updatedTransientTask?.cancel()
+                self.updatedTransientText = "Updated \u{00B7} \(count) conversations"
+                self.updatedTransientTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(RescanFeedback.displaySeconds * 1_000_000_000))
+                    if Task.isCancelled { return }
+                    self?.updatedTransientText = nil
+                    self?.refreshStatus()
+                }
+            }
+            self.refreshStatus()
+        }
     }
 
     // MARK: - Preview (show) — T5
@@ -251,10 +360,6 @@ final class ConversationsViewModel: ObservableObject {
     /// remembered scroll or land at the initial position.
     func selectConversation(_ summary: ConversationSummary) {
         selectedSessionID = summary.sessionID
-        // New selection: reset per-conversation preview state before the
-        // fetch lands.
-        expandedMessageSeqs = []
-        scrolledMessageID = nil
         showProcess?.cancel()
         showGeneration += 1
         let generation = showGeneration
@@ -284,7 +389,21 @@ final class ConversationsViewModel: ObservableObject {
             // display, the hit offsets, and the fold boundary.
             renderedMessages = loaded.messages.map { RenderedMessage(role: $0.role, text: $0.text) }
             recomputeHits()
-            restoreScroll(sessionID: sessionID)
+            // §4.6: the page renders and positions itself — the remembered
+            // anchor (per conversation, message granularity) wins over the
+            // bottom-default; hits land right after so the initial position
+            // can be the latest hit.
+            // The end marker's elapsed text (§4.6/§8.39) uses the same
+            // formatting as the header, carried in the payload (simpler
+            // than a bridge call; same load-time staleness as the header).
+            let elapsed = summaries.first { $0.sessionID == sessionID }.map {
+                ElapsedTime.format(seconds: Int64(Date().timeIntervalSince1970) - $0.updatedAt)
+            }
+            webPane.load(
+                messages: loaded.messages, rendered: renderedMessages,
+                anchorSeq: scrollMemory[sessionID], elapsed: elapsed
+            )
+            pushHitsToPane(scrollToCurrent: scrollMemory[sessionID] == nil)
             refreshStatus()
         case 2:
             // §4.6: not in the index (just deleted) — clear the preview, one
@@ -304,9 +423,8 @@ final class ConversationsViewModel: ObservableObject {
         renderedMessages = []
         hits = []
         currentHitIndex = nil
-        expandedMessageSeqs = []
         selectedSessionID = nil
-        scrolledMessageID = nil
+        webPane.load(messages: [], rendered: [], anchorSeq: nil)
     }
 
     // MARK: - Hit navigation (T5)
@@ -323,7 +441,9 @@ final class ConversationsViewModel: ObservableObject {
             currentHitIndex = nil
             return
         }
-        let terms = ConversationsQuery.validTerms(query)
+        // NFC here too (§8.38(12)): `show` now returns composed text, so
+        // composed terms keep offsets exact.
+        let terms = ConversationsQuery.validTerms(query.precomposedStringWithCanonicalMapping)
         hits = ConversationHits.locations(messageTexts: renderedMessages.map(\.renderedText), terms: terms)
         currentHitIndex = hits.isEmpty ? nil : hits.count - 1
     }
@@ -333,69 +453,46 @@ final class ConversationsViewModel: ObservableObject {
     /// search's debounce — highlighting is instant and local.
     func queryChangedForPreview() {
         recomputeHits()
+        // §4.6: highlights and the counter refresh, the scroll does not move
+        // — and an active selection survives (highlights are painted ranges,
+        // not DOM structure — §8.38).
+        pushHitsToPane(scrollToCurrent: false)
     }
 
-    /// ▲ — jump to the older hit (lower document index).
+    /// Mirror Core's hits into the page. `scrollToCurrent` jumps to the
+    /// initial position (the latest hit) on a fresh load without scroll
+    /// memory; a query re-type never moves the scroll (§4.6).
+    private func pushHitsToPane(scrollToCurrent: Bool) {
+        webPane.setHits(hits, rendered: renderedMessages, current: currentHitIndex)
+        if scrollToCurrent, let currentHitIndex {
+            webPane.jump(to: currentHitIndex)
+        }
+    }
+
+    /// ‹ / ⇧⌘G — toward the older hit (lower document index). Clamped and
+    /// ALWAYS jumping while hits exist (§4.6/§8.38(7)): the old guards
+    /// skipped the jump entirely when the index had nowhere to move, which
+    /// was the owner's "single hit / folded hit doesn't navigate" defect —
+    /// the pane never got asked to scroll (or expand) at all.
     func navigateToOlderHit() {
-        guard let index = currentHitIndex, index > 0 else { return }
-        jumpToHit(index - 1)
+        if let target = ConversationsHitNavigation.previous(current: currentHitIndex, count: hits.count) {
+            jumpToHit(target)
+        }
     }
 
-    /// ▼ — jump to the newer hit (higher document index).
+    /// › / ⌘G — toward the newer hit (higher document index).
     func navigateToNewerHit() {
-        guard let index = currentHitIndex, index < hits.count - 1 else { return }
-        jumpToHit(index + 1)
+        if let target = ConversationsHitNavigation.next(current: currentHitIndex, count: hits.count) {
+            jumpToHit(target)
+        }
     }
 
     private func jumpToHit(_ index: Int) {
-        guard hits.indices.contains(index), let detail else { return }
+        guard hits.indices.contains(index) else { return }
         currentHitIndex = index
-        let hit = hits[index]
-        guard detail.messages.indices.contains(hit.messageIndex),
-              renderedMessages.indices.contains(hit.messageIndex) else { return }
-        let message = detail.messages[hit.messageIndex]
-        // §4.6: a folded hit auto-expands on ▲▼ jump (fold boundary counted
-        // on rendered text).
-        if ConversationHits.requiresExpansion(
-            hit: hit, messageText: renderedMessages[hit.messageIndex].renderedText
-        ) {
-            expandedMessageSeqs.insert(message.seq)
-        }
-        scrolledMessageID = message.seq
-    }
-
-    /// `Show full message` tap for one message (§4.6/§9 fold).
-    func expandMessage(seq: Int64) {
-        expandedMessageSeqs.insert(seq)
-    }
-
-    /// `Show less` tap (§4.6): re-fold, and pull the scroll back to this
-    /// message so the viewpoint doesn't jump away from it.
-    func collapseMessage(seq: Int64) {
-        expandedMessageSeqs.remove(seq)
-        scrolledMessageID = seq
-    }
-
-    // MARK: - Hit tick marks (§4.6)
-
-    /// Tick fractions (0...1), one per hit in `hits` order, for the right-
-    /// edge distribution overlay while the find bar is visible. Message-level
-    /// approximation weighted by what each message currently displays.
-    var tickFractions: [Double] {
-        ConversationTicks.fractions(hits: hits, visibleMessageLengths: visibleMessageLengths)
-    }
-
-    /// What each message currently occupies, in rendered characters: the fold
-    /// prefix while folded, the full rendered length otherwise.
-    private var visibleMessageLengths: [Int] {
-        guard let detail else { return [] }
-        let limit = ConversationsConstants.messageFoldCharacterLimit
-        return renderedMessages.enumerated().map { index, rendered in
-            let total = rendered.renderedText.count
-            guard total > limit else { return total }
-            let seq = detail.messages[index].seq
-            return expandedMessageSeqs.contains(seq) ? total : limit
-        }
+        // §4.6: the page scrolls to the hit and auto-expands a folded one —
+        // acting on Core's hidden flag carried in the hits payload.
+        webPane.jump(to: index)
     }
 
     // MARK: - Resume (T6)
@@ -444,36 +541,21 @@ final class ConversationsViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Scroll restore (T5)
-
-    /// On (re)selection: the remembered scroll wins over the initial position
-    /// (§4.6); otherwise land on the latest hit, or — with no hits — at the
-    /// bottom (latest message) via the list's default bottom anchor (a nil
-    /// anchor here).
-    private func restoreScroll(sessionID: String) {
-        if let remembered = scrollMemory[sessionID] {
-            scrolledMessageID = remembered
-        } else if let index = currentHitIndex, hits.indices.contains(index),
-                  let detail, detail.messages.indices.contains(hits[index].messageIndex),
-                  renderedMessages.indices.contains(hits[index].messageIndex) {
-            let hit = hits[index]
-            let message = detail.messages[hit.messageIndex]
-            if ConversationHits.requiresExpansion(
-                hit: hit, messageText: renderedMessages[hit.messageIndex].renderedText
-            ) {
-                expandedMessageSeqs.insert(message.seq)
-            }
-            scrolledMessageID = message.seq
-        } else {
-            scrolledMessageID = nil // bottom (latest) via defaultScrollAnchor
-        }
-    }
-
     // MARK: - Status line
 
     private func refreshStatus() {
         if let indexProgressText {
             statusText = indexProgressText
+            return
+        }
+        if isRefreshing {
+            // §4.6: the press must visibly react even when the result set
+            // ends up identical.
+            statusText = "Refreshing\u{2026}"
+            return
+        }
+        if let updatedTransientText {
+            statusText = updatedTransientText
             return
         }
         if let errorText {

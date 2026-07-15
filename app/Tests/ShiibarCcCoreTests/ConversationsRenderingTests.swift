@@ -92,7 +92,7 @@ final class ConversationsRenderingTests: XCTestCase {
     func testInlineMarkersAreConsumedInParagraphs() {
         let blocks = ConversationsRendering.blocks(
             role: "assistant",
-            text: "has **bold**, *italic*, `code`, ~~gone~~, [link](https://example.com)"
+            text: "has **bold**, *italic*, `code`, ~~gone~~, [link](https://example.invalid)"
         )
         XCTAssertEqual(texts(blocks), ["has bold, italic, code, gone, link"])
     }

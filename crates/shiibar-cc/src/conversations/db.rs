@@ -19,7 +19,11 @@ use std::time::Duration;
 
 /// Extractor schema version: bump when the extraction rules or the table
 /// shapes change; a mismatch triggers an automatic full rebuild.
-const SCHEMA_VERSION: i64 = 1;
+// v2: message/meta text is NFC-normalized at insert (DESIGN.md 4.6 /
+// 8.38(12) - NFD dakuten from IME input never matched the composed index;
+// the bump triggers the automatic full rebuild so every existing row gets
+// normalized regardless of how it was written).
+const SCHEMA_VERSION: i64 = 2;
 
 /// Explicit SQLite lock wait (DESIGN.md §4.6: never rely on the default).
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -276,13 +280,17 @@ impl Db {
         if !meta_text.trim().is_empty() {
             tx.execute(
                 "INSERT INTO messages(text, session_id, seq, role) VALUES(?1, ?2, '-1', ?3)",
-                params![meta_text, session_id, META_ROLE],
+                params![to_nfc(&meta_text).as_ref(), session_id, META_ROLE],
             )?;
         }
         for (seq, m) in extracted.messages.iter().enumerate() {
+            // NFC at the matching boundary (4.6 / 8.38(12)): this table IS
+            // the FTS/LIKE corpus, and `show` reads it back, so the whole
+            // pipeline (index, search, display, in-body hits) agrees on the
+            // composed form.
             tx.execute(
                 "INSERT INTO messages(text, session_id, seq, role) VALUES(?1, ?2, ?3, ?4)",
-                params![m.text, session_id, seq.to_string(), m.role.as_str()],
+                params![to_nfc(&m.text).as_ref(), session_id, seq.to_string(), m.role.as_str()],
             )?;
         }
         write_progress(&tx, progress_done, progress_total)?;
@@ -482,6 +490,17 @@ fn fts_phrase(term: &str) -> String {
     format!("\"{}\"", term.replace('"', "\"\""))
 }
 
+/// NFC normalization (4.6 / 8.38(12)): canonical-equivalent text must
+/// match regardless of composition form. Borrow when already composed (the
+/// common case) - the quick check avoids an allocation per message.
+fn to_nfc(s: &str) -> std::borrow::Cow<'_, str> {
+    use unicode_normalization::{is_nfc_quick, IsNormalized, UnicodeNormalization};
+    match is_nfc_quick(s.chars()) {
+        IsNormalized::Yes => std::borrow::Cow::Borrowed(s),
+        _ => std::borrow::Cow::Owned(s.nfc().collect()),
+    }
+}
+
 /// `%term%` with LIKE wildcards escaped (`\` is the ESCAPE character).
 fn like_pattern(term: &str) -> String {
     let escaped = term
@@ -537,5 +556,84 @@ mod tests {
         // Case-insensitive by default.
         assert_eq!(count("\"QUICK\""), 1);
         assert_eq!(count("\"nothing here\""), 0);
+    }
+
+    // ---- NFC normalization at the matching boundary (4.6 / 8.38(12)) ----
+    // CJK fixtures are written as unicode escapes to keep the source ASCII
+    // (repo language rule). "left-navi" in katakana:
+    //   NFC:  U+30EC U+30D5 U+30C8 U+30CA U+30D3          (bi composed)
+    //   NFD:  U+30EC U+30D5 U+30C8 U+30CA U+30D2 U+3099   (hi + dakuten)
+    // "left" (U+30EC U+30D5 U+30C8) carries no dakuten: NFC == NFD, the
+    // control that masked the field bug.
+
+    const NAVI_NFC: &str = "\u{30EC}\u{30D5}\u{30C8}\u{30CA}\u{30D3}";
+    const NAVI_NFD: &str = "\u{30EC}\u{30D5}\u{30C8}\u{30CA}\u{30D2}\u{3099}";
+    const LEFT: &str = "\u{30EC}\u{30D5}\u{30C8}";
+
+    /// A Db in a temp dir with one conversation whose sole message is
+    /// `text` (tests never touch the real state dir).
+    fn db_with_message(dir: &tempfile::TempDir, text: &str) -> Db {
+        let (mut db, _) = open_rw(&dir.path().join("test.db")).unwrap();
+        let extracted = crate::conversations::transcript::Extracted {
+            title: Some("t".to_string()),
+            cwd: Some("/Users/example/demo".to_string()),
+            messages: vec![crate::conversations::transcript::Message {
+                role: crate::conversations::transcript::Role::Assistant,
+                text: text.to_string(),
+            }],
+        };
+        db.replace_conversation("s1", "/Users/example/demo/s1.jsonl", 1, 1, 1, &extracted, 1, 1)
+            .unwrap();
+        db
+    }
+
+    fn matches(db: &Db, term: &str) -> bool {
+        // The term goes through the same normalization as parse_query.
+        use unicode_normalization::UnicodeNormalization;
+        let normalized: String = term.nfc().collect();
+        !db.sessions_matching_term(&normalized).unwrap().is_empty()
+    }
+
+    #[test]
+    fn nfd_query_matches_nfc_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_message(&dir, &format!("see {NAVI_NFC} here"));
+        assert!(matches(&db, NAVI_NFD), "a decomposed IME query must hit composed text");
+        assert!(matches(&db, NAVI_NFC));
+    }
+
+    #[test]
+    fn nfc_query_matches_nfd_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_message(&dir, &format!("see {NAVI_NFD} here"));
+        assert!(matches(&db, NAVI_NFC), "a composed query must hit decomposed transcript text");
+        assert!(matches(&db, NAVI_NFD));
+    }
+
+    #[test]
+    fn composed_bi_equals_hi_plus_combining_dakuten() {
+        // The exact field case: bi (U+30D3) == hi (U+30D2) + U+3099.
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_message(&dir, "na\u{30D2}\u{3099}bi text");
+        assert!(matches(&db, "na\u{30D3}"));
+    }
+
+    #[test]
+    fn dakuten_free_control_matches_either_way() {
+        // "left" has identical NFC/NFD byte forms - the control that made
+        // the field bug look app-specific.
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_message(&dir, &format!("{LEFT} nav"));
+        assert!(matches(&db, LEFT));
+    }
+
+    #[test]
+    fn show_returns_the_composed_form() {
+        // The stored corpus is what `show` returns: composed, so the app's
+        // rendered-text hits agree with the search (4.6).
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_message(&dir, NAVI_NFD);
+        let shown = db.show("s1").unwrap().unwrap();
+        assert_eq!(shown.messages[0].text, NAVI_NFC);
     }
 }

@@ -106,7 +106,7 @@ final class AppState: ObservableObject {
     private let dropdownPanelSizer = DropdownPanelSizer()
     /// Places the Agents window pre-paint on (re)open (see
     /// `AgentsWindowPlacer` in AgentsWindowView.swift); armed by
-    /// `VMenuHandler.openAsWindow` via `expectAgentsWindowPlacement`.
+    /// `VMenuHandler.openAgentsWindow` via `expectAgentsWindowPlacement`.
     private let agentsWindowPlacer = AgentsWindowPlacer()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
@@ -125,7 +125,7 @@ final class AppState: ObservableObject {
     /// their open/close here so a single owner decides the activation policy
     /// — two independent writers would race (one closing while the other is
     /// still open would wrongly drop the app to accessory). Also the enabled
-    /// state for each window's menu verb (Open as Window / Conversations…).
+    /// state for each window's menu verb (Agents… / Conversations…).
     @Published private(set) var openRegularWindowTitles: Set<String> = []
 
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
@@ -159,8 +159,23 @@ final class AppState: ObservableObject {
         agentsWindowPlacer.start()
     }
 
+    /// §4.5/§8.43: the window verbs raise an existing window instead of
+    /// disabling — the same deminiaturize + activate + front semantics as
+    /// the Dock-click reopen path (`applicationShouldHandleReopen`). The
+    /// icon-anchored placement is NOT armed here: raising must never move
+    /// an existing window. Returns false when no such window exists (the
+    /// caller opens fresh).
+    @discardableResult
+    func raiseWindow(titled title: String) -> Bool {
+        guard let window = NSApp.windows.first(where: { $0.title == title }) else { return false }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
     /// Arm the Agents window's pre-paint placement for the open the ⌄
-    /// menu's "Open as Window" is about to trigger (see
+    /// menu's "Agents…" item is about to trigger (see
     /// `AgentsWindowPlacer` for the measured mechanism).
     func expectAgentsWindowPlacement(
         topLeft: NSPoint,
@@ -192,16 +207,10 @@ final class AppState: ObservableObject {
 
     // MARK: - Regular-app windows (§4.5/§8.30)
 
-    /// True while the Agents (Open as Window) window exists — gates the ⌄
-    /// menu's "Open as Window" item (disabled while it's open, §4.5).
+    /// True while the Agents window exists — gates both menus' "Agents…"
+    /// item (disabled while it's open, §4.5/§8.40).
     var isAgentsWindowOpen: Bool {
         openRegularWindowTitles.contains(AgentsWindow.title)
-    }
-
-    /// True while the Conversations window exists — gates both menus'
-    /// "Conversations…" item (disabled while it's open, §4.5).
-    var isConversationsWindowOpen: Bool {
-        openRegularWindowTitles.contains(ConversationsWindow.title)
     }
 
     /// Report that a regular-mode window (Agents or Conversations) has
