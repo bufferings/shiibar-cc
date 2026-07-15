@@ -124,6 +124,36 @@ final class ConversationsViewModel: ObservableObject {
         _ completion: @escaping @MainActor (CLIRunResult) -> Void
     ) -> ConversationsProcess? = ConversationsRunner.run
 
+    /// Injectable launcher for the show subprocess (mirrors
+    /// `searchProcessLauncher`): auto-select-on-open (§4.6/§8.46) drives a
+    /// `show` exactly as a click does, so tests must be able to observe that
+    /// fetch with a stubbed runner rather than launch a real subprocess.
+    /// Production default is the real subprocess runner.
+    var showProcessLauncher: (
+        _ arguments: [String],
+        _ helpersDirectory: URL?,
+        _ completion: @escaping @MainActor (CLIRunResult) -> Void
+    ) -> ConversationsProcess? = ConversationsRunner.run
+
+    /// Injectable launcher for the index-on-open streaming subprocess
+    /// (mirrors `searchProcessLauncher`): the auto-select-on-open flow
+    /// (§4.6/§8.46) begins with `conversations index --json`, so tests must
+    /// be able to drive an open without launching a real subprocess.
+    /// Production default is the real streaming runner.
+    var indexProcessLauncher: (
+        _ arguments: [String],
+        _ helpersDirectory: URL?,
+        _ onLine: @escaping @MainActor (String) -> Void,
+        _ completion: @escaping @MainActor (Int32) -> Void
+    ) -> ConversationsProcess? = ConversationsRunner.runStreaming
+
+    /// A window-open auto-select is pending (§4.6/§8.46): set when the window
+    /// opens, consumed by the FIRST list delivery of that open (including the
+    /// late delivery after a full index build). It is the ONLY auto-select
+    /// trigger — keystroke/⟳ deliveries never set it, so they cannot select
+    /// on the user's behalf.
+    private var pendingAutoSelectOnOpen = false
+
     init(appState: AppState?) {
         self.appState = appState
         refreshStatus()
@@ -140,6 +170,10 @@ final class ConversationsViewModel: ObservableObject {
     /// search for the current query once the index is caught up.
     func windowOpened() {
         errorText = nil
+        // Arm auto-select for this open (DESIGN.md §4.6/§8.46): the first list
+        // delivery selects the newest row when nothing is selected. A held
+        // selection survives reopen, so the delivery's nil check leaves it be.
+        pendingAutoSelectOnOpen = true
         runIndexThenSearch()
     }
 
@@ -157,11 +191,11 @@ final class ConversationsViewModel: ObservableObject {
 
     private func runIndexThenSearch() {
         indexProcess?.cancel()
-        indexProcess = ConversationsRunner.runStreaming(
-            arguments: ["conversations", "index", "--json"],
-            helpersDirectory: helpersDirectory,
-            onLine: { [weak self] line in self?.handleIndexLine(line) },
-            completion: { [weak self] code in self?.handleIndexFinished(code) }
+        indexProcess = indexProcessLauncher(
+            ["conversations", "index", "--json"],
+            helpersDirectory,
+            { [weak self] line in self?.handleIndexLine(line) },
+            { [weak self] code in self?.handleIndexFinished(code) }
         )
     }
 
@@ -204,6 +238,9 @@ final class ConversationsViewModel: ObservableObject {
             resultsAreFiltered = false
             listEmptyMessage = nil
             errorText = "Indexing failed"
+            // The open produced no list, so its auto-select shot is spent
+            // (§4.6/§8.46): recovery is a later trigger, which never selects.
+            pendingAutoSelectOnOpen = false
             refreshStatus()
             return
         }
@@ -287,6 +324,10 @@ final class ConversationsViewModel: ObservableObject {
         guard result.exitCode == 0, let decoded = ConversationSearchResult.decode(result.stdout) else {
             // §4.6: a search error keeps the previous list and shows an error.
             errorText = "Search failed"
+            // A failed open search delivered no list, so its auto-select shot
+            // is spent (§4.6/§8.46): only "the open" may auto-select, never a
+            // later recovery trigger.
+            pendingAutoSelectOnOpen = false
             if finishedRefresh {
                 // §8.43: even the failure settles only after the full turn.
                 settleRefreshAtWholeTurn(successCount: nil)
@@ -305,6 +346,21 @@ final class ConversationsViewModel: ObservableObject {
             : nil
         if finishedRefresh {
             settleRefreshAtWholeTurn(successCount: summaries.count)
+        }
+        // Auto-select the newest conversation on open (DESIGN.md §4.6/§8.46):
+        // the first list delivery of an open selects the top row (the list is
+        // always newest-first) when nothing is selected — same show fetch,
+        // scroll-to-latest, and Resume panel as a click. This is the sole
+        // auto-select trigger; keystroke/⟳ deliveries never arm the flag.
+        // Zero conversations stays in the empty state. A held selection (a
+        // reopen) is non-nil here, so it is left untouched. Runs before the
+        // drop-out clear below so the just-selected newest — which is in the
+        // results — is not immediately cleared.
+        if pendingAutoSelectOnOpen {
+            pendingAutoSelectOnOpen = false
+            if selectedSessionID == nil, let newest = summaries.first {
+                selectConversation(newest)
+            }
         }
         // §4.6: clear the preview only when the selected conversation is no
         // longer in the results; otherwise the preview is untouched.
@@ -365,9 +421,9 @@ final class ConversationsViewModel: ObservableObject {
         let generation = showGeneration
         let sessionID = summary.sessionID
 
-        showProcess = ConversationsRunner.run(
-            arguments: ["conversations", "show", sessionID, "--json"],
-            helpersDirectory: helpersDirectory
+        showProcess = showProcessLauncher(
+            ["conversations", "show", sessionID, "--json"],
+            helpersDirectory
         ) { [weak self] result in
             guard let self, generation == self.showGeneration,
                   self.selectedSessionID == sessionID else { return }

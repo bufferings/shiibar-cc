@@ -201,6 +201,40 @@ fn session_start_non_compact_always_lowers_the_flag() {
 }
 
 #[test]
+fn session_start_missing_source_behaves_like_startup() {
+    // §3.4 supplement (missing/unknown field defaults): "a SessionStart
+    // missing its `source` (or carrying an unknown one) is the same as
+    // startup (idle)" — so the whole startup row applies: register idle,
+    // force idle from every state, and lower the flag.
+    assert_row(
+        "SessionStart(missing source)",
+        |p| {
+            p.event = HookEvent::SessionStart;
+            p.source = None;
+        },
+        [
+            Cell::Register(Status::Idle, false),
+            Cell::ToStatus(Status::Idle),
+            Cell::ToStatus(Status::Idle),
+            Cell::ToStatus(Status::Idle),
+        ],
+    );
+
+    // Flag column of the startup row ("lower") must apply too.
+    for start in [Status::Working, Status::Waiting, Status::Idle] {
+        let prev = existing(start, true);
+        let p = base_payload(HookEvent::SessionStart); // source stays None
+        let Outcome::Updated { entry, .. } = apply_report(Some(&prev), &p, NOW) else {
+            panic!("expected Updated");
+        };
+        assert!(
+            !entry.unreviewed,
+            "SessionStart(missing source) from {start:?}+unreviewed must clear the flag"
+        );
+    }
+}
+
+#[test]
 fn session_start_compact_is_ignored_and_never_forces_idle() {
     assert_row(
         "SessionStart(source=compact)",
@@ -360,11 +394,15 @@ fn notification_missing_notification_type_behaves_like_unknown() {
 
 #[test]
 fn notification_waiting_inducing_always_raises_the_flag_even_from_waiting_to_waiting() {
+    // `None` is included per the §3.4 supplement: "a Notification missing
+    // `notification_type` is the same as unknown (waiting)" — unknown falls
+    // to waiting and raises the flag (prefer a false alarm over a miss).
     for nt in [
-        NotificationType::PermissionPrompt,
-        NotificationType::AgentNeedsInput,
-        NotificationType::ElicitationDialog,
-        NotificationType::Unknown,
+        Some(NotificationType::PermissionPrompt),
+        Some(NotificationType::AgentNeedsInput),
+        Some(NotificationType::ElicitationDialog),
+        Some(NotificationType::Unknown),
+        None,
     ] {
         for (start, starting_flag) in [
             (Status::Working, false),
@@ -374,7 +412,7 @@ fn notification_waiting_inducing_always_raises_the_flag_even_from_waiting_to_wai
         ] {
             let prev = existing(start, starting_flag);
             let mut p = base_payload(HookEvent::Notification);
-            p.notification_type = Some(nt);
+            p.notification_type = nt;
             p.message = Some("please confirm again".into());
             let Outcome::Updated { entry, .. } = apply_report(Some(&prev), &p, NOW) else {
                 panic!("expected Updated");

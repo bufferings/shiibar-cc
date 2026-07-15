@@ -18,6 +18,12 @@ final class ConversationsSearchPipelineTests: XCTestCase {
 
     private final class Stub {
         var dispatched: [Dispatched] = []
+        /// `show` subprocess arguments the stub captured (auto-select-on-open
+        /// drives a show exactly as a click does — §4.6/§8.46).
+        var showArguments: [[String]] = []
+        /// Captured index-on-open completions, so a test can finish the index
+        /// (warm: exit 0, no progress) and let the post-index search run.
+        var indexCompletions: [@MainActor (Int32) -> Void] = []
     }
 
     private var stub = Stub()
@@ -30,7 +36,26 @@ final class ConversationsSearchPipelineTests: XCTestCase {
             // An idle Process was never launched; cancel() is a safe no-op.
             return ConversationsProcess(process: Process())
         }
+        viewModel.indexProcessLauncher = { [stub] _, _, _, completion in
+            stub.indexCompletions.append(completion)
+            return ConversationsProcess(process: Process())
+        }
+        viewModel.showProcessLauncher = { [stub] arguments, _, _ in
+            // Capture the show fetch; never complete it — the tests assert on
+            // selection, not on decoded detail (which would need a WebView).
+            stub.showArguments.append(arguments)
+            return ConversationsProcess(process: Process())
+        }
         return viewModel
+    }
+
+    /// Drive a window open with a warm index (exit 0, no progress lines) so
+    /// the post-index search dispatches, then return once it is captured.
+    private func openWindowAndAwaitSearch(_ viewModel: ConversationsViewModel) {
+        viewModel.windowOpened()
+        XCTAssertEqual(stub.indexCompletions.count, 1, "open runs the index once")
+        stub.indexCompletions[0](0)
+        waitForDispatches(1)
     }
 
     private func resultJSON(_ sessionIDs: [String]) -> String {
@@ -172,6 +197,74 @@ final class ConversationsSearchPipelineTests: XCTestCase {
         }
         XCTAssertFalse(viewModel.isRefreshing)
         XCTAssertEqual(viewModel.statusText, "Search failed", "failure shows the error, no transient")
+    }
+
+    // MARK: - Auto-select on open (§4.6/§8.46)
+
+    /// The first list delivery after the window opens selects the newest row
+    /// (the list is always newest-first) and fetches its show, exactly as a
+    /// click would.
+    func testFirstDeliveryAfterOpenAutoSelectsTheNewest() {
+        let viewModel = makeViewModel()
+        openWindowAndAwaitSearch(viewModel)
+        XCTAssertEqual(stub.dispatched.count, 1, "the post-index search dispatches once")
+        stub.dispatched[0].completion(CLIRunResult(exitCode: 0, stdout: resultJSON(["newest", "older"]), stderr: ""))
+        XCTAssertEqual(viewModel.selectedSessionID, "newest",
+                       "the first list delivery after open auto-selects the newest row")
+        XCTAssertEqual(stub.showArguments, [["conversations", "show", "newest", "--json"]],
+                       "auto-select fetches the show exactly as a click does")
+    }
+
+    /// Zero conversations stays in the empty state — nothing is selected and
+    /// no show is fetched.
+    func testOpenWithZeroConversationsSelectsNothing() {
+        let viewModel = makeViewModel()
+        openWindowAndAwaitSearch(viewModel)
+        stub.dispatched[0].completion(CLIRunResult(exitCode: 0, stdout: #"{"conversations":[]}"#, stderr: ""))
+        XCTAssertNil(viewModel.selectedSessionID, "an empty list selects nothing")
+        XCTAssertTrue(stub.showArguments.isEmpty, "no show is fetched for an empty list")
+        XCTAssertEqual(viewModel.statusText, "0 conversations (0 running)")
+    }
+
+    /// A later delivery must NOT auto-select after the existing rule cleared
+    /// the preview because the selection dropped out of the results: the open
+    /// already spent the single auto-select trigger.
+    func testLaterSearchDeliveryDoesNotAutoSelectAfterDropOutClear() {
+        let viewModel = makeViewModel()
+        openWindowAndAwaitSearch(viewModel)
+        stub.dispatched[0].completion(CLIRunResult(exitCode: 0, stdout: resultJSON(["sel"]), stderr: ""))
+        XCTAssertEqual(viewModel.selectedSessionID, "sel")
+        XCTAssertEqual(stub.showArguments.count, 1)
+
+        // The user types; the new search's results drop the selected id.
+        viewModel.query = "zz"
+        viewModel.queryChanged()
+        waitForDispatches(2)
+        stub.dispatched[1].completion(CLIRunResult(exitCode: 0, stdout: resultJSON(["other"]), stderr: ""))
+        XCTAssertNil(viewModel.selectedSessionID,
+                     "drop-out clears the preview and nothing is re-selected (§8.46)")
+        XCTAssertEqual(stub.showArguments.count, 1, "no auto-select show on a keystroke delivery")
+    }
+
+    /// Reopening with a selection still held keeps it — auto-select only fires
+    /// when nothing is selected, so the reopen delivery re-selects nothing.
+    func testHeldSelectionSurvivesReopenWithoutReselect() {
+        let viewModel = makeViewModel()
+        openWindowAndAwaitSearch(viewModel)
+        stub.dispatched[0].completion(CLIRunResult(exitCode: 0, stdout: resultJSON(["sel", "older"]), stderr: ""))
+        XCTAssertEqual(viewModel.selectedSessionID, "sel")
+        XCTAssertEqual(stub.showArguments.count, 1)
+
+        // Close and reopen with the selection still held; the id is still in
+        // the results, so it is neither cleared nor re-selected.
+        viewModel.windowClosed()
+        viewModel.windowOpened()
+        XCTAssertEqual(stub.indexCompletions.count, 2, "reopen runs the index again")
+        stub.indexCompletions[1](0)
+        waitForDispatches(2)
+        stub.dispatched[1].completion(CLIRunResult(exitCode: 0, stdout: resultJSON(["sel", "older"]), stderr: ""))
+        XCTAssertEqual(viewModel.selectedSessionID, "sel", "a held selection survives reopen")
+        XCTAssertEqual(stub.showArguments.count, 1, "no re-select show fires on reopen")
     }
 
     // MARK: - In-body hits for the same query over rendered text

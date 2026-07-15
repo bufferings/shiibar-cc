@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn strip_markdown_rewrites_markdown_links_to_their_text() {
-        let input = "See [the docs](https://example.com/docs) for details.";
+        let input = "See [the docs](https://example.invalid/docs) for details.";
         assert_eq!(strip_markdown(input), "See the docs for details.");
     }
 

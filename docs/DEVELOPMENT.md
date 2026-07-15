@@ -115,7 +115,8 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 - 実ペイロードの採取: hooks を設定した実セッションで対象イベントを発生させ、受信した実 hook JSON を `fixtures/` に保存する
 - 偽装再生: `echo '<hook JSON>' | shiibar-cc report <event>`(実 Claude Code なしで daemon の遷移を再現できる)
-- 要検証リスト(DESIGN.md §7-3): 残る未観測は `elicitation_complete` の実発火のみ
+- 要検証リスト(DESIGN.md §7-3): 残る未観測は `elicitation_complete` の実発火と
+  `auth_success` 通知(fixtures/README.md — hand-written のまま)
   (`elicitation_*` の意味と `PostToolUseFailure` は実ログで検証済み — 記録は §7-3)
 
 ## macOS 権限まわり
