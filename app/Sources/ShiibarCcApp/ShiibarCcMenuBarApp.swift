@@ -157,15 +157,15 @@ enum AgentsWindow {
 /// The Conversations `Window` scene's stable id/title (§4.6, M35), shared
 /// between the scene declaration above, the `openWindow(id:)` call sites (⌄
 /// menu / app menu), and the window-lifecycle title filter in
-/// `ConversationsWindowViewModel`. Initial size 640×480pt; resizable both
-/// axes, size and position remembered. The sidebar width lives in
-/// `ConversationsConstants` (§9: initial 250pt, draggable 200-400pt,
-/// remembered — §8.38(7)).
+/// `ConversationsWindowViewModel`. Initial size 1050×700pt (§9/§8.45);
+/// resizable both axes, size and position remembered. The sidebar width
+/// lives in `ConversationsConstants` (§9: initial 250pt, draggable
+/// 200-400pt, remembered — §8.38(7)).
 enum ConversationsWindow {
     static let id = "conversations"
     static let title = "Conversations"
-    static let defaultWidth: CGFloat = 640
-    static let defaultHeight: CGFloat = 480
+    static let defaultWidth: CGFloat = 1050
+    static let defaultHeight: CGFloat = 700
 }
 
 @MainActor
