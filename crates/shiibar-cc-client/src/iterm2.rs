@@ -68,11 +68,15 @@ fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
 // ---------------------------------------------------------------------
 
 /// AppleScript that scans iTerm2 for a session whose `id` equals `uuid`,
-/// and if found: selects that session (pane), its tab, brings its window
-/// to the front, and activates iTerm2. `tell s to select` is essential for
-/// split panes — selecting only the window/tab leaves the tab's previously
-/// active pane focused, so a jump to a session in a split would land on the
-/// wrong pane (verified on a real machine 2026-07-04, M2 smoke test).
+/// and if found: activates iTerm2 FIRST, then selects its window, its tab,
+/// and the matched session (pane). Activate must come before the selects:
+/// with the selects first, a focus issued while another app is active makes
+/// activate raise a same-Space iTerm2 window, so a session on another Space
+/// never comes forward — the script still reports FOUND (DESIGN.md §7-1,
+/// 2026-07-17; §4.3). `tell s to select` is essential for split panes —
+/// selecting only the window/tab leaves the tab's previously active pane
+/// focused, so a jump to a session in a split would land on the wrong pane
+/// (verified on a real machine 2026-07-04, M2 smoke test).
 /// Deliberately checks `application "iTerm2" is running` first and only
 /// opens a `tell application "iTerm2"` block inside that guard — this is
 /// what keeps `focus` from launching iTerm2 when it isn't running
@@ -86,8 +90,8 @@ fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
 /// intermittently throws `-1719` (invalid index) on split-pane tabs
 /// (real-machine M2 smoke test). Indexing one session at a time inside a
 /// `try` lets a transient bad element be skipped instead of aborting the
-/// whole scan. The window/tab/session `select` + `activate` stay outside
-/// the `try`, so a real error (e.g. TCC denial) still surfaces.
+/// whole scan. The `activate` and the window/tab/session `select`s all stay
+/// outside the `try`, so a real error (e.g. TCC denial) still surfaces.
 pub fn build_focus_script(uuid: &str) -> String {
     let uuid = escape_as_string_literal(uuid);
     format!(
@@ -103,11 +107,11 @@ pub fn build_focus_script(uuid: &str) -> String {
                         set sid to id of (session si of t)
                     end try
                     if sid is "{uuid}" then
+                        activate
                         set s to session si of t
                         tell w to select
                         tell t to select
                         tell s to select
-                        activate
                         return "FOUND"
                     end if
                 end repeat
@@ -517,16 +521,54 @@ mod tests {
     }
 
     #[test]
-    fn focus_script_only_activates_after_a_match_is_found() {
+    fn focus_script_activates_first_then_selects_inside_the_match_branch() {
+        // Activate-first: with the selects first, a focus issued while
+        // another app is active raises a same-Space window and never crosses
+        // to the matched session's Space (DESIGN.md §7-1/§4.3).
         let script = build_focus_script("SOME-UUID");
         let if_match = script.find("if sid is").unwrap();
         let activate = script.find("activate").unwrap();
+        let window_select = script.find("tell w to select").unwrap();
+        let session_select = script.find("tell s to select").unwrap();
         let found = script.find("\"FOUND\"").unwrap();
         assert!(
             if_match < activate,
             "activate must be inside the match branch"
         );
-        assert!(activate < found, "activate must run before reporting FOUND");
+        assert!(
+            activate < window_select,
+            "activate must run before the window/tab/session selects"
+        );
+        assert!(window_select < session_select);
+        assert!(
+            session_select < found,
+            "the selects must run before reporting FOUND"
+        );
+    }
+
+    #[test]
+    fn focus_script_activate_appears_only_inside_the_match_branch() {
+        // The scan, the no-match (NOTFOUND) path, and the not-running guard
+        // must move nothing: activate exists exactly once, inside the
+        // `if sid is` branch (DESIGN.md §7-1/§4.3).
+        let script = build_focus_script("SOME-UUID");
+        assert_eq!(
+            script.matches("activate").count(),
+            1,
+            "activate must appear exactly once"
+        );
+        let if_match = script.find("if sid is").unwrap();
+        // The first `end if` in the text closes the match branch (it nests
+        // inside the outer is-running guard), so activate sitting before it
+        // proves activate is confined to the match branch.
+        let end_of_match = script.find("end if").unwrap();
+        let activate = script.find("activate").unwrap();
+        assert!(
+            if_match < activate && activate < end_of_match,
+            "activate must sit inside the match branch, so NOTFOUND moves nothing"
+        );
+        let notfound = script.find("\"NOTFOUND\"").unwrap();
+        assert!(activate < notfound);
     }
 
     #[test]

@@ -29,12 +29,16 @@ const APPLE_TERMINAL_PREFIX: &str = "apple-terminal:";
 // ---------------------------------------------------------------------
 
 /// AppleScript that scans **all windows × all tabs** of Terminal.app for a
-/// tab whose `tty` equals `tty`, and if found: selects that tab, brings its
-/// window frontmost, and activates Terminal.app (DESIGN.md §4.3/§7-7). The
-/// full scan is required because a Cmd+T tab appears to AppleScript as a
-/// separate single-tab window (AppKit window tabs), while a merged window
-/// holds several tabs — one loop covers both shapes (§7-7). A no-match moves
-/// nothing.
+/// tab whose `tty` equals `tty`, and if found: activates Terminal.app FIRST,
+/// then selects that tab and brings its window frontmost (DESIGN.md
+/// §4.3/§7-7). Activate-first mirrors the iterm2 module: with the selects
+/// first, a focus issued while another app is active raises a same-Space
+/// window, so a tab on another Space never comes forward (§7-1; the
+/// Terminal.app cross-Space case is measured too, §7-7). The full scan is
+/// required because a Cmd+T tab appears to
+/// AppleScript as a separate single-tab window (AppKit window tabs), while a
+/// merged window holds several tabs — one loop covers both shapes (§7-7). A
+/// no-match moves nothing.
 ///
 /// Guarded on `application id "com.apple.Terminal" is running` first, and the
 /// `tell application "Terminal"` block lives inside that guard: the
@@ -52,9 +56,9 @@ pub fn build_focus_script(tty: &str) -> String {
             repeat with t in tabs of w
                 try
                     if (tty of t) is "{tty}" then
+                        activate
                         set selected of t to true
                         set frontmost of w to true
-                        activate
                         return "FOUND"
                     end if
                 end try
@@ -415,17 +419,44 @@ mod tests {
     }
 
     #[test]
-    fn focus_script_only_activates_after_a_match_and_sets_selected_and_frontmost() {
+    fn focus_script_activates_first_then_sets_selected_and_frontmost() {
+        // Activate-first (DESIGN.md §7-1/§4.3); selected/frontmost keep their
+        // relative order, only activate moves to the front of the branch.
         let script = build_focus_script("/dev/ttys006");
         let if_match = script.find("if (tty of t) is").unwrap();
+        let activate = script.find("activate").unwrap();
         let set_selected = script.find("set selected of t to true").unwrap();
         let set_frontmost = script.find("set frontmost of w to true").unwrap();
-        let activate = script.find("activate").unwrap();
         let found = script.find("\"FOUND\"").unwrap();
-        assert!(if_match < set_selected);
+        assert!(if_match < activate, "activate must be inside the match branch");
+        assert!(activate < set_selected, "activate must run before the selects");
         assert!(set_selected < set_frontmost);
-        assert!(set_frontmost < activate);
-        assert!(activate < found);
+        assert!(set_frontmost < found);
+    }
+
+    #[test]
+    fn focus_script_activate_appears_only_inside_the_match_branch() {
+        // The scan, the no-match (NOTFOUND) path, and the not-running guard
+        // must move nothing: activate exists exactly once, inside the
+        // `if (tty of t) is` branch (DESIGN.md §7-1/§4.3).
+        let script = build_focus_script("/dev/ttys006");
+        assert_eq!(
+            script.matches("activate").count(),
+            1,
+            "activate must appear exactly once"
+        );
+        let if_match = script.find("if (tty of t) is").unwrap();
+        // The first `end if` in the text closes the match branch (it nests
+        // inside the outer is-running guard), so activate before it proves
+        // activate is confined to the match branch.
+        let end_of_match = script.find("end if").unwrap();
+        let activate = script.find("activate").unwrap();
+        assert!(
+            if_match < activate && activate < end_of_match,
+            "activate must sit inside the match branch, so NOTFOUND moves nothing"
+        );
+        let notfound = script.find("\"NOTFOUND\"").unwrap();
+        assert!(activate < notfound);
     }
 
     #[test]

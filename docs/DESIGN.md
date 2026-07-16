@@ -381,7 +381,7 @@ Rust 製 daemon。tokio + Unix socket。
     - `focus(target)`: target(`apple-terminal:` を外した tty パス)を使い、AppleScript で Terminal.app の
       **全 windows × 全 tabs** を走査し、`tty of tab` が一致したタブを **`activate` してから**
       `set selected of t to true` + `set frontmost of w to true` で前面化する(activate 先行の
-      理由は iterm2 と同じ — §7-1。Terminal.app での Space またぎ自体は未実測 — §7-7)。
+      理由は iterm2 と同じ — §7-1。Terminal.app での Space またぎも実測済み — §7-7)。
       一致なしは「該当なし」(activate は一致分岐の中のみ)。
       **Terminal.app が起動していなければ起動せずに「該当なし」を返す**(is-running ガード。iterm2 と同じ)。
       全走査が必須なのは、Cmd+T のタブが AppleScript には**別 window(各 1 タブ)**として見える一方、
@@ -1224,8 +1224,9 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
      `set frontmost of window`(設定可能と実測)+ `activate`」で成立。ウィンドウ間・
      同一ウィンドウのタブ間とも目視確認済み(この目視は activate 末尾の順で行った)。
      一致なしは何も動かさない。現行仕様の順は activate 先行(§4.3 — 理由は §7-1 の
-     Space またぎ実測)。**activate 先行の順での Terminal.app の動作と、Terminal.app の
-     Space またぎは未実測**(実機スモークが初検証)
+     Space またぎ実測)。**activate 先行の順での Terminal.app の動作と Space またぎは
+     実機で確認済み**(2026-07-17、M42 スモーク: 別アプリがアクティブな状態から
+     別 Space の Terminal.app タブへ正しく遷移する)
    - **Cmd+T のタブは AppleScript には別 window(各 1 タブ)として見える**(AppKit のウィンドウタブ機構。
      タブグループは bounds が同一)。旧来の 1 window 複数 tab の形も存在し得るため、走査は常に全 window×全 tab
    - split pane(Cmd+D)は**同一セッションの表示分割** — 分割の前後で tty 一覧が不変(実測)。
