@@ -1,5 +1,7 @@
 //! iTerm2 / AppleScript knowledge lives here ONLY (design principle 2,
-//! DESIGN.md §4.3 / §8.2).
+//! DESIGN.md §4.3 / §8.2). The generic osascript / `ps` plumbing, the shared
+//! error type, and the prefix dispatch live in `crate::terminal`; this
+//! module owns everything iTerm2-specific.
 //!
 //! Test separation is the load-bearing property of this module (DESIGN.md
 //! §4.3, task brief): "AppleScript source generation" and "osascript output
@@ -10,77 +12,14 @@
 //! that needs TCC Automation permission, which isn't available in CI (and
 //! would pop a permission dialog on a dev machine the first time).
 
-use std::io::Write as _;
-use std::process::{Command, Stdio};
+use crate::terminal::{
+    AppleScriptOutput, AppleScriptRunner, ProbeOutcome, PsRunner, TerminalError, TerminalResult,
+    bad_output, build_resume_shell_command, escape_as_string_literal, is_permission_denied,
+    normalize_tty, parse_ps_tty_output,
+};
 
-/// Output of one `osascript` invocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppleScriptOutput {
-    pub success: bool,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-/// Runs an AppleScript source string and returns its output. Injected so
-/// tests can substitute a fake (DESIGN.md §4.3 test-separation requirement).
-pub trait AppleScriptRunner {
-    fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput>;
-}
-
-/// Real `osascript` runner: the script is piped over stdin (`osascript -`)
-/// rather than passed as a `-e` argument, so no shell-escaping is needed
-/// for the generated multi-line source.
-pub struct Osascript;
-
-impl AppleScriptRunner for Osascript {
-    fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
-        let mut child = Command::new("osascript")
-            .arg("-")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        child
-            .stdin
-            .take()
-            .expect("stdin was requested as piped")
-            .write_all(script.as_bytes())?;
-        let output = child.wait_with_output()?;
-        Ok(AppleScriptOutput {
-            success: output.status.success(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
-    }
-}
-
-/// Errors from an iterm operation. The focus/no-match vs. TCC-permission
-/// distinction is required by DESIGN.md §4.4 (shiibar-cc exit 2 vs. 3).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ItermError {
-    NoMatch,
-    PermissionDenied,
-    Other(String),
-}
-
-impl std::fmt::Display for ItermError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ItermError::NoMatch => write!(f, "no matching iTerm2 session"),
-            ItermError::PermissionDenied => {
-                write!(
-                    f,
-                    "osascript is not authorized to control iTerm2 (Automation permission)"
-                )
-            }
-            ItermError::Other(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl std::error::Error for ItermError {}
-
-pub type ItermResult<T> = Result<T, ItermError>;
+/// The target prefix for iTerm2 sessions (§2), with the trailing `:`.
+const ITERM2_PREFIX: &str = "iterm2:";
 
 // ---------------------------------------------------------------------
 // Pure: target <-> UUID
@@ -88,7 +27,7 @@ pub type ItermResult<T> = Result<T, ItermError>;
 
 /// Extract the UUID a target refers to (DESIGN.md §2/§4.3). A target is
 /// normally already a bare UUID (that's the wire format since the M1M2
-/// respec: `shiibar-cc report` and `iterm_targets` both derive the *same*
+/// respec: `shiibar-cc report` and `iterm2_targets` both derive the *same*
 /// bare UUID for the same session, §2). The `wNtNpN:UUID` shape (the raw
 /// `$ITERM_SESSION_ID` value, §7-1) is also accepted — for pre-respec
 /// callers and defensiveness — by taking the part after the `:`; anything
@@ -122,30 +61,6 @@ fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
     } else {
         Some((&s[..end], &s[end..]))
     }
-}
-
-fn escape_as_string_literal(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// Wrap `s` in POSIX shell single quotes, safe against any byte the shell
-/// treats specially (spaces, `$`, backticks, double quotes, `;`, ...):
-/// single quotes make everything between them literal except a single
-/// quote itself, so each embedded `'` is closed, escaped as `\'`, and
-/// reopened (`'\''`). Used by `build_resume_script` (DESIGN.md §4.3) for
-/// the `cd`/`claude --resume` command line sent to the new window's shell.
-fn escape_shell_single_quoted(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        if c == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(c);
-        }
-    }
-    out.push('\'');
-    out
 }
 
 // ---------------------------------------------------------------------
@@ -246,19 +161,6 @@ end if
     .to_string()
 }
 
-/// The `cd <cwd> && claude --resume <session_id>` shell command line run in
-/// the new window (DESIGN.md §4.3). Each argument is POSIX single-quote
-/// escaped independently — `cwd` may contain spaces, quotes, or `$`, and
-/// `session_id` is expected to be a UUID but is escaped the same way rather
-/// than trusted (§4.3: "escape it, don't validate it").
-fn build_resume_shell_command(cwd: &str, session_id: &str) -> String {
-    format!(
-        "cd {} && claude --resume {}",
-        escape_shell_single_quoted(cwd),
-        escape_shell_single_quoted(session_id)
-    )
-}
-
 /// AppleScript that opens a *new* iTerm2 window and runs
 /// `claude --resume <session_id>` there, `cd`-ed into `cwd` (DESIGN.md
 /// §4.3, task brief T1). Unlike `build_focus_script`, this does NOT guard
@@ -305,38 +207,26 @@ return "OK"
 // Pure: osascript output parsing
 // ---------------------------------------------------------------------
 
-/// TCC Automation-permission denial: osascript exits non-zero with an
-/// error mentioning "not authorized to send Apple events" / AppleEvent
-/// error -1743.
-fn is_permission_denied(output: &AppleScriptOutput) -> bool {
-    let text = output.stderr.to_lowercase();
-    text.contains("not authorized to send apple events") || text.contains("-1743")
-}
-
-fn bad_output(stdout: &str) -> ItermError {
-    ItermError::Other(format!("unexpected osascript output: {stdout:?}"))
-}
-
-pub fn parse_focus_output(output: &AppleScriptOutput) -> ItermResult<()> {
+pub fn parse_focus_output(output: &AppleScriptOutput) -> TerminalResult<()> {
     if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
+        return Err(TerminalError::PermissionDenied);
     }
     if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
     }
     match output.stdout.trim() {
         "FOUND" => Ok(()),
-        "NOTFOUND" => Err(ItermError::NoMatch),
+        "NOTFOUND" => Err(TerminalError::NoMatch),
         other => Err(bad_output(other)),
     }
 }
 
-pub fn parse_focused_output(output: &AppleScriptOutput) -> ItermResult<Option<String>> {
+pub fn parse_focused_output(output: &AppleScriptOutput) -> TerminalResult<Option<String>> {
     if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
+        return Err(TerminalError::PermissionDenied);
     }
     if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
     }
     let stdout = output.stdout.trim();
     if stdout == "NONE" {
@@ -348,26 +238,18 @@ pub fn parse_focused_output(output: &AppleScriptOutput) -> ItermResult<Option<St
     if uuid.is_empty() {
         return Err(bad_output(stdout));
     }
-    // The target IS the bare UUID (§2) — no `wNtNpN` prefix to reassemble:
-    // `focus` only ever looks at the UUID half anyway (§7-1), and iTerm2
-    // can't give us a tab index (see `build_focused_script`).
-    Ok(Some(uuid.to_string()))
+    // The target is the prefixed `iterm2:<UUID>` (§2/§4.3): no `wNtNpN`
+    // prefix to reassemble (focus only ever looks at the UUID half, §7-1,
+    // and iTerm2 can't give a tab index — see `build_focused_script`).
+    Ok(Some(format!("{ITERM2_PREFIX}{uuid}")))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProbeOutcome {
-    /// iTerm2 isn't running, so permission couldn't be checked.
-    NotRunning,
-    /// iTerm2 answered a query: automation permission is granted.
-    Granted,
-}
-
-pub fn parse_probe_output(output: &AppleScriptOutput) -> ItermResult<ProbeOutcome> {
+pub fn parse_probe_output(output: &AppleScriptOutput) -> TerminalResult<ProbeOutcome> {
     if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
+        return Err(TerminalError::PermissionDenied);
     }
     if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
     }
     if output.stdout.trim() == "NOT_RUNNING" {
         Ok(ProbeOutcome::NotRunning)
@@ -379,12 +261,12 @@ pub fn parse_probe_output(output: &AppleScriptOutput) -> ItermResult<ProbeOutcom
 /// Parse `build_resume_script`'s output. There's no "no match" outcome here
 /// (unlike `parse_focus_output`) — `open_resume_window` always creates a
 /// new window, it never searches for an existing one.
-pub fn parse_resume_output(output: &AppleScriptOutput) -> ItermResult<()> {
+pub fn parse_resume_output(output: &AppleScriptOutput) -> TerminalResult<()> {
     if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
+        return Err(TerminalError::PermissionDenied);
     }
     if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
     }
     match output.stdout.trim() {
         "OK" => Ok(()),
@@ -401,29 +283,29 @@ pub fn parse_resume_output(output: &AppleScriptOutput) -> ItermResult<()> {
 /// iTerm2" and "target isn't in the `wNtNpN:UUID` shape at all" (the
 /// `session:` fallback target, or garbage input) — no osascript is run in
 /// the latter case.
-pub fn focus(target: &str, runner: &dyn AppleScriptRunner) -> ItermResult<()> {
-    let uuid = extract_uuid(target).ok_or(ItermError::NoMatch)?;
+pub fn focus(target: &str, runner: &dyn AppleScriptRunner) -> TerminalResult<()> {
+    let uuid = extract_uuid(target).ok_or(TerminalError::NoMatch)?;
     let script = build_focus_script(uuid);
     let output = runner
         .run(&script)
-        .map_err(|e| ItermError::Other(e.to_string()))?;
+        .map_err(|e| TerminalError::Other(e.to_string()))?;
     parse_focus_output(&output)
 }
 
 /// `focused()` (DESIGN.md §4.3): the frontmost iTerm2 session's target, if
 /// iTerm2 is the frontmost application; `Ok(None)` otherwise.
-pub fn focused(runner: &dyn AppleScriptRunner) -> ItermResult<Option<String>> {
+pub fn focused(runner: &dyn AppleScriptRunner) -> TerminalResult<Option<String>> {
     let output = runner
         .run(&build_focused_script())
-        .map_err(|e| ItermError::Other(e.to_string()))?;
+        .map_err(|e| TerminalError::Other(e.to_string()))?;
     parse_focused_output(&output)
 }
 
 /// Harmless iTerm2 probe for `shiibar-cc doctor`'s TCC permission check.
-pub fn probe(runner: &dyn AppleScriptRunner) -> ItermResult<ProbeOutcome> {
+pub fn probe(runner: &dyn AppleScriptRunner) -> TerminalResult<ProbeOutcome> {
     let output = runner
         .run(&build_probe_script())
-        .map_err(|e| ItermError::Other(e.to_string()))?;
+        .map_err(|e| TerminalError::Other(e.to_string()))?;
     parse_probe_output(&output)
 }
 
@@ -437,75 +319,17 @@ pub fn open_resume_window(
     cwd: &str,
     session_id: &str,
     runner: &dyn AppleScriptRunner,
-) -> ItermResult<()> {
+) -> TerminalResult<()> {
     let script = build_resume_script(cwd, session_id);
     let output = runner
         .run(&script)
-        .map_err(|e| ItermError::Other(e.to_string()))?;
+        .map_err(|e| TerminalError::Other(e.to_string()))?;
     parse_resume_output(&output)
 }
 
 // ---------------------------------------------------------------------
-// iterm_targets: reconcile's pid -> target derivation (DESIGN.md §3.5/§4.3)
+// iterm2_targets: reconcile's pid -> target derivation (DESIGN.md §3.5/§4.3)
 // ---------------------------------------------------------------------
-
-/// Output of one `ps` invocation, mirroring `AppleScriptOutput`'s
-/// success/stdout split so a failed `ps` degrades the same way a failed
-/// `osascript` does (§3.5: "an incomplete scan must not prune").
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PsOutput {
-    pub success: bool,
-    pub stdout: String,
-}
-
-/// Runs `ps` to resolve pid -> tty. Injected so tests never shell out to the
-/// real `ps` (DESIGN.md / M2 task brief test-separation requirement).
-pub trait PsRunner {
-    fn run(&self, pids: &[u32]) -> std::io::Result<PsOutput>;
-}
-
-/// Real `ps` runner: `ps -o pid=,tty= -p <comma-separated pids>` (verified
-/// on a real machine 2026-07-04: prints `"<pid> <tty>"` per line, `tty`
-/// without a `/dev/` prefix, e.g. `ttys003`; a pid that isn't running is
-/// silently omitted from the output rather than erroring).
-pub struct RealPs;
-
-impl PsRunner for RealPs {
-    fn run(&self, pids: &[u32]) -> std::io::Result<PsOutput> {
-        let pid_list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-        let output = Command::new("ps")
-            .args(["-o", "pid=,tty=", "-p", &pid_list])
-            .output()?;
-        Ok(PsOutput {
-            success: output.status.success(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        })
-    }
-}
-
-/// Parse `ps -o pid=,tty=` output into a pid -> tty map. Lines that don't
-/// parse as `<pid> <tty>` are skipped rather than failing the whole batch
-/// (defensive: a stray warning line on stderr wouldn't land here, but this
-/// keeps the parser total).
-pub fn parse_ps_tty_output(stdout: &str) -> std::collections::HashMap<u32, String> {
-    stdout
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let pid: u32 = parts.next()?.parse().ok()?;
-            let tty = parts.next()?.to_string();
-            Some((pid, tty))
-        })
-        .collect()
-}
-
-/// Normalize a tty path for comparison: `ps` prints it bare (`ttys003`),
-/// iTerm2's AppleScript `tty of session` prints it with a `/dev/` prefix
-/// (`/dev/ttys003`) — verified on a real machine 2026-07-04. Stripping the
-/// prefix (if present) makes the two comparable regardless of source.
-fn normalize_tty(tty: &str) -> &str {
-    tty.strip_prefix("/dev/").unwrap_or(tty)
-}
 
 /// AppleScript that enumerates every iTerm2 session's `tty` and `id` (§3.5).
 /// Same explicit-index-plus-`try` scanning pattern as `build_focus_script`
@@ -516,7 +340,7 @@ fn normalize_tty(tty: &str) -> &str {
 /// `SESSION<TAB>tty<TAB>uuid` line per session found, followed by a final
 /// `DONE<TAB><failure count>` line; `failures > 0` is the signal callers use
 /// to treat the scan as incomplete (§3.5: skip pruning that round).
-pub fn build_iterm_targets_script() -> String {
+pub fn build_iterm2_targets_script() -> String {
     r#"if application "iTerm2" is running then
     tell application "iTerm2"
         set failures to 0
@@ -549,14 +373,14 @@ end if
     .to_string()
 }
 
-/// Parse `build_iterm_targets_script`'s output into `(tty, uuid)` pairs plus
+/// Parse `build_iterm2_targets_script`'s output into `(tty, uuid)` pairs plus
 /// whether the scan was complete (no `try` failures, §3.5).
-pub fn parse_iterm_targets_output(output: &AppleScriptOutput) -> ItermResult<(Vec<(String, String)>, bool)> {
+pub fn parse_iterm2_targets_output(output: &AppleScriptOutput) -> TerminalResult<(Vec<(String, String)>, bool)> {
     if is_permission_denied(output) {
-        return Err(ItermError::PermissionDenied);
+        return Err(TerminalError::PermissionDenied);
     }
     if !output.success {
-        return Err(ItermError::Other(output.stderr.trim().to_string()));
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
     }
 
     let mut sessions = Vec::new();
@@ -573,16 +397,17 @@ pub fn parse_iterm_targets_output(output: &AppleScriptOutput) -> ItermResult<(Ve
     Ok((sessions, failures == 0))
 }
 
-/// One pid -> target(bare UUID) mapping, plus whether the underlying scan
-/// (both `ps` and the iTerm2 AppleScript enumeration) was complete enough to
-/// trust for pruning (§3.5: reconcile only prunes when this is `true`).
+/// One pid -> target(`iterm2:<UUID>`) mapping, plus whether the underlying
+/// scan (both `ps` and the iTerm2 AppleScript enumeration) was complete
+/// enough to trust for pruning (§3.5: reconcile only prunes when this is
+/// `true`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ItermTargets {
+pub struct Iterm2Targets {
     pub targets: std::collections::HashMap<u32, String>,
     pub complete: bool,
 }
 
-/// `iterm_targets(pids)` (DESIGN.md §3.5/§4.3): resolve `claude agents`' pids
+/// `iterm2_targets(pids)` (DESIGN.md §3.5/§4.3): resolve `claude agents`' pids
 /// to shiibar targets by matching `ps`'s pid -> tty against iTerm2's own
 /// tty -> uuid enumeration. A pid with no matching iTerm2 session (not
 /// running inside iTerm2 at all) is simply absent from `targets` — that
@@ -598,13 +423,13 @@ pub struct ItermTargets {
 ///   and whatever could still be resolved (§3.5: caller sends
 ///   `complete:false` and skips pruning, but still adds/updates from what
 ///   it *did* get).
-pub fn iterm_targets(
+pub fn iterm2_targets(
     pids: &[u32],
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
-) -> ItermResult<ItermTargets> {
+) -> TerminalResult<Iterm2Targets> {
     if pids.is_empty() {
-        return Ok(ItermTargets {
+        return Ok(Iterm2Targets {
             targets: std::collections::HashMap::new(),
             complete: true,
         });
@@ -616,10 +441,10 @@ pub fn iterm_targets(
         Err(_) => (std::collections::HashMap::new(), false),
     };
 
-    let (sessions, scan_complete) = match script_runner.run(&build_iterm_targets_script()) {
-        Ok(output) => match parse_iterm_targets_output(&output) {
+    let (sessions, scan_complete) = match script_runner.run(&build_iterm2_targets_script()) {
+        Ok(output) => match parse_iterm2_targets_output(&output) {
             Ok(v) => v,
-            Err(ItermError::PermissionDenied) => return Err(ItermError::PermissionDenied),
+            Err(TerminalError::PermissionDenied) => return Err(TerminalError::PermissionDenied),
             Err(_) => (Vec::new(), false),
         },
         Err(_) => (Vec::new(), false),
@@ -631,11 +456,12 @@ pub fn iterm_targets(
             .iter()
             .find(|(session_tty, _)| normalize_tty(session_tty) == normalize_tty(tty))
         {
-            targets.insert(pid, uuid.clone());
+            // Prefixed target (§2/§3.5): reconcile keys on `iterm2:<UUID>`.
+            targets.insert(pid, format!("{ITERM2_PREFIX}{uuid}"));
         }
     }
 
-    Ok(ItermTargets {
+    Ok(Iterm2Targets {
         targets,
         complete: ps_ok && scan_complete,
     })
@@ -736,33 +562,6 @@ mod tests {
         assert!(script.contains("NOT_RUNNING"));
     }
 
-    // ---- escape_shell_single_quoted ----
-
-    #[test]
-    fn escape_shell_single_quoted_wraps_plain_text() {
-        assert_eq!(escape_shell_single_quoted("plain"), "'plain'");
-    }
-
-    #[test]
-    fn escape_shell_single_quoted_handles_spaces_and_dollar_and_backticks() {
-        // Single-quoting makes the shell treat these as plain bytes; no
-        // separate handling needed for any of them.
-        assert_eq!(
-            escape_shell_single_quoted("has space $VAR `cmd`"),
-            "'has space $VAR `cmd`'"
-        );
-    }
-
-    #[test]
-    fn escape_shell_single_quoted_escapes_embedded_single_quotes() {
-        assert_eq!(escape_shell_single_quoted("it's"), r#"'it'\''s'"#);
-    }
-
-    #[test]
-    fn escape_shell_single_quoted_handles_empty_string() {
-        assert_eq!(escape_shell_single_quoted(""), "''");
-    }
-
     // ---- build_resume_script ----
 
     #[test]
@@ -825,7 +624,7 @@ mod tests {
         let stderr = "Not authorized to send Apple events to iTerm2. (-1743)";
         assert_eq!(
             parse_resume_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -833,7 +632,7 @@ mod tests {
     fn parse_resume_output_other_failure() {
         assert_eq!(
             parse_resume_output(&out(false, "", "some other osascript error")),
-            Err(ItermError::Other("some other osascript error".to_string()))
+            Err(TerminalError::Other("some other osascript error".to_string()))
         );
     }
 
@@ -841,7 +640,7 @@ mod tests {
     fn parse_resume_output_unexpected_stdout_is_an_error() {
         assert!(matches!(
             parse_resume_output(&out(true, "garbage", "")),
-            Err(ItermError::Other(_))
+            Err(TerminalError::Other(_))
         ));
     }
 
@@ -864,7 +663,7 @@ mod tests {
     fn parse_focus_output_notfound() {
         assert_eq!(
             parse_focus_output(&out(true, "NOTFOUND\n", "")),
-            Err(ItermError::NoMatch)
+            Err(TerminalError::NoMatch)
         );
     }
 
@@ -873,7 +672,7 @@ mod tests {
         let stderr = "execution error: iTerm2 got an error: Not authorized to send Apple events to iTerm2. (-1743)";
         assert_eq!(
             parse_focus_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -881,7 +680,7 @@ mod tests {
     fn parse_focus_output_other_failure() {
         assert_eq!(
             parse_focus_output(&out(false, "", "some other osascript error")),
-            Err(ItermError::Other("some other osascript error".to_string()))
+            Err(TerminalError::Other("some other osascript error".to_string()))
         );
     }
 
@@ -889,7 +688,7 @@ mod tests {
     fn parse_focus_output_unexpected_stdout_is_an_error() {
         assert!(matches!(
             parse_focus_output(&out(true, "garbage", "")),
-            Err(ItermError::Other(_))
+            Err(TerminalError::Other(_))
         ));
     }
 
@@ -899,10 +698,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_focused_output_returns_the_bare_uuid_as_target() {
+    fn parse_focused_output_returns_the_prefixed_uuid_as_target() {
         assert_eq!(
             parse_focused_output(&out(true, "FOCUSED:ABCD-1234\n", "")),
-            Ok(Some("ABCD-1234".to_string()))
+            Ok(Some("iterm2:ABCD-1234".to_string()))
         );
     }
 
@@ -911,7 +710,7 @@ mod tests {
         let stderr = "not authorized to send Apple events to System Events.";
         assert_eq!(
             parse_focused_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -936,7 +735,7 @@ mod tests {
         let stderr = "osascript is not allowed to send Apple events, error -1743";
         assert_eq!(
             parse_probe_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -961,7 +760,7 @@ mod tests {
             }
         }
         let result = focus("not-w-t-p-shaped:garbage", &PanicRunner);
-        assert_eq!(result, Err(ItermError::NoMatch));
+        assert_eq!(result, Err(TerminalError::NoMatch));
     }
 
     #[test]
@@ -983,7 +782,7 @@ mod tests {
         };
         assert_eq!(
             focus("w0t0p0:UUID", &runner),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -992,7 +791,7 @@ mod tests {
         let runner = FakeRunner {
             output: out(true, "FOCUSED:UUID\n", ""),
         };
-        assert_eq!(focused(&runner), Ok(Some("UUID".to_string())));
+        assert_eq!(focused(&runner), Ok(Some("iterm2:UUID".to_string())));
     }
 
     #[test]
@@ -1025,15 +824,15 @@ mod tests {
         };
         assert_eq!(
             open_resume_window("/Users/example/project", "SESSION-1", &runner),
-            Err(ItermError::PermissionDenied)
+            Err(TerminalError::PermissionDenied)
         );
     }
 
-    // ---- iterm_targets: build_iterm_targets_script / parsing ----
+    // ---- iterm2_targets: build_iterm2_targets_script / parsing ----
 
     #[test]
     fn iterm_targets_script_never_activates_and_guards_on_running() {
-        let script = build_iterm_targets_script();
+        let script = build_iterm2_targets_script();
         assert!(!script.contains("activate"));
         assert!(script.contains(r#"application "iTerm2" is running"#));
         assert!(script.contains("DONE"));
@@ -1042,7 +841,7 @@ mod tests {
     #[test]
     fn iterm_targets_script_uses_explicit_index_and_try_like_focus() {
         // Same -1719 avoidance as build_focus_script (§7-1).
-        let script = build_iterm_targets_script();
+        let script = build_iterm2_targets_script();
         assert!(script.contains("session si of t"));
         assert!(script.contains("try"));
         assert!(!script.contains("repeat with s in sessions"));
@@ -1055,7 +854,7 @@ mod tests {
             "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys003\tUUID-B\nDONE\t0\n",
             "",
         );
-        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        let (sessions, complete) = parse_iterm2_targets_output(&output).unwrap();
         assert_eq!(
             sessions,
             vec![
@@ -1069,7 +868,7 @@ mod tests {
     #[test]
     fn parse_iterm_targets_output_nonzero_failures_is_incomplete() {
         let output = out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", "");
-        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        let (sessions, complete) = parse_iterm2_targets_output(&output).unwrap();
         assert_eq!(sessions.len(), 1);
         assert!(!complete, "a nonzero failure count must mark the scan incomplete");
     }
@@ -1077,7 +876,7 @@ mod tests {
     #[test]
     fn parse_iterm_targets_output_iterm2_not_running_is_empty_and_complete() {
         let output = out(true, "DONE\t0\n", "");
-        let (sessions, complete) = parse_iterm_targets_output(&output).unwrap();
+        let (sessions, complete) = parse_iterm2_targets_output(&output).unwrap();
         assert!(sessions.is_empty());
         assert!(complete, "no iTerm2 at all is zero sessions, not a failed scan");
     }
@@ -1086,35 +885,15 @@ mod tests {
     fn parse_iterm_targets_output_permission_denied() {
         let stderr = "Not authorized to send Apple events to iTerm2. (-1743)";
         assert_eq!(
-            parse_iterm_targets_output(&out(false, "", stderr)),
-            Err(ItermError::PermissionDenied)
+            parse_iterm2_targets_output(&out(false, "", stderr)),
+            Err(TerminalError::PermissionDenied)
         );
     }
 
-    // ---- iterm_targets: ps output parsing ----
+    // ---- iterm2_targets: end-to-end wiring with fake runners ----
+    // (ps parsing / normalize_tty are shared and tested in `terminal`.)
 
-    #[test]
-    fn parse_ps_tty_output_builds_a_pid_to_tty_map() {
-        let map = parse_ps_tty_output("20124 ttys000\n16437 ttys001\n");
-        assert_eq!(map.get(&20124).map(String::as_str), Some("ttys000"));
-        assert_eq!(map.get(&16437).map(String::as_str), Some("ttys001"));
-        assert_eq!(map.len(), 2);
-    }
-
-    #[test]
-    fn parse_ps_tty_output_skips_unparseable_lines() {
-        let map = parse_ps_tty_output("not a line\n20124 ttys000\n");
-        assert_eq!(map.len(), 1);
-        assert_eq!(map.get(&20124).map(String::as_str), Some("ttys000"));
-    }
-
-    #[test]
-    fn normalize_tty_strips_dev_prefix() {
-        assert_eq!(normalize_tty("/dev/ttys003"), "ttys003");
-        assert_eq!(normalize_tty("ttys003"), "ttys003");
-    }
-
-    // ---- iterm_targets: end-to-end wiring with fake runners ----
+    use crate::terminal::PsOutput;
 
     struct FakePs {
         output: PsOutput,
@@ -1127,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn iterm_targets_matches_pid_to_target_via_tty() {
+    fn iterm2_targets_matches_pid_to_prefixed_target_via_tty() {
         let ps = FakePs {
             output: PsOutput {
                 success: true,
@@ -1141,9 +920,9 @@ mod tests {
                 "",
             ),
         };
-        let result = iterm_targets(&[111, 222], &ps, &script_runner).unwrap();
-        assert_eq!(result.targets.get(&111).map(String::as_str), Some("UUID-A"));
-        assert_eq!(result.targets.get(&222).map(String::as_str), Some("UUID-B"));
+        let result = iterm2_targets(&[111, 222], &ps, &script_runner).unwrap();
+        assert_eq!(result.targets.get(&111).map(String::as_str), Some("iterm2:UUID-A"));
+        assert_eq!(result.targets.get(&222).map(String::as_str), Some("iterm2:UUID-B"));
         assert!(result.complete);
     }
 
@@ -1158,7 +937,7 @@ mod tests {
         let script_runner = FakeRunner {
             output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
         };
-        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
+        let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
         assert!(result.targets.is_empty());
         assert!(result.complete, "a pid outside iTerm2 isn't a scan failure");
     }
@@ -1174,8 +953,8 @@ mod tests {
         let script_runner = FakeRunner {
             output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", ""),
         };
-        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
-        assert_eq!(result.targets.get(&111).map(String::as_str), Some("UUID-A"));
+        let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
+        assert_eq!(result.targets.get(&111).map(String::as_str), Some("iterm2:UUID-A"));
         assert!(!result.complete);
     }
 
@@ -1190,7 +969,7 @@ mod tests {
         let script_runner = FakeRunner {
             output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
         };
-        let result = iterm_targets(&[111], &ps, &script_runner).unwrap();
+        let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
         assert!(!result.complete);
     }
 
@@ -1213,8 +992,8 @@ mod tests {
             ),
         };
         assert_eq!(
-            iterm_targets(&[111], &ps, &script_runner),
-            Err(ItermError::PermissionDenied)
+            iterm2_targets(&[111], &ps, &script_runner),
+            Err(TerminalError::PermissionDenied)
         );
     }
 
@@ -1232,7 +1011,7 @@ mod tests {
                 panic!("osascript must not run when there are no pids to resolve");
             }
         }
-        let result = iterm_targets(&[], &PanicPs, &PanicScript).unwrap();
+        let result = iterm2_targets(&[], &PanicPs, &PanicScript).unwrap();
         assert!(result.targets.is_empty());
         assert!(result.complete);
     }

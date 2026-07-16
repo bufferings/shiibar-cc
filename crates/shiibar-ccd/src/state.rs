@@ -116,14 +116,41 @@ struct StateFile {
 }
 
 /// Load persisted agents from `path`. Missing file => empty (fresh start).
+///
+/// Applies the one-time target format migration (§2): a `state.json` written
+/// before target prefixes existed holds bare iTerm2 UUIDs, so any target
+/// without a `:` gets `iterm2:` prepended on load. This is a storage-format
+/// migration only — the daemon never interprets what a prefix means (that's
+/// the client's terminal modules and `shiibar-cc report`, §2).
 pub fn load(path: &Path) -> anyhow::Result<Vec<AgentEntry>> {
     match std::fs::read_to_string(path) {
         Ok(contents) => {
             let file: StateFile = serde_json::from_str(&contents)?;
-            Ok(file.agents)
+            Ok(file
+                .agents
+                .into_iter()
+                .map(|mut a| {
+                    a.target = migrate_target_prefix(a.target);
+                    a
+                })
+                .collect())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// The prefix a pre-prefix (bare-UUID) iTerm2 target migrates to (§2).
+const ITERM2_TARGET_PREFIX: &str = "iterm2:";
+
+/// One-time storage-format migration (§2): a target with no `:` is a
+/// pre-prefix bare iTerm2 UUID and gets `iterm2:` prepended; a target that
+/// already carries a prefix (any `:`) is left untouched.
+fn migrate_target_prefix(target: String) -> String {
+    if target.contains(':') {
+        target
+    } else {
+        format!("{ITERM2_TARGET_PREFIX}{target}")
     }
 }
 
@@ -168,10 +195,40 @@ mod tests {
     fn round_trips_through_save_and_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let agents = vec![entry("a", Status::Waiting), entry("b", Status::Idle)];
+        // Already-prefixed targets (§2): the migration on load is a no-op for
+        // these, so this exercises a true save/load round trip.
+        let agents = vec![
+            entry("iterm2:a", Status::Waiting),
+            entry("apple-terminal:/dev/ttys006", Status::Idle),
+        ];
         save(&path, &agents).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded, agents);
+    }
+
+    #[test]
+    fn migrates_a_bare_uuid_target_to_the_iterm2_prefix_on_load() {
+        // §2 one-time format migration: a pre-prefix state.json holds a bare
+        // iTerm2 UUID (no `:`); load must prepend `iterm2:`. A target that
+        // already carries a prefix (either terminal) is left untouched.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"agents":[
+                {"target":"BARE-UUID","status":"waiting","unreviewed":true,"session_id":"s","cwd":"/c","since":1,"last_seen":2},
+                {"target":"iterm2:ALREADY","status":"idle","unreviewed":false,"session_id":"s","cwd":"/c","since":1,"last_seen":2},
+                {"target":"apple-terminal:/dev/ttys006","status":"idle","unreviewed":false,"session_id":"s","cwd":"/c","since":1,"last_seen":2}
+            ]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded[0].target, "iterm2:BARE-UUID");
+        assert_eq!(loaded[1].target, "iterm2:ALREADY", "an already-prefixed target is untouched");
+        assert_eq!(
+            loaded[2].target, "apple-terminal:/dev/ttys006",
+            "an apple-terminal target is untouched"
+        );
     }
 
     #[test]

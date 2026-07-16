@@ -5,7 +5,7 @@
 //! `$PATH`, the real `osascript` runner) into `shiibar-cc`'s library
 //! functions, which do the actual work and are what the test suite drives.
 
-use shiibar_cc_client::iterm::Osascript;
+use shiibar_cc_client::terminal::Osascript;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -150,7 +150,7 @@ fn cmd_focused(_args: &[String]) -> i32 {
 
 fn cmd_reconcile(_args: &[String]) -> i32 {
     let claude_runner = shiibar_cc_client::RealClaudeAgents;
-    let ps_runner = shiibar_cc_client::iterm::RealPs;
+    let ps_runner = shiibar_cc_client::terminal::RealPs;
     let script_runner = Osascript;
     let (code, err) = shiibar_cc::reconcile_cmd::run_reconcile(
         &shiibar_cc_client::resolve_socket_path(),
@@ -205,7 +205,8 @@ fn cmd_resume(args: &[String]) -> i32 {
         }
     };
     let runner = Osascript;
-    let report = shiibar_cc::resume_cmd::run_resume(&parsed.cwd, &parsed.session_id, &runner);
+    let report =
+        shiibar_cc::resume_cmd::run_resume(&parsed.cwd, &parsed.session_id, parsed.terminal, &runner);
     if let Some(m) = report.message {
         eprintln!("{m}");
     }

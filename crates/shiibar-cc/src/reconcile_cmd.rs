@@ -1,11 +1,11 @@
 //! `shiibar-cc reconcile` (DESIGN.md §3.5/§4.4): gather the live session list
-//! (`claude agents --json` + `iterm_targets`, done by
+//! (`claude agents --json` + the terminal scans, done by
 //! `shiibar_cc_client::reconcile::gather`) and send it to the daemon as
 //! `{"cmd":"reconcile",...}`.
 
 use crate::exitcode;
-use shiibar_cc_client::iterm::{AppleScriptRunner, ItermError, PsRunner};
 use shiibar_cc_client::reconcile::{ClaudeAgentsRunner, gather};
+use shiibar_cc_client::terminal::{AppleScriptRunner, PsRunner, TerminalError};
 use shiibar_cc_proto::{AckResponse, Request};
 use std::path::Path;
 
@@ -26,11 +26,11 @@ pub fn run_reconcile(
 ) -> (i32, Option<String>) {
     let result = match gather(claude_runner, ps_runner, script_runner) {
         Ok(r) => r,
-        Err(ItermError::PermissionDenied) => {
+        Err(TerminalError::PermissionDenied) => {
             return (
                 exitcode::TCC_DENIED,
                 Some(
-                    "shiibar-cc reconcile: osascript automation permission for iTerm2 is denied \
+                    "shiibar-cc reconcile: osascript automation permission for the terminal is denied \
                      (System Settings > Privacy & Security > Automation); nothing was sent"
                         .to_string(),
                 ),
@@ -60,7 +60,7 @@ pub fn run_reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shiibar_cc_client::iterm::{AppleScriptOutput, PsOutput};
+    use shiibar_cc_client::terminal::{AppleScriptOutput, PsOutput};
 
     struct FakeClaude {
         json: String,

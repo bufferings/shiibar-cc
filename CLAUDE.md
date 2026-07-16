@@ -1,6 +1,6 @@
 # shiibar-cc
 
-macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting / idle, plus an unreviewed flag) via hooks and jumps to the corresponding iTerm2 tab.
+macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting / idle, plus an unreviewed flag) via hooks and jumps to the corresponding iTerm2 / Terminal.app tab.
 
 ## Source of truth
 

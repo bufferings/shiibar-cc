@@ -20,7 +20,7 @@ use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
-const TARGET: &str = "11111111-1111-1111-1111-111111111111";
+const TARGET: &str = "iterm2:11111111-1111-1111-1111-111111111111";
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
 
 #[tokio::test]
@@ -236,7 +236,7 @@ async fn elicitation_and_prompt_input_exit_fixtures_replay() {
 
 async fn send(daemon: &TestDaemon, fixture: &str, event: HookEvent) {
     let raw = load_fixture(fixture);
-    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1_700_000_000)
+    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1_700_000_000)
         .expect("fixture should extract cleanly")
         .expect("fixture + ITERM_SESSION_ID should never be dropped");
     daemon.report(payload).await;

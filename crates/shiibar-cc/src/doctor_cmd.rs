@@ -14,7 +14,8 @@
 
 use crate::exitcode;
 use serde::{Serialize, Serializer};
-use shiibar_cc_client::iterm::{AppleScriptRunner, ItermError, ProbeOutcome, probe};
+use shiibar_cc_client::terminal::{AppleScriptRunner, ProbeOutcome, TerminalError};
+use shiibar_cc_client::{apple_terminal, iterm2};
 use shiibar_cc_proto::{InfoResponse, Request};
 use std::ffi::OsStr;
 use std::path::Path;
@@ -156,6 +157,43 @@ impl SpacesSettingReader for Defaults {
     }
 }
 
+/// One terminal's TCC-probe outcome as a `CheckRecord` (§4.4). `id` is the
+/// per-terminal check id; `name` is the human terminal name. NotRunning is
+/// `[info]` (skipped, not a problem — §8.47); denial and other errors are
+/// `warn`; granted is `ok`.
+fn tcc_check(
+    id: &'static str,
+    name: &str,
+    outcome: Result<ProbeOutcome, TerminalError>,
+) -> CheckRecord {
+    match outcome {
+        Ok(ProbeOutcome::Granted) => CheckRecord::new(
+            id,
+            CheckStatus::Ok,
+            format!("osascript can control {name} (Automation permission granted)"),
+            None,
+        ),
+        Ok(ProbeOutcome::NotRunning) => CheckRecord::new(
+            id,
+            CheckStatus::Info,
+            format!("{name} is not running; Automation permission not checked"),
+            None,
+        ),
+        Err(TerminalError::PermissionDenied) => CheckRecord::new(
+            id,
+            CheckStatus::Warn,
+            format!("osascript Automation permission for {name} is denied"),
+            Some("System Settings > Privacy & Security > Automation"),
+        ),
+        Err(e) => CheckRecord::new(
+            id,
+            CheckStatus::Warn,
+            format!("could not probe {name}: {e}"),
+            None,
+        ),
+    }
+}
+
 pub fn run_doctor_checks(
     socket_path: &Path,
     settings_path: &Path,
@@ -252,32 +290,16 @@ pub fn run_doctor_checks(
         ));
     }
 
-    match probe(runner) {
-        Ok(ProbeOutcome::Granted) => checks.push(CheckRecord::new(
-            "tcc",
-            CheckStatus::Ok,
-            "osascript can control iTerm2 (Automation permission granted)".to_string(),
-            None,
-        )),
-        Ok(ProbeOutcome::NotRunning) => checks.push(CheckRecord::new(
-            "tcc",
-            CheckStatus::Info,
-            "iTerm2 is not running; Automation permission not checked".to_string(),
-            None,
-        )),
-        Err(ItermError::PermissionDenied) => checks.push(CheckRecord::new(
-            "tcc",
-            CheckStatus::Warn,
-            "osascript Automation permission for iTerm2 is denied".to_string(),
-            Some("System Settings > Privacy & Security > Automation"),
-        )),
-        Err(e) => checks.push(CheckRecord::new(
-            "tcc",
-            CheckStatus::Warn,
-            format!("could not probe iTerm2: {e}"),
-            None,
-        )),
-    }
+    // TCC probe, once per supported terminal (§4.4): a terminal that isn't
+    // running is skipped with `[info]` (folds to `ok` in JSON) rather than
+    // probed, so doctor never pops a permission prompt for a terminal the
+    // user doesn't use (§8.47).
+    checks.push(tcc_check("tcc_iterm2", "iTerm2", iterm2::probe(runner)));
+    checks.push(tcc_check(
+        "tcc_apple_terminal",
+        "Terminal.app",
+        apple_terminal::probe(runner),
+    ));
 
     match spaces_reader.read().as_deref() {
         Some("0") => checks.push(CheckRecord::new(
@@ -354,7 +376,7 @@ fn shiibar_cc_on_path(path_env: Option<&OsStr>) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shiibar_cc_client::iterm::AppleScriptOutput;
+    use shiibar_cc_client::terminal::AppleScriptOutput;
 
     struct FakeRunner {
         output: AppleScriptOutput,
@@ -506,6 +528,41 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("Automation permission for iTerm2 is denied"))
         );
+    }
+
+    #[test]
+    fn tcc_probes_each_supported_terminal_and_skips_the_ones_not_running() {
+        // §4.4/§8.47: one TCC check per terminal; a terminal that isn't
+        // running is `[info]` (skipped, not probed) in human output and folds
+        // to `ok` in JSON. The FakeRunner answers NOT_RUNNING for both.
+        let dir = tempfile::tempdir().unwrap();
+        let runner = FakeRunner {
+            output: out(true, "NOT_RUNNING\n", ""),
+        };
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &spaces_on(),
+        );
+        let iterm2 = checks.iter().find(|c| c.id == "tcc_iterm2").expect("iterm2 tcc check");
+        let apple = checks
+            .iter()
+            .find(|c| c.id == "tcc_apple_terminal")
+            .expect("apple_terminal tcc check");
+        assert_eq!(iterm2.status, CheckStatus::Info);
+        assert_eq!(apple.status, CheckStatus::Info);
+        assert!(iterm2.line().starts_with("[info]"));
+        assert!(apple.line().contains("Terminal.app is not running"));
+
+        // Both fold to `ok` in JSON (§4.4: the schema has no fourth value).
+        let value: serde_json::Value = serde_json::from_str(&checks_to_json(&checks)).unwrap();
+        let array = value["checks"].as_array().unwrap();
+        for id in ["tcc_iterm2", "tcc_apple_terminal"] {
+            let c = array.iter().find(|c| c["id"] == id).unwrap();
+            assert_eq!(c["status"], "ok", "{id} not-running must fold to ok in JSON");
+        }
     }
 
     // ---- structured records / --json (DESIGN.md §4.4) ----

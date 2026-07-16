@@ -7,8 +7,8 @@
 //! crate's automated tests either.
 
 use crate::exitcode;
-use shiibar_cc_client::iterm::{AppleScriptRunner, ItermError, focus, focused};
 use shiibar_cc_client::selector::{SelectError, Selector, resolve_selector};
+use shiibar_cc_client::terminal::{AppleScriptRunner, TerminalError, focus, focused};
 use shiibar_cc_proto::{AckResponse, ListResponse, Request};
 use std::path::{Path, PathBuf};
 
@@ -100,11 +100,11 @@ pub fn run_focused(runner: &dyn AppleScriptRunner) -> FocusedReport {
             target: None,
             message: None,
         },
-        Err(ItermError::PermissionDenied) => FocusedReport {
+        Err(TerminalError::PermissionDenied) => FocusedReport {
             exit_code: exitcode::TCC_DENIED,
             target: None,
             message: Some(
-                "shiibar-cc focused: osascript automation permission for iTerm2 is denied"
+                "shiibar-cc focused: osascript automation permission for the terminal is denied"
                     .to_string(),
             ),
         },
@@ -122,15 +122,15 @@ pub fn run_focused(runner: &dyn AppleScriptRunner) -> FocusedReport {
 fn jump_to(socket_path: &Path, dest_target: &str, runner: &dyn AppleScriptRunner) -> FocusReport {
     if let Err(e) = focus(dest_target, runner) {
         return match e {
-            ItermError::NoMatch => err(
+            TerminalError::NoMatch => err(
                 exitcode::NOT_FOUND,
-                "shiibar-cc focus: no matching iTerm2 session (tab may be closed)",
+                "shiibar-cc focus: no matching terminal session (tab may be closed)",
             ),
-            ItermError::PermissionDenied => err(
+            TerminalError::PermissionDenied => err(
                 exitcode::TCC_DENIED,
-                "shiibar-cc focus: osascript automation permission for iTerm2 is denied",
+                "shiibar-cc focus: osascript automation permission for the terminal is denied",
             ),
-            ItermError::Other(msg) => err(exitcode::ERROR, format!("shiibar-cc focus: {msg}")),
+            TerminalError::Other(msg) => err(exitcode::ERROR, format!("shiibar-cc focus: {msg}")),
         };
     }
 
@@ -149,7 +149,7 @@ fn jump_to(socket_path: &Path, dest_target: &str, runner: &dyn AppleScriptRunner
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shiibar_cc_client::iterm::AppleScriptOutput;
+    use shiibar_cc_client::terminal::AppleScriptOutput;
     use std::sync::Mutex;
 
     /// A fake `AppleScriptRunner` that returns pre-scripted outputs in
@@ -280,17 +280,22 @@ mod tests {
     // ---- run_focused: exit-code mapping (§4.4) ----
 
     #[test]
-    fn run_focused_with_a_frontmost_session_is_exit_0_with_its_target() {
+    fn run_focused_with_a_frontmost_iterm2_session_is_exit_0_with_its_prefixed_target() {
+        // `terminal::focused` asks iTerm2 first; a hit there returns the
+        // prefixed target and Terminal.app is never queried (one canned
+        // output is enough).
         let runner = ScriptedRunner::new(vec![out(true, "FOCUSED:UUID-1\n", "")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::OK);
-        assert_eq!(report.target, Some("UUID-1".to_string()));
+        assert_eq!(report.target, Some("iterm2:UUID-1".to_string()));
         assert_eq!(report.message, None);
     }
 
     #[test]
-    fn run_focused_with_iterm2_not_frontmost_is_exit_2() {
-        let runner = ScriptedRunner::new(vec![out(true, "NONE\n", "")]);
+    fn run_focused_with_neither_terminal_frontmost_is_exit_2() {
+        // Neither iTerm2 nor Terminal.app is frontmost: both `focused`
+        // scripts answer NONE, so two canned outputs are consumed.
+        let runner = ScriptedRunner::new(vec![out(true, "NONE\n", ""), out(true, "NONE\n", "")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::NOT_FOUND);
         assert_eq!(report.target, None);

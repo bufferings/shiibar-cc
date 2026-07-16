@@ -1,11 +1,13 @@
 //! `claude agents --json` gathering for `shiibar-cc reconcile` (DESIGN.md
 //! §3.5). This is the "gather" half: parse `claude agents --json`, map its
-//! status vocabulary to shiibar's, and use `iterm::iterm_targets` to turn
-//! each entry's pid into a shiibar target. The result is what `shiibar-cc`
-//! sends as `{"cmd":"reconcile",...}` (§4.2); daemon-side application
-//! (add/update/prune) lives in shiibar-ccd, not here.
+//! status vocabulary to shiibar's, and resolve each entry's pid to a shiibar
+//! target by matching it against **every running supported terminal**
+//! (`iterm2::iterm2_targets` + `apple_terminal::apple_terminal_targets`). The
+//! result is what `shiibar-cc` sends as `{"cmd":"reconcile",...}` (§4.2);
+//! daemon-side application (add/update/prune) lives in shiibar-ccd, not here.
 
-use crate::iterm::{self, AppleScriptRunner, PsRunner};
+use crate::terminal::{AppleScriptRunner, PsRunner, TerminalError};
+use crate::{apple_terminal, iterm2};
 use shiibar_cc_proto::{ReconcileSession, Status};
 use std::process::Command;
 
@@ -94,19 +96,26 @@ pub struct GatherResult {
 
 /// Gather the live session list for a `reconcile` request (§3.5): run
 /// `claude agents --json`, map statuses, and resolve each pid to a shiibar
-/// target via `iterm::iterm_targets`. A `claude agents` entry whose pid
-/// doesn't resolve to an iTerm2 session is skipped (§3.5 step 1: "no iTerm2
-/// match -> skip", §8.11).
+/// target by matching it against every running supported terminal's scan
+/// (`iterm2::iterm2_targets` + `apple_terminal::apple_terminal_targets`). A
+/// `claude agents` entry whose pid matches neither terminal is skipped (§3.5
+/// step 1: "no match -> skip", §8.11/§8.47). An un-launched terminal's
+/// is-running-guarded scan returns an empty set (§3.5: don't scan a terminal
+/// that isn't running), so calling both is safe.
 ///
-/// `Err(PermissionDenied)` is the one non-degradable failure: osascript's
-/// TCC (Automation) denial, propagated from `iterm_targets` so the caller
+/// `complete` is the AND of both scans (§3.5: "every scan that was *attempted*
+/// succeeded"); an un-launched terminal contributes an empty-but-complete
+/// scan, so it never drags `complete` down.
+///
+/// `Err(PermissionDenied)` is the one non-degradable failure: osascript's TCC
+/// (Automation) denial, propagated from either terminal's scan so the caller
 /// can exit 3 (§4.4) instead of silently sending useless `complete:false`
 /// reconciles forever.
 pub fn gather(
     claude_runner: &dyn ClaudeAgentsRunner,
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
-) -> Result<GatherResult, iterm::ItermError> {
+) -> Result<GatherResult, TerminalError> {
     let raw = match claude_runner.run() {
         Ok(s) => s,
         Err(_) => {
@@ -127,12 +136,21 @@ pub fn gather(
     };
 
     let pids: Vec<u32> = agents.iter().map(|a| a.pid).collect();
-    let resolved = iterm::iterm_targets(&pids, ps_runner, script_runner)?;
+    let iterm2_resolved = iterm2::iterm2_targets(&pids, ps_runner, script_runner)?;
+    let apple_resolved = apple_terminal::apple_terminal_targets(&pids, ps_runner, script_runner)?;
+    let complete = iterm2_resolved.complete && apple_resolved.complete;
 
     let sessions = agents
         .into_iter()
         .filter_map(|a| {
-            let target = resolved.targets.get(&a.pid)?.clone();
+            // A tty belongs to exactly one terminal, so a pid resolves via at
+            // most one of the two maps; prefer iterm2's arbitrarily (there's
+            // never an overlap).
+            let target = iterm2_resolved
+                .targets
+                .get(&a.pid)
+                .or_else(|| apple_resolved.targets.get(&a.pid))?
+                .clone();
             let waiting_for = (a.status == Status::Waiting).then_some(a.waiting_for).flatten();
             Some(ReconcileSession {
                 target,
@@ -144,16 +162,13 @@ pub fn gather(
         })
         .collect();
 
-    Ok(GatherResult {
-        complete: resolved.complete,
-        sessions,
-    })
+    Ok(GatherResult { complete, sessions })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::iterm::{AppleScriptOutput, PsOutput};
+    use crate::terminal::{AppleScriptOutput, PsOutput};
 
     fn claude_agents_json() -> &'static str {
         r#"[
@@ -252,9 +267,55 @@ mod tests {
         assert_eq!(result.sessions.len(), 2, "pid 333 (no iTerm2 match) must be skipped");
         let by_target: std::collections::HashMap<_, _> =
             result.sessions.iter().map(|s| (s.target.as_str(), s)).collect();
-        assert_eq!(by_target["UUID-A"].status, Status::Working);
-        assert_eq!(by_target["UUID-B"].status, Status::Waiting);
-        assert_eq!(by_target["UUID-B"].waiting_for.as_deref(), Some("permission prompt"));
+        assert_eq!(by_target["iterm2:UUID-A"].status, Status::Working);
+        assert_eq!(by_target["iterm2:UUID-B"].status, Status::Waiting);
+        assert_eq!(by_target["iterm2:UUID-B"].waiting_for.as_deref(), Some("permission prompt"));
+    }
+
+    #[test]
+    fn gather_resolves_an_apple_terminal_session_and_merges_both_terminals() {
+        // pid 111 is an iTerm2 session, pid 222 a Terminal.app tab. The
+        // script runner answers each terminal's enumeration script by its
+        // marker (SESSION for iTerm2, TAB for Terminal.app), so both resolve
+        // and the merged result carries both prefixed targets (§3.5/§4.3).
+        struct MarkerScript;
+        impl AppleScriptRunner for MarkerScript {
+            fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+                let stdout = if script.contains("SESSION") {
+                    "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n"
+                } else {
+                    "TAB\t/dev/ttys006\nDONE\t0\n"
+                };
+                Ok(AppleScriptOutput {
+                    success: true,
+                    stdout: stdout.to_string(),
+                    stderr: String::new(),
+                })
+            }
+        }
+        let claude = FakeClaude {
+            output: Ok(r#"[
+                {"sessionId":"s-1","cwd":"/a","pid":111,"status":"busy"},
+                {"sessionId":"s-2","cwd":"/b","pid":222,"status":"waiting","waitingFor":"input"}
+            ]"#
+            .to_string()),
+        };
+        let ps = FakePs {
+            stdout: "111 ttys000\n222 ttys006\n".to_string(),
+        };
+        let result = gather(&claude, &ps, &MarkerScript).unwrap();
+        assert!(result.complete);
+        let by_target: std::collections::HashMap<_, _> =
+            result.sessions.iter().map(|s| (s.target.as_str(), s)).collect();
+        assert_eq!(by_target["iterm2:UUID-A"].status, Status::Working);
+        assert_eq!(
+            by_target["apple-terminal:/dev/ttys006"].status,
+            Status::Waiting
+        );
+        assert_eq!(
+            by_target["apple-terminal:/dev/ttys006"].waiting_for.as_deref(),
+            Some("input")
+        );
     }
 
     #[test]
@@ -302,6 +363,6 @@ mod tests {
             stdout: "111 ttys000\n".to_string(),
         };
         let result = gather(&claude, &ps, &TccScript);
-        assert!(matches!(result, Err(crate::iterm::ItermError::PermissionDenied)));
+        assert!(matches!(result, Err(crate::terminal::TerminalError::PermissionDenied)));
     }
 }

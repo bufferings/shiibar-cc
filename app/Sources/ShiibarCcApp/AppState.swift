@@ -15,7 +15,10 @@ final class AppState: ObservableObject {
     /// The working animation timer (M5 T8) only cares whether the current
     /// rollup shows `working`, so both mutation points refresh it.
     @Published private(set) var agents: [Agent] = [] {
-        didSet { refreshWorkingAnimationTimer() }
+        didSet {
+            refreshWorkingAnimationTimer()
+            rememberObservedTerminal()
+        }
     }
     @Published private(set) var connected = false {
         didSet { refreshWorkingAnimationTimer() }
@@ -533,6 +536,28 @@ final class AppState: ObservableObject {
         case .unknown:
             break
         }
+    }
+
+    // MARK: - Resume terminal (§4.6/T6)
+
+    /// Remember the newest observed terminal kind so Resume can fall back to
+    /// it once the agent list empties (§4.6: "updated every time entries are
+    /// observed"). Only stores when the current entries name a supported
+    /// terminal — an empty/unrecognized list leaves the previous memory
+    /// intact.
+    private func rememberObservedTerminal() {
+        if let kind = ResumeTerminal.newestObservedKind(agents: agents) {
+            UserDefaults.standard.set(kind, forKey: ResumeTerminal.userDefaultsKey)
+        }
+    }
+
+    /// The `--terminal` value Resume should pass (§4.6/T6): newest observed
+    /// entry's kind → remembered kind → `iterm2`.
+    var resumeTerminal: String {
+        ResumeTerminal.decide(
+            agents: agents,
+            remembered: UserDefaults.standard.string(forKey: ResumeTerminal.userDefaultsKey)
+        )
     }
 
     // MARK: - Derived display state

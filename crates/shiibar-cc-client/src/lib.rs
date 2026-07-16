@@ -1,14 +1,17 @@
 //! Client library: socket connection, list / subscribe / wait, selector
-//! resolution, cwd label formatting, and the iterm module (the ONLY place
-//! that knows about iTerm2 / AppleScript).
+//! resolution, cwd label formatting, and the terminal modules (`iterm2` /
+//! `apple_terminal` — the ONLY places that know about iTerm2 / Terminal.app /
+//! AppleScript) behind the shared `terminal` dispatch.
 //!
 //! Spec: docs/DESIGN.md §4.3.
 
+pub mod apple_terminal;
 pub mod connection;
-pub mod iterm;
+pub mod iterm2;
 pub mod label;
 pub mod reconcile;
 pub mod selector;
+pub mod terminal;
 pub mod wait;
 
 pub use connection::{

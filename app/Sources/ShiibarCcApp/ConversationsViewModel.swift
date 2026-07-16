@@ -559,16 +559,20 @@ final class ConversationsViewModel: ObservableObject {
         !summary.live && (summary.cwd?.isEmpty == false)
     }
 
-    /// Resume a past conversation in a new iTerm2 window (§4.6/T6):
-    /// `shiibar-cc resume --cwd <cwd> <session_id>` via the same subprocess
-    /// mechanism as focus. The window stays open. On success, re-run the
-    /// search so the resumed conversation flips to running.
+    /// Resume a past conversation in a new terminal window (§4.6/T6):
+    /// `shiibar-cc resume --cwd <cwd> --terminal <t> <session_id>` via the
+    /// same subprocess mechanism as focus. The terminal `t` is decided by
+    /// observation (§4.6): the newest agent entry's prefix, else the last
+    /// observed kind, else `iterm2` — the app decides and passes it, resume
+    /// makes no decision of its own (§4.4). The window stays open. On success,
+    /// re-run the search so the resumed conversation flips to running.
     func resume(_ summary: ConversationSummary) {
         guard !summary.live, let cwd = summary.cwd, !cwd.isEmpty else { return }
         let sessionID = summary.sessionID
+        let terminal = appState?.resumeTerminal ?? ResumeTerminal.iterm2
         DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
             let result = CLIRunner.run(
-                ["resume", "--cwd", cwd, sessionID],
+                ["resume", "--cwd", cwd, "--terminal", terminal, sessionID],
                 helpersDirectory: helpersDirectory,
                 expectedExitCodes: [0]
             )

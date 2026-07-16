@@ -134,7 +134,7 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     // Register a session that a hook, not reconcile, put there (a ghost
     // candidate: still tracked by shiibar-ccd, but no longer live).
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;
@@ -150,7 +150,7 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     }
     let resp: ListResponse = daemon.request(&Request::List).await.unwrap();
     assert!(
-        resp.agents.iter().any(|a| a.target == "11111111-1111-1111-1111-111111111111"),
+        resp.agents.iter().any(|a| a.target == "iterm2:11111111-1111-1111-1111-111111111111"),
         "complete:false must not prune the ghost"
     );
 
@@ -158,14 +158,14 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     reconcile(&daemon, true, vec![session("t-other", Status::Working, None)]).await;
     match sub.next_event().await {
         SubscribeEvent::AgentRemoved { target, reason } => {
-            assert_eq!(target, "11111111-1111-1111-1111-111111111111");
+            assert_eq!(target, "iterm2:11111111-1111-1111-1111-111111111111");
             assert_eq!(reason, RemovalReason::Prune, "reconcile prune must report reason=prune (§4.2)");
         }
         other => panic!("expected agent_removed, got {other:?}"),
     }
     let resp: ListResponse = daemon.request(&Request::List).await.unwrap();
     assert!(
-        !resp.agents.iter().any(|a| a.target == "11111111-1111-1111-1111-111111111111"),
+        !resp.agents.iter().any(|a| a.target == "iterm2:11111111-1111-1111-1111-111111111111"),
         "complete:true must prune the ghost"
     );
     assert!(resp.agents.iter().any(|a| a.target == "t-other"), "still-live session must survive");

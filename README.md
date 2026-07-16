@@ -3,14 +3,31 @@
 <img src="docs/assets/app-icon.png" width="120" alt="Shiibar CC app icon" align="left" hspace="16">
 
 A macOS menu bar app that watches your Claude Code agent sessions
-running in iTerm2 and lets you jump straight to the right one.
+running in iTerm2 or the macOS Terminal.app and lets you jump straight to
+the right one.
 
-**iTerm2 only, by design.** Sessions running in any other terminal
-(Terminal.app, VS Code's integrated terminal, SSH) are not tracked at all —
-they never appear in the list, and there is nothing to jump to. If your
-Claude Code sessions don't live in iTerm2, this tool does nothing for you.
+**Supported terminals only, by design.** Sessions running in a terminal
+Shiibar CC can't drive (VS Code's integrated terminal, SSH) are not tracked
+at all — they never appear in the list, and there is nothing to jump to. If
+your Claude Code sessions don't live in a supported terminal, this tool does
+nothing for you.
 
 <br clear="all">
+
+## Supported terminals
+
+Shiibar CC tracks and jumps to Claude Code sessions running in these
+terminals:
+
+| Terminal           | Verified with                   |
+| ------------------ | ------------------------------- |
+| iTerm2             | iTerm2 3.6.11 on macOS 14.5     |
+| macOS Terminal.app | Terminal.app 2.14 on macOS 14.5 |
+
+"Verified with" is the combination the behavior was checked against, not a
+minimum requirement — lower bounds aren't tested. A session in any other
+terminal (VS Code's integrated terminal, SSH) isn't tracked: it never
+appears in the list, and there is nothing to jump to.
 
 ## What it does
 
@@ -25,7 +42,7 @@ a glance:
   session that finished or started waiting
 
 Click a session in the dropdown (or a notification) and it jumps to that
-session's iTerm2 tab.
+session's terminal tab.
 
 <img src="docs/assets/menubar-dropdown.png" width="500"
      alt="The Shiibar CC dropdown, grouped by status: one session waiting
@@ -52,7 +69,7 @@ Claude Code conversation history across every folder. Open it from the `⌄`
 menu (or the app menu) → Conversations…: a two-pane window where you can
 **browse** recent conversations, **search** their full text across folders,
 **read** any one from the bottom (latest) up, and **resume** a past one in a
-new iTerm2 window. Search is incremental; each word of two or more
+new terminal window. Search is incremental; each word of two or more
 characters matches as a case-insensitive substring ("auth" finds
 "authentication"), and multiple words are AND-ed.
 
@@ -79,9 +96,10 @@ catches up.
 Installing and running Shiibar CC asks for the following. Each one maps to a
 specific feature — nothing is requested speculatively.
 
-- **Automation (Apple Events) for iTerm2**: needed to find and select the
-  right window/tab/session when you jump to an agent. This is the only
-  terminal app Shiibar CC drives.
+- **Automation (Apple Events) for iTerm2 and Terminal.app**: needed to find
+  and select the right window/tab/session when you jump to an agent. Shiibar
+  CC drives whichever of the two supported terminals a session runs in, and
+  only asks for a terminal's permission when it actually needs to control it.
 - **Notifications**: needed to alert you when a session starts waiting on
   you, or finishes.
 - **Login Items**: the app registers itself to start at login automatically
@@ -132,7 +150,7 @@ claude plugin install shiibar-cc@shiibar-cc
 ```
 
 Then open Shiibar CC once (from Spotlight or `/Applications`) to grant the
-notification and iTerm2 Automation permissions — this also registers it as
+notification and terminal Automation permissions — this also registers it as
 a Login Item. Verify everything end to end from the ⌄ menu's Setup Check,
 or from a terminal:
 
@@ -190,7 +208,7 @@ To remove it:
 ./scripts/dev-uninstall.sh   # quits the app; removes the app bundle, Login
                               # Item, ~/.local/bin symlinks, state directory,
                               # the app's saved preferences, local signing
-                              # certificate, and iTerm2 Automation grant
+                              # certificate, and terminal Automation grants
 claude plugin uninstall shiibar-cc
 ```
 
@@ -207,7 +225,7 @@ flowchart LR
     daemon --> app[menu bar app]
     daemon --> cli[shiibar-cc CLI]
     app -- "focus" --> cli
-    cli -- "AppleScript" --> iterm[iTerm2 tab]
+    cli -- "AppleScript" --> term[iTerm2 / Terminal.app tab]
 ```
 
 - Every Claude Code hook event runs `plugin/hooks/report.sh`, which shells
@@ -222,8 +240,9 @@ flowchart LR
   Conversations index. The exceptions you may want to run yourself are
   `doctor` (troubleshooting) and `conversations search` (scripted search,
   above).
-- Jumping to a session ("focus") drives iTerm2 with AppleScript. iTerm2 is
-  the only terminal app Shiibar CC knows how to control, by design.
+- Jumping to a session ("focus") drives the session's terminal (iTerm2 or
+  Terminal.app) with AppleScript. Those two are the only terminals Shiibar CC
+  knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on

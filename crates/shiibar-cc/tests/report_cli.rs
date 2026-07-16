@@ -144,9 +144,10 @@ fn delivers_a_valid_report_request_with_target_from_iterm_session_id() {
     let shiibar_cc_proto::Request::Report(payload) = request else {
         panic!("expected a report request, got {request:?}");
     };
-    // Target is the bare UUID half only (§2/§4.1) — not the whole
-    // $ITERM_SESSION_ID string, so it matches what iterm_targets derives.
-    assert_eq!(payload.target, "D2DA6A1F-TEST");
+    // Target is the prefixed `iterm2:<UUID>` (§2/§4.1) — the UUID is the
+    // `:`-onward half of $ITERM_SESSION_ID (not the whole string), so it
+    // matches what iterm2_targets derives.
+    assert_eq!(payload.target, "iterm2:D2DA6A1F-TEST");
     assert_eq!(payload.event, shiibar_cc_proto::HookEvent::UserPromptSubmit);
     // Values from the real captured fixture (fixtures/README.md).
     assert_eq!(

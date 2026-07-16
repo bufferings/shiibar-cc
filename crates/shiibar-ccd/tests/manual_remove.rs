@@ -12,7 +12,7 @@ use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
-const TARGET: &str = "11111111-1111-1111-1111-111111111111";
+const TARGET: &str = "iterm2:11111111-1111-1111-1111-111111111111";
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn manual_remove_deletes_the_entry_and_broadcasts_reason_remove() {
 
     // Register an entry via a real hook report.
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;

@@ -1,10 +1,12 @@
 # fixtures/ — hook payload provenance
 
-Real Claude Code hook payloads, captured on a live machine on 2026-07-05
-(a dedicated capture session driving each event on purpose, including an
-MCP elicitation flow to capture the `elicitation_dialog` /
-`elicitation_response` notifications and a `prompt_input_exit` SessionEnd;
-see DESIGN.md §7-3 for what the capture campaign verified). The daemon's
+Real Claude Code hook payloads, captured on a live machine (per-file dates
+in the table below; the 2026-07-05 campaign was a dedicated capture session
+driving each event on purpose, including an MCP elicitation flow to capture
+the `elicitation_dialog` / `elicitation_response` notifications and a
+`prompt_input_exit` SessionEnd — see DESIGN.md §7-3 for what it verified;
+the 2026-07-16 pair was captured inside a macOS Terminal.app tab for the
+Terminal.app support work). The daemon's
 integration tests (`crates/shiibar-ccd/tests/fixtures_replay.rs` and
 friends) replay these through the same extraction pipeline the real
 `shiibar-cc report` uses.
@@ -22,7 +24,8 @@ forward-compat ignoring works):
   `tool_input.command`, error text.
 - Japanese string values translated to English, preserving meaning and
   shape: `prompt` in `user_prompt_submit.json`, `last_assistant_message`
-  in both `stop_*.json` files. All other values were already English.
+  in `stop_no_background_tasks.json` and `stop_with_background_tasks.json`.
+  All other values were already English.
 - The nonexistent target path in `post_tool_use_failure.json`'s
   `tool_input.file_path` was renamed to a neutral English path
   (`/no/such/path.txt`); the `error` text does not reference it.
@@ -46,3 +49,5 @@ forward-compat ignoring works):
 | `notification_auth_success.json` | **hand-written, pending capture** — no `auth_success` notification was observed in the 2026-07-05 capture session |
 | `stop_no_background_tasks.json` | captured 2026-07-05 (`Stop-111529-2484`, `background_tasks: []`; message translated) |
 | `stop_with_background_tasks.json` | captured 2026-07-05 (`Stop-111655-2638`, one real background task: `id`/`type`/`status`/`description`/`command`; message translated) |
+| `session_start_apple_terminal.json` | captured 2026-07-16 (`SessionStart-223102-65893`) from a `claude` session running in a macOS Terminal.app tab (Terminal.app 2.14 / macOS 14.5) — same payload shape as the iTerm2 captures; the terminal only matters to target generation, which reads the environment, not the payload |
+| `stop_apple_terminal.json` | captured 2026-07-16 (`Stop-223115-66026`), the Stop of the same Terminal.app session; `last_assistant_message` was already English |

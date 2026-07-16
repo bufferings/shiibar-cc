@@ -1,0 +1,8 @@
+{
+  "session_id": "15e577e1-05d6-41b8-bb10-8f45b8e68f8b",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-demo-blog/15e577e1-05d6-41b8-bb10-8f45b8e68f8b.jsonl",
+  "cwd": "/Users/example/demo/blog",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "claude-fable-5"
+}

@@ -43,12 +43,13 @@ fn stale_entry_is_removed_and_broadcast_fresh_entry_is_kept() {
     let (events_tx, _rx) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
     let mut core = Core::load(&state_dir, clock.clone(), Logger::new(Level::Debug), events_tx).unwrap();
 
-    // "a" is last seen at t=0.
-    core.handle_report(session_start("a", "s-a", 0));
+    // "a" is last seen at t=0. (Prefixed targets, §2 — so the reload's
+    // one-time format migration is a no-op here.)
+    core.handle_report(session_start("iterm2:a", "s-a", 0));
 
     // "b" is last seen at t=80_000 (still < 24h before the sweep below).
     clock.set(80_000);
-    core.handle_report(session_start("b", "s-b", 80_000));
+    core.handle_report(session_start("iterm2:b", "s-b", 80_000));
 
     let mut rx = core.events_tx.subscribe();
 
@@ -57,12 +58,12 @@ fn stale_entry_is_removed_and_broadcast_fresh_entry_is_kept() {
     core.sweep_stale();
 
     assert_eq!(core.agents.len(), 1, "only the fresh entry should remain");
-    assert_eq!(core.agents[0].target, "b");
+    assert_eq!(core.agents[0].target, "iterm2:b");
     assert_eq!(core.agents[0].status, Status::Idle);
 
     match rx.try_recv().expect("expected an agent_removed broadcast") {
         BroadcastEvent::AgentRemoved { target, reason } => {
-            assert_eq!(target, "a");
+            assert_eq!(target, "iterm2:a");
             assert_eq!(reason, RemovalReason::Stale, "stale sweep must report reason=stale (§4.2)");
         }
         other => panic!("expected AgentRemoved, got {other:?}"),
@@ -73,5 +74,5 @@ fn stale_entry_is_removed_and_broadcast_fresh_entry_is_kept() {
     let (events_tx2, _rx2) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
     let reloaded = Core::load(&state_dir, clock, Logger::new(Level::Debug), events_tx2).unwrap();
     assert_eq!(reloaded.agents.len(), 1);
-    assert_eq!(reloaded.agents[0].target, "b");
+    assert_eq!(reloaded.agents[0].target, "iterm2:b");
 }
