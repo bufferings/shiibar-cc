@@ -359,8 +359,11 @@ Rust 製 daemon。tokio + Unix socket。
     osascript プロセス実行部だけを差し替え可能にする(両モジュール共通)
   - **iterm2 モジュール**(iTerm2 の知識はここにのみ存在させる)
     - `focus(target)`: target(振り分け入口で `iterm2:` を外した裸の UUID。§2)を使い、
-      AppleScript で iTerm2 の windows→tabs→sessions を走査して一致セッションの session(pane)・tab・window を
-      select、`activate`。一致なしは「該当なし」。
+      AppleScript で iTerm2 の windows→tabs→sessions を走査し、一致を見つけたら
+      **`activate` してから** window・tab・session(pane)を select する(activate が後だと、
+      別アプリがアクティブな状態からの focus で今の Space のウィンドウが select に勝ち、
+      別 Space へ遷移しない — §7-1)。一致なしは「該当なし」(activate は一致分岐の中のみ —
+      該当なしでは何も動かさない)。
       **iTerm2 が起動していなければ起動せずに「該当なし」を返す**(走査は `application "iTerm2" is running` ガード内)。
       走査は明示 index + `try`(分割ペインで `index of tab` / plural 反復が `-1719/-1728` になる実機バグ回避。§7-1)
     - `focused()`: iTerm2 が最前面アプリのとき、前面 session の target(`iterm2:<UUID>`。§2)を返す。前面でなければ「なし」
@@ -376,8 +379,10 @@ Rust 製 daemon。tokio + Unix socket。
       迂回するため採らない
   - **apple_terminal モジュール**(Terminal.app の知識はここにのみ存在させる。実測の根拠は §7-7)
     - `focus(target)`: target(`apple-terminal:` を外した tty パス)を使い、AppleScript で Terminal.app の
-      **全 windows × 全 tabs** を走査し、`tty of tab` が一致したタブを `set selected of t to true` +
-      `set frontmost of w to true` + `activate` で前面化する。一致なしは「該当なし」。
+      **全 windows × 全 tabs** を走査し、`tty of tab` が一致したタブを **`activate` してから**
+      `set selected of t to true` + `set frontmost of w to true` で前面化する(activate 先行の
+      理由は iterm2 と同じ — §7-1。Terminal.app での Space またぎ自体は未実測 — §7-7)。
+      一致なしは「該当なし」(activate は一致分岐の中のみ)。
       **Terminal.app が起動していなければ起動せずに「該当なし」を返す**(is-running ガード。iterm2 と同じ)。
       全走査が必須なのは、Cmd+T のタブが AppleScript には**別 window(各 1 タブ)**として見える一方、
       Merge 等で 1 window 複数 tab の形も存在するため — 両形態を同じループがカバーする(§7-7 実測)
@@ -1078,6 +1083,14 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
      (2026-07-07、2 台目の実機で確認: TCC は許可済み・Setup Check 全緑でも focus が「効かない」見た目になり、
      ON に戻すと解消)。設定の実体は NSGlobalDomain の `AppleSpacesSwitchOnActivate`
      (明示 `0` = OFF。未設定は既定 ON)→ doctor がチェックする(§4.4)
+   - **`activate` が select の後だと、上記設定が ON でも Space をまたげない**(2026-07-17 実機確認):
+     iTerm2 **以外**のアプリがアクティブな状態から focus すると、select → activate の順では
+     activate のアプリ切り替えが「今の Space にある iTerm2 ウィンドウ」を前に出し、select 済みの
+     別 Space のウィンドウが負ける(スクリプトは FOUND / exit 0 のまま — 見た目だけ誤着地)。
+     iTerm2 がアクティブなままの focus(プルダウンはアクティブアプリを奪わないパネル)では
+     発生しない — Conversations の Jump(§4.6)がこの条件を初めて日常動線にして発覚。
+     **一致を見つけたら activate → select の順**にすると別 Space へ正しく遷移する(同日実証)。
+     activate は一致分岐の中でのみ実行するため、該当なし・未起動時に何も動かさない規則(§4.3)は保たれる
 2. **claude agents / セッション状態の取得** — ✅ 実機で検証済み(2026-07-04):
    - `claude agents --json` が実在。`sessionId` / `cwd` / `pid` / `status` / `statusUpdatedAt` を返す
      (`~/.claude/sessions/<pid>.json` も同内容)
@@ -1209,7 +1222,10 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
      target の tty は祖先 walk で取る(§4.1)
    - focus は「全 windows × 全 tabs 走査 → `tty of tab` 一致 → `set selected` +
      `set frontmost of window`(設定可能と実測)+ `activate`」で成立。ウィンドウ間・
-     同一ウィンドウのタブ間とも目視確認済み。一致なしは何も動かさない
+     同一ウィンドウのタブ間とも目視確認済み(この目視は activate 末尾の順で行った)。
+     一致なしは何も動かさない。現行仕様の順は activate 先行(§4.3 — 理由は §7-1 の
+     Space またぎ実測)。**activate 先行の順での Terminal.app の動作と、Terminal.app の
+     Space またぎは未実測**(実機スモークが初検証)
    - **Cmd+T のタブは AppleScript には別 window(各 1 タブ)として見える**(AppKit のウィンドウタブ機構。
      タブグループは bounds が同一)。旧来の 1 window 複数 tab の形も存在し得るため、走査は常に全 window×全 tab
    - split pane(Cmd+D)は**同一セッションの表示分割** — 分割の前後で tty 一覧が不変(実測)。
