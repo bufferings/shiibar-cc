@@ -84,7 +84,7 @@ find a conversation:
 
 ```sh
 shiibar-cc conversations search "auth middleware"   # add --json for a stable
-                                                     # machine-readable shape
+                                                    # machine-readable shape
 ```
 
 Conversations reads Claude Code's transcripts, an undocumented internal
@@ -162,9 +162,9 @@ To remove it:
 
 ```sh
 brew uninstall --cask shiibar-cc   # add --zap to also remove the state
-                                    # directory (including the local
-                                    # conversations index), saved
-                                    # preferences, and saved app state
+                                   # directory (including the local
+                                   # conversations index), saved
+                                   # preferences, and saved app state
 claude plugin uninstall shiibar-cc
 ```
 
@@ -206,9 +206,9 @@ To remove it:
 
 ```sh
 ./scripts/dev-uninstall.sh   # quits the app; removes the app bundle, Login
-                              # Item, ~/.local/bin symlinks, state directory,
-                              # the app's saved preferences, local signing
-                              # certificate, and terminal Automation grants
+                             # Item, ~/.local/bin symlinks, state directory,
+                             # the app's saved preferences, local signing
+                             # certificate, and terminal Automation grants
 claude plugin uninstall shiibar-cc
 ```
 
