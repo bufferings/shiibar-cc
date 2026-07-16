@@ -29,7 +29,8 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
   launches (`NSWorkspace.open`), no `NSPasteboard.general`, no network access, no real state dir
   or home. Make outward actions injectable and verify them with spies. Fixture URLs use a
   reserved, non-resolving domain (e.g. `https://example.invalid/`).
-- iTerm2 / AppleScript knowledge lives ONLY in the iterm module of `shiibar-cc-client` (design principle 2).
+- Terminal (iTerm2 / Terminal.app) and AppleScript knowledge lives ONLY in the terminal modules of
+  `shiibar-cc-client` (`iterm2` / `apple_terminal` — named after the target prefixes; design principle 2).
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
 
 ## Rules for documentation work
