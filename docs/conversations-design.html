@@ -223,6 +223,9 @@ git push origin main --tags</pre>
     <li>挙動の正は DESIGN.md §4.6「Jump ボタン」・決定の背景は §8.48。ここでは形だけ:
       注記はボタンのすぐ左隣・パネル高さ不変・ボタンは Resume / Jump 同幅
       (行を移ってボタンが替わっても端が動かない)</li>
+    <li>Jump が該当なし(exit 2)のときは<strong>標準の NSAlert シート</strong>で知らせる
+      ([Cancel] [Refresh]・既定 Refresh。文言と挙動の正は DESIGN.md §4.6)。
+      見た目は標準のまま — このページに独自の形は持たない</li>
   </ul>
   <div class="mock">
     <div class="mock-label">上 = past / 中 = running・追跡中 / 下 = running・追跡外(disabled が残る唯一のケース)</div>
