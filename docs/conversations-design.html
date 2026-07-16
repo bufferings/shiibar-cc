@@ -105,8 +105,12 @@
   .mm .thumb { left:0; right:0; border-radius:5px; background:rgba(127,127,127,.22); }
   .endcap { display:flex; align-items:center; gap:10px; color:var(--menu-text2); font-size:11px; margin:14px 16px 4px; }
   .endcap::before, .endcap::after { content:""; flex:1; height:1px; background:var(--line); }
-  .actions { display:flex; justify-content:flex-end; gap:8px; padding:10px 16px 12px; border-top:1px solid var(--line); }
-  .btn { background:var(--sel); color:#fff; border-radius:6px; padding:5px 18px; font-size:13px; font-weight:600; }
+  .actions { display:flex; justify-content:flex-end; align-items:center; gap:10px; padding:10px 16px 12px; border-top:1px solid var(--line); }
+  /* Resume / Jump は同幅(長い方 = Resume に揃えて固定。DESIGN.md §4.6 / §8.48) */
+  .btn { background:var(--sel); color:#fff; border-radius:6px; padding:5px 18px; min-width:92px;
+    text-align:center; font-size:13px; font-weight:600; }
+  .btn.dis { background:rgba(127,127,127,.18); color:rgba(127,127,127,.75); }
+  .note { font-size:11px; color:var(--menu-text2); }
 
   .strip { background:var(--panebg); border:1px solid var(--line); border-radius:9px; padding:14px;
     max-width:560px; display:flex; flex-direction:column; gap:10px; font-size:13px; }
@@ -156,8 +160,11 @@
       <strong>2 行目 = フォルダラベル</strong>(+ 実行中なら <code>· running</code>)。
       経過時間を 1 行目の右端に置くのは、2 行目を短く保って行のリズムを崩さないため</li>
     <li>右は選択中の会話の全文。下端(最新)から上へスクロールして読む</li>
-    <li>下部パネルは常に出す。Resume が押せるのは past の行だけで、live の行では disabled +
-      <code>This conversation is running</code> の一言(読むだけ)</li>
+    <li>下部パネルは常に出す。ボタンは行の状態で 3 つ(DESIGN.md §4.6 / §8.48):
+      past = <strong>Resume</strong> / live で Agents に一致あり = <strong>Jump</strong>
+      (そのタブへ focus)+ <code>This conversation is running</code> /
+      live で一致なし = disabled の Jump + <code>Running in a terminal Shiibar CC can't drive</code>。
+      注記はボタンのすぐ左隣(下記「下部パネルの 3 状態」)</li>
     <li>ステータス行は <code>N conversations (M running)</code></li>
   </ul>
   <div class="mock">
@@ -208,6 +215,21 @@ git push origin main --tags</pre>
           <div class="actions"><span class="btn">Resume</span></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <h2>下部パネルの 3 状態</h2>
+  <ul>
+    <li>挙動の正は DESIGN.md §4.6「Jump ボタン」・決定の背景は §8.48。ここでは形だけ:
+      注記はボタンのすぐ左隣・パネル高さ不変・ボタンは Resume / Jump 同幅
+      (行を移ってボタンが替わっても端が動かない)</li>
+  </ul>
+  <div class="mock">
+    <div class="mock-label">上 = past / 中 = running・追跡中 / 下 = running・追跡外(disabled が残る唯一のケース)</div>
+    <div class="strip" style="max-width:620px; padding:0; gap:0">
+      <div class="actions" style="border-top:0"><span class="btn">Resume</span></div>
+      <div class="actions"><span class="note">This conversation is running</span><span class="btn">Jump</span></div>
+      <div class="actions"><span class="note">Running in a terminal Shiibar CC can't drive</span><span class="btn dis">Jump</span></div>
     </div>
   </div>
 
@@ -368,8 +390,8 @@ git push origin main --<span class="hl">tag</span>s</pre>
       リサイズカーソルに変わり、境界線がわずかに濃くなる(掴めることが見た目で分かる)</li>
     <li>ヘッダ下の区切り線は検索バー行の有無によらず常時(DESIGN.md §4.6)。⟳ の実行中・完了後の
       ステータス行の文言も DESIGN.md §4.6 が正</li>
-    <li>running の会話の下部パネル(高さ不変・disabled Resume は標準の灰色の器・注記はボタンの
-      すぐ左隣)の文法は DESIGN.md §4.6 / §8.42</li>
+    <li>下部パネルの 3 状態(高さ不変・disabled は標準の灰色の器・注記はボタンのすぐ左隣・
+      Resume / Jump 同幅)の文法は DESIGN.md §4.6 / §8.42 / §8.48</li>
     <li>⟳ ボタンの状態(静止時は背景なし・ホバーで浮く / 押下で沈む)と回転の規律は
       DESIGN.md §4.6 / §9(§8.42 / §8.44。working の ✻ スピナーとは別文法)</li>
     <li>検索欄・選択色・ホバーの作法はドロップダウン(menubar-design.html)と共通。
