@@ -756,11 +756,19 @@ final class AppState: ObservableObject {
         }
     }
 
-    func focus(target: String) {
+    /// Focus a terminal tab (§4.5 row click / notification click, and §4.6
+    /// Conversations Jump). Fire-and-forget for the row/notification callers;
+    /// `completion` lets the Conversations Jump observe the exit code to decide
+    /// on the no-match sheet (§4.6/§8.48) WITHOUT changing the row-click path —
+    /// the shared TCC (exit 3) handling in `noteExitCode` runs the same for
+    /// every caller. `completion` runs on the main actor after the subprocess
+    /// returns; `seen`-on-success stays the CLI's job, unchanged.
+    func focus(target: String, completion: (@MainActor (Int32) -> Void)? = nil) {
         DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
             let result = CLIRunner.focus(target: target, helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
+                completion?(result.exitCode)
             }
         }
     }

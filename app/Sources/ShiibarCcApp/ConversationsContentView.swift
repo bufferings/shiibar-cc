@@ -54,6 +54,21 @@ struct ConversationsContentView: View {
             rightPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // The no-match Jump sheet (§4.6/§8.48): a standard window-attached
+        // alert with the app icon (no custom look), buttons [Cancel] [Refresh]
+        // with Refresh the default. Refresh re-runs the search exactly like ⟳;
+        // Cancel leaves the list untouched. The presentation is driven purely
+        // by the view model's boolean, which the alert clears on dismissal.
+        .alert(
+            "Couldn't jump to this conversation.",
+            isPresented: $viewModel.jumpFailureAlertRequested
+        ) {
+            Button("Cancel", role: .cancel) { viewModel.jumpFailureCancelChosen() }
+            Button("Refresh") { viewModel.jumpFailureRefreshChosen() }
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Its terminal tab is gone — the session may have ended. Refresh the list to see its current state.")
+        }
     }
 
     /// An invisible 9pt grab strip straddling the sidebar boundary
@@ -300,32 +315,74 @@ private struct RefreshButtonStyle: ButtonStyle {
     }
 }
 
-/// The enabled Resume verb at the mock's exact .btn metrics (§8.39
-/// normative CSS: 13px semibold, padding 5px 18px, radius 6, accent fill,
-/// white text) — .controlSize approximations read the wrong size
-/// on-device. Hover darkens slightly; press darkens more (§8.42).
-private struct ResumeButton: View {
+/// The faint reason note left of the panel button (§4.6/§8.48).
+private struct PanelNote: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+    }
+}
+
+/// A fixed-width panel-button label so Resume and Jump share the wider
+/// label's width (§4.6/§8.48: the button's right edge and click target must
+/// not shift when a row change swaps the verb — the horizontal twin of the
+/// constant panel height). The hidden `Resume` (the wider label) reserves the
+/// width; the visible title centers within.
+private struct PanelButtonLabel: View {
+    let title: String
+    var body: some View {
+        ZStack {
+            Text("Resume").hidden()
+            Text(title)
+        }
+        .font(.system(size: 13, weight: .semibold))
+    }
+}
+
+/// The enabled panel verb at the mock's exact .btn metrics (§8.39 normative
+/// CSS: 13px semibold, padding 5px 18px, radius 6, accent fill, white text) —
+/// .controlSize approximations read the wrong size on-device. Hover darkens
+/// slightly; press darkens more (§8.42).
+private struct PanelActionButton: View {
+    let title: String
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        Button("Resume", action: action)
-            .buttonStyle(ResumeButtonStyle(hovering: hovering))
+        Button(action: action) { PanelButtonLabel(title: title) }
+            .buttonStyle(PanelActionButtonStyle(hovering: hovering))
             .onHover { hovering = $0 }
     }
 }
 
-private struct ResumeButtonStyle: ButtonStyle {
+private struct PanelActionButtonStyle: ButtonStyle {
     let hovering: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.vertical, 5)
             .padding(.horizontal, 18)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlAccentColor)))
             .brightness(configuration.isPressed ? -0.12 : (hovering ? -0.06 : 0))
+    }
+}
+
+/// The disabled twin (§4.6/§8.42): the enabled button's exact metrics — so
+/// the panel height and the button width stay constant — in the standard
+/// gray container, never the washed prominent blue.
+private struct PanelDisabledButton: View {
+    let title: String
+
+    var body: some View {
+        PanelButtonLabel(title: title)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 18)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.16)))
     }
 }
 
@@ -491,38 +548,44 @@ private struct ConversationPreview: View {
     }
 
     /// The bottom panel keeps a constant presence and height for every
-    /// selected conversation (§4.6/§8.38(8)): a live row shows Resume
-    /// disabled with a faint note instead of dropping the panel.
+    /// selected conversation (§4.6/§8.38(8)/§8.48): one verb with two faces —
+    /// Resume for past rows, Jump for running rows — plus the two disabled
+    /// edges. The verb is the held `selectedAction`, derived at selection and
+    /// list delivery (§8.48), never from a live agent change. The note (when
+    /// present) clusters immediately LEFT OF THE BUTTON, not at the panel's
+    /// left edge. Resume and Jump share the wider label's width so the button
+    /// edge doesn't shift when a row change swaps the verb (§8.48).
     private var actionPanel: some View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 8) {
                 Spacer()
-                // §4.6 (f970e29): the note clusters immediately LEFT OF THE
-                // BUTTON — not at the panel's left edge.
-                if summary?.live == true {
-                    Text("This conversation is running")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                // §4.6/§8.42: the disabled state (running rows) wears the
-                // STANDARD gray container — never the washed prominent
-                // blue; the enabled verb stays prominent at the mock's .btn
-                // size (§8.39) and reacts to hover (press is built into the
-                // prominent style).
-                if summary.map(viewModel.canResume) ?? false {
-                    ResumeButton {
+                switch viewModel.selectedAction {
+                case .resume:
+                    // §4.6/§8.42/§8.39: enabled Resume, prominent accent fill.
+                    PanelActionButton(title: "Resume") {
                         if let summary { viewModel.resume(summary) }
                     }
-                } else {
-                    // The disabled twin shares the enabled button's exact
-                    // metrics (constant panel height), in the standard gray.
-                    Text("Resume")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 18)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.16)))
+                case .resumeDisabled:
+                    // Past row without a cwd: disabled Resume, standard gray.
+                    PanelDisabledButton(title: "Resume")
+                case .jump:
+                    // Running, jumpable (§8.48): the note says why it's not
+                    // Resume; the button focuses the matched tab. The derived
+                    // target is held on the view model, which `jump()` reads.
+                    PanelNote("This conversation is running")
+                    PanelActionButton(title: "Jump") {
+                        viewModel.jump()
+                    }
+                case .jumpDisabled:
+                    // Running in a terminal this app can't drive (§8.48): the
+                    // note gives the reason; Jump stays gray (§8.42).
+                    PanelNote("Running in a terminal Shiibar CC can't drive")
+                    PanelDisabledButton(title: "Jump")
+                case .none:
+                    // No selection (the preview isn't shown in this state, but
+                    // keep the panel's height stable regardless).
+                    PanelDisabledButton(title: "Resume")
                 }
             }
             .padding(12)

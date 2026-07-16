@@ -86,6 +86,33 @@ final class ConversationsViewModel: ObservableObject {
     /// boundaries, and badge inputs.
     let webPane = WebPaneController()
 
+    // MARK: - Bottom panel (Resume / Jump) — T2
+
+    /// The verb offered for the selected conversation (§4.6/§8.48): Resume for
+    /// past, Jump for running. Derived ONLY on row selection and on list
+    /// delivery, then held — a live `AppState.agents` change never re-derives
+    /// it (§8.34: the panel doesn't change while the user just watches). Nil
+    /// when nothing is selected.
+    @Published private(set) var selectedAction: ConversationAction?
+
+    /// The no-match Jump sheet (§4.6/§8.48): set true when a Jump's focus
+    /// returned exit 2 (the terminal tab is gone), which the view presents as
+    /// the standard window sheet. A two-way binding so the presented alert
+    /// clears it on dismissal.
+    @Published var jumpFailureAlertRequested = false
+
+    /// Snapshot source for the agent list, read ONLY at the two derivation
+    /// moments (§4.6/§8.48): row selection and list delivery. Deliberately not
+    /// subscribed, so a live agent change alone can't move the button.
+    /// Production reads `AppState.agents`; tests inject a stub.
+    var agentsSnapshot: () -> [Agent] = { [] }
+
+    /// Injectable focus action for Jump (§4.6/§8.48): forwards to the SAME
+    /// focus path as the dropdown row click (`AppState.focus`, with its seen
+    /// and TCC handling), but observes the exit code so the no-match sheet can
+    /// be decided. Tests inject a spy instead of launching a real subprocess.
+    var focusAction: (_ target: String, _ completion: @escaping @MainActor (Int32) -> Void) -> Void = { _, _ in }
+
     // MARK: - Private state
 
     private weak var appState: AppState?
@@ -156,6 +183,13 @@ final class ConversationsViewModel: ObservableObject {
 
     init(appState: AppState?) {
         self.appState = appState
+        // Read the agent list live at derivation time (§4.6/§8.48), and route
+        // Jump through the shared row-click focus path (§4.5), observing the
+        // exit code for the no-match sheet.
+        self.agentsSnapshot = { [weak appState] in appState?.agents ?? [] }
+        self.focusAction = { [weak appState] target, completion in
+            appState?.focus(target: target, completion: completion)
+        }
         refreshStatus()
         webPane.onAnchor = { [weak self] seq in
             guard let self, let selectedSessionID = self.selectedSessionID else { return }
@@ -367,6 +401,11 @@ final class ConversationsViewModel: ObservableObject {
         if let selectedSessionID, !summaries.contains(where: { $0.sessionID == selectedSessionID }) {
             clearPreview()
         }
+        // §4.6/§8.48: re-derive the bottom-panel verb on list delivery (the
+        // second and only other derivation moment) — a kept selection may have
+        // flipped running<->past, so the verb follows the freshly delivered
+        // list, not a live agent change.
+        deriveSelectedAction()
         refreshStatus()
     }
 
@@ -416,6 +455,10 @@ final class ConversationsViewModel: ObservableObject {
     /// remembered scroll or land at the initial position.
     func selectConversation(_ summary: ConversationSummary) {
         selectedSessionID = summary.sessionID
+        // §4.6/§8.48: derive the bottom-panel verb on selection, snapshotting
+        // the agent list now. One of the two derivation moments (the other is
+        // list delivery).
+        deriveSelectedAction()
         showProcess?.cancel()
         showGeneration += 1
         let generation = showGeneration
@@ -480,6 +523,7 @@ final class ConversationsViewModel: ObservableObject {
         hits = []
         currentHitIndex = nil
         selectedSessionID = nil
+        selectedAction = nil
         webPane.load(messages: [], rendered: [], anchorSeq: nil)
     }
 
@@ -551,13 +595,60 @@ final class ConversationsViewModel: ObservableObject {
         webPane.jump(to: index)
     }
 
-    // MARK: - Resume (T6)
+    // MARK: - Bottom-panel action derivation (Resume / Jump) — T2
 
-    /// Whether a Resume button should show for `summary`: past only, and only
-    /// when the cwd is known (resume needs an absolute cwd — §4.4).
-    func canResume(_ summary: ConversationSummary) -> Bool {
-        !summary.live && (summary.cwd?.isEmpty == false)
+    /// Recompute the held panel verb (§4.6/§8.48) for the current selection
+    /// from the agent list AS IT STANDS NOW. Called only at the two derivation
+    /// moments — row selection and list delivery — never from a live agent
+    /// change. Nil when nothing is selected or the selection is not in the
+    /// current list.
+    private func deriveSelectedAction() {
+        guard let selectedSessionID,
+              let summary = summaries.first(where: { $0.sessionID == selectedSessionID }) else {
+            selectedAction = nil
+            return
+        }
+        selectedAction = ConversationAction.derive(for: summary, agents: agentsSnapshot())
     }
+
+    // MARK: - Jump (T2)
+
+    /// Jump to the running conversation's terminal tab (§4.6/§8.48): focus the
+    /// target derived at selection/delivery time (not re-read live). Same focus
+    /// path as the dropdown row click; the window stays open and NO search
+    /// re-runs on success (the conversation's state is unchanged — §8.48).
+    /// Only exit 2 (the tab is gone) raises the no-match sheet.
+    func jump() {
+        guard case .jump(let target)? = selectedAction else { return }
+        focusAction(target) { [weak self] exitCode in
+            self?.handleJumpResult(exitCode)
+        }
+    }
+
+    private func handleJumpResult(_ exitCode: Int32) {
+        // §4.6/§8.48: only exit 2 (no matching terminal tab) surfaces the
+        // sheet. Exit 0 lands on the tab; exit 1 is an internal error; exit 3
+        // (TCC) already raised the shared warning via the focus path — none of
+        // those show this sheet.
+        if exitCode == 2 {
+            jumpFailureAlertRequested = true
+        }
+    }
+
+    /// The no-match sheet's Refresh (§4.6/§8.48): the SAME search re-run as the
+    /// ⟳ button — the stale running marker drops, the selection is kept, and
+    /// the verb re-derives on the delivery.
+    func jumpFailureRefreshChosen() {
+        refreshTapped()
+    }
+
+    /// The no-match sheet's Cancel (§4.6/§8.48): does nothing — the list is
+    /// left as-is until the user refreshes on their own.
+    func jumpFailureCancelChosen() {
+        // Intentionally empty: Cancel touches neither the list nor the preview.
+    }
+
+    // MARK: - Resume (T6)
 
     /// Resume a past conversation in a new terminal window (§4.6/T6):
     /// `shiibar-cc resume --cwd <cwd> --terminal <t> <session_id>` via the

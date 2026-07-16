@@ -68,8 +68,9 @@ Alongside the live status view, Shiibar CC keeps a searchable index of your
 Claude Code conversation history across every folder. Open it from the `⌄`
 menu (or the app menu) → Conversations…: a two-pane window where you can
 **browse** recent conversations, **search** their full text across folders,
-**read** any one from the bottom (latest) up, and **resume** a past one in a
-new terminal window. Search is incremental; each word of two or more
+**read** any one from the bottom (latest) up, **jump** to one that's still
+running in its terminal tab, and **resume** a past one in a new terminal
+window. Search is incremental; each word of two or more
 characters matches as a case-insensitive substring ("auth" finds
 "authentication"), and multiple words are AND-ed.
 
