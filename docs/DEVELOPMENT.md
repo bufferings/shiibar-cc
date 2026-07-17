@@ -287,7 +287,10 @@ Release は作らず zip を workflow artifact に置く。
    (publish と API 障害が重なると起きる — v0.5.0 で実例)。復旧は `tag_name` を PATCH した上で
    **draft に戻して再 publish**(asset と release ID は保持される)。bump-cask の rerun は
    壊れた元イベントを再生するだけなので直らない — 正しい `tag_name` は新しい
-   `release: published` イベントでしか届かない
+   `release: published` イベントでしか届かない。復旧後に `git ls-remote --tags origin` を確認する —
+   壊れた publish は `untagged-…` という名前の**実タグ**をリポジトリに作ることがあり、
+   残骸なら削除する(`git push origin --delete untagged-…`。v0.5.0 の実例では v0.5.0 と
+   同一コミットを指す重複だった)
 6. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
    再計算して tap の cask を更新する(完走後、tap の `version` / `sha256` を確認する)
 7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
