@@ -273,11 +273,23 @@ Release は作らず zip を workflow artifact に置く。
    `plugin.json` の version と三点一致必須**。`.github/workflows/release.yml` の `check-version.sh` が
    検査し、不一致ならビルド前に失敗する)
 3. Actions が arm64 ビルド → Developer ID 署名(hardened runtime)→ 公証 → staple → zip を行い、
-   **draft** の GitHub Release を作る
+   **draft** の GitHub Release を作る。ノート本文は自動生成(コミット件名の列挙)なので、
+   **draft の冒頭に利用者向けの概要を足す**: リード 1 文 + 利用者視点の節(機能 / Fixed / Changed)、
+   自動生成の一覧は `## Commits` 見出しの下にそのまま残す。文言は所有者確認を経てから publish へ。
+   draft の API 操作はタグ名経由(`gh release edit <tag>`)が不安定なことがある —
+   release ID 直指定(`gh api repos/…/releases/<id>`)が確実(ID は
+   `gh api repos/bufferings/shiibar-cc/releases --jq '.[] | select(.draft) | .id'` で取れる)
 4. 所有者が draft の zip を実機スモークする
-5. スモーク OK なら draft を publish する(この操作が正式な公開)
+5. スモーク OK なら draft を publish する(この操作が正式な公開)。
+   **publish 直後に、release がタグに着地したことを機械検証する**:
+   `curl -sI https://github.com/bufferings/shiibar-cc/releases/download/vX.Y.Z/shiibar-cc-X.Y.Z-arm64.zip`
+   が 302/200 なら OK。404 なら release の `tag_name` が `untagged-…` のまま公開されている
+   (publish と API 障害が重なると起きる — v0.5.0 で実例)。復旧は `tag_name` を PATCH した上で
+   **draft に戻して再 publish**(asset と release ID は保持される)。bump-cask の rerun は
+   壊れた元イベントを再生するだけなので直らない — 正しい `tag_name` は新しい
+   `release: published` イベントでしか届かない
 6. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
-   再計算して tap の cask を更新する
+   再計算して tap の cask を更新する(完走後、tap の `version` / `sha256` を確認する)
 7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
    bump してコミットする(`plugin.json` は上げない — 次のリリースコミットまで公開済みの番号を保つ)
 
