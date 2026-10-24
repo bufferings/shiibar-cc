@@ -20,75 +20,105 @@ cask "shiibar-cc" do
   desc "Menu bar app that tracks Claude Code status and jumps to its iTerm2 tab"
   homepage "https://github.com/bufferings/shiibar-cc"
 
-  depends_on macos: :sonoma
   depends_on arch:  :arm64
+  depends_on macos: :sonoma
 
   app "Shiibar CC.app"
   binary "#{appdir}/Shiibar CC.app/Contents/Helpers/shiibar-cc"
   binary "#{appdir}/Shiibar CC.app/Contents/Helpers/shiibar-ccd"
 
-  postflight do
+  # `postflight_steps`, not `postflight`: Homebrew 7 deprecated the plain
+  # Ruby `*flight` blocks in favour of declarative `*_steps` blocks
+  # (Library/Homebrew/cask/dsl.rb, "Calling `postflight` is deprecated!
+  # Use `postflight_steps` instead."). Steps run inside Homebrew's cask
+  # sandbox (Library/Homebrew/cask/artifact/install_steps.rb), which shapes
+  # this step in four ways, all verified on-device with a throwaway cask
+  # on Homebrew 7.0.10:
+  # - The sandbox denies reads under the home directory, and names
+  #   ~/.claude and ~/.claude.json explicitly (`deny_read_home` in
+  #   Library/Homebrew/sandbox.rb). `writable_paths` re-allows reading and
+  #   writing both, which is all the plugin commands touch there.
+  # - HOME is replaced with a temporary directory, so the script restores
+  #   the real home first; otherwise it would look for settings.json (and
+  #   `claude` would look for its config) in the wrong place.
+  # - ~/.gitconfig is on the same denied list, and git aborts when it
+  #   cannot read it, which fails the marketplace clone. The script sets
+  #   GIT_CONFIG_GLOBAL=/dev/null so git skips the user's global config;
+  #   the clone is a public HTTPS repository and needs none.
+  # - Network access is blocked unless `network_access: true`, and the
+  #   marketplace commands clone from GitHub.
+  postflight_steps do
     # Best-effort install/update of the hooks plugin from the Claude Code
     # CLI. Every step is allowed to fail without failing the cask install
     # or upgrade (the caveats below spell out the two-command manual
     # fallback): `claude` itself may not be installed, the plugin commands
-    # may error, etc.
-    # Written as a shell script (not Cask's Ruby system_command helpers)
-    # because the logic needs a PATH-independent `claude` resolution,
-    # grep-based settings checks, and command chaining that reads far
-    # more clearly as shell than as a chain of Ruby system_command calls.
-    script = <<~SH
-      claude_bin=""
-      if command -v claude >/dev/null 2>&1; then
-        claude_bin="$(command -v claude)"
-      elif [ -x "$HOME/.local/bin/claude" ]; then
-        # `brew install` postflight scripts run outside the user's login
-        # shell, so PATH does not include whatever an interactive shell's
-        # rc file adds. $HOME/.local/bin is where the Claude Code CLI's own
-        # installer places the binary, so check it directly as a fallback
-        # rather than trusting PATH alone.
-        claude_bin="$HOME/.local/bin/claude"
-      fi
+    # may error, etc. `must_succeed: false` keeps the script's own exit
+    # status non-fatal as well.
+    # Written as a shell script (not a chain of `run` steps) because the
+    # logic needs a PATH-independent `claude` resolution, grep-based
+    # settings checks, and command chaining that reads far more clearly as
+    # shell than as a chain of steps.
+    run "/bin/bash",
+        args:           ["-c", <<~SH],
+          # Restore the real home directory (see the sandbox notes above).
+          # Tilde expansion of the user name reads the home directory from the
+          # user database, not from the overridden HOME.
+          HOME="$(eval echo "~$(id -un)")"
+          export HOME
+          export GIT_CONFIG_GLOBAL=/dev/null
 
-      # No claude CLI found at all: nothing to do here, the caveats' manual
-      # fallback is the catch-all.
-      if [ -z "$claude_bin" ]; then
-        exit 0
-      fi
+          claude_bin=""
+          if command -v claude >/dev/null 2>&1; then
+            claude_bin="$(command -v claude)"
+          elif [ -x "$HOME/.local/bin/claude" ]; then
+            # `brew install` postflight scripts run outside the user's login
+            # shell, so PATH does not include whatever an interactive shell's
+            # rc file adds. $HOME/.local/bin is where the Claude Code CLI's own
+            # installer places the binary, so check it directly as a fallback
+            # rather than trusting PATH alone.
+            claude_bin="$HOME/.local/bin/claude"
+          fi
 
-      # Three-way branch on the shiibar-cc@shiibar-cc entry in enabledPlugins
-      # (DESIGN.md §8.28). Matched with grep, not jq, since jq may not be
-      # installed (scripts/dev-install.sh has the same grep fallback for the
-      # `true` value):
-      #
-      # 1. No entry: first install — add the marketplace and install the
-      #    plugin.
-      # 2. Entry with value `true` (plugin enabled): refresh the hooks so a
-      #    `brew upgrade` delivers them together with the app, without
-      #    depending on the user's marketplace auto-update setting (off by
-      #    default for third-party marketplaces). Both commands are needed,
-      #    in this order — verified against the real CLI: `marketplace
-      #    update` only refreshes the marketplace clone (the installed
-      #    plugin stays at its old version), and `plugin update` only
-      #    installs the newest version already present in that clone (it
-      #    does not refresh the clone itself).
-      # 3. Entry with any other value (e.g. `false`): do nothing — never
-      #    re-enable or refresh a plugin the user deliberately disabled or
-      #    removed.
-      settings="$HOME/.claude/settings.json"
-      if [ -f "$settings" ] && grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:' "$settings"; then
-        if grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:[[:space:]]*true' "$settings"; then
-          "$claude_bin" plugin marketplace update shiibar-cc || true
-          "$claude_bin" plugin update shiibar-cc@shiibar-cc || true
-        fi
-        exit 0
-      fi
+          # No claude CLI found at all: nothing to do here, the caveats' manual
+          # fallback is the catch-all.
+          if [ -z "$claude_bin" ]; then
+            exit 0
+          fi
 
-      "$claude_bin" plugin marketplace add bufferings/shiibar-cc || true
-      "$claude_bin" plugin install shiibar-cc@shiibar-cc || true
-    SH
+          # Three-way branch on the shiibar-cc@shiibar-cc entry in enabledPlugins
+          # (DESIGN.md §8.28). Matched with grep, not jq, since jq may not be
+          # installed (scripts/dev-install.sh has the same grep fallback for the
+          # `true` value):
+          #
+          # 1. No entry: first install — add the marketplace and install the
+          #    plugin.
+          # 2. Entry with value `true` (plugin enabled): refresh the hooks so a
+          #    `brew upgrade` delivers them together with the app, without
+          #    depending on the user's marketplace auto-update setting (off by
+          #    default for third-party marketplaces). Both commands are needed,
+          #    in this order — verified against the real CLI: `marketplace
+          #    update` only refreshes the marketplace clone (the installed
+          #    plugin stays at its old version), and `plugin update` only
+          #    installs the newest version already present in that clone (it
+          #    does not refresh the clone itself).
+          # 3. Entry with any other value (e.g. `false`): do nothing — never
+          #    re-enable or refresh a plugin the user deliberately disabled or
+          #    removed.
+          settings="$HOME/.claude/settings.json"
+          if [ -f "$settings" ] && grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:' "$settings"; then
+            if grep -q '"shiibar-cc@shiibar-cc"[[:space:]]*:[[:space:]]*true' "$settings"; then
+              "$claude_bin" plugin marketplace update shiibar-cc || true
+              "$claude_bin" plugin update shiibar-cc@shiibar-cc || true
+            fi
+            exit 0
+          fi
 
-    system_command "/bin/bash", args: ["-c", script]
+          "$claude_bin" plugin marketplace add bufferings/shiibar-cc || true
+          "$claude_bin" plugin install shiibar-cc@shiibar-cc || true
+        SH
+        must_succeed:   false,
+        network_access: true,
+        writable_paths: ["~/.claude", "~/.claude.json"]
   end
 
   # Insurance for `uninstall quit:` below: that Apple Event only reaches the
@@ -103,11 +133,11 @@ cask "shiibar-cc" do
   # its own. `uninstall script:` (same page,
   # https://docs.brew.sh/Cask-Cookbook#uninstall-script) needs an existing
   # script file (`executable:`) rather than an inline command, so this uses
-  # `uninstall_postflight`, a plain Ruby block that runs after the uninstall
-  # artifacts are processed (same page, "Stanza: *flight") — the same
-  # `system_command "/bin/bash", args: [...]` shape already used in
-  # `postflight` above. (`Cask/StanzaOrder` in `brew style --cask` requires
-  # this block to appear before `uninstall` in the file.)
+  # `uninstall_postflight_steps`, which runs after the uninstall artifacts
+  # are processed (the steps form of "Stanza: *flight" on the same page; see
+  # `postflight_steps` above for why steps). (`Cask/StanzaOrder` in
+  # `brew style --cask` requires this block to appear before `uninstall` in
+  # the file.)
   #
   # Same pattern and `-xf` reasoning as scripts/dev-uninstall.sh: verified
   # on-device that `-xf` requires an exact match of the full argument list,
@@ -115,13 +145,16 @@ cask "shiibar-cc" do
   # process that merely takes this path as an argument (e.g. `tail -f` on
   # it) does not. The daemon is always launched with the bundled absolute
   # path and no arguments (DaemonLifecycleManager.swift: `process.arguments
-  # = []`).
-  uninstall_postflight do
-    script = <<~'SH'
-      pkill -xf '/.*/Shiibar CC\.app/Contents/Helpers/shiibar-ccd' || true
-    SH
-
-    system_command "/bin/bash", args: ["-c", script]
+  # = []`). The `terminate_process` step is not used: its `match: :full`
+  # runs `pkill -f` without `-x` (Library/Homebrew/install_steps.rb
+  # `run_terminate_process`), which would also kill such a `tail -f`.
+  # Verified on-device with a throwaway cask that `pkill` inside the cask
+  # sandbox still signals the daemon. `must_succeed: false` because `pkill`
+  # exits 1 when no daemon is running, the common case.
+  uninstall_postflight_steps do
+    run "/usr/bin/pkill",
+        args:         ["-xf", "/.*/Shiibar CC\\.app/Contents/Helpers/shiibar-ccd"],
+        must_succeed: false
   end
 
   uninstall quit: "cc.shiibar.menubar"
