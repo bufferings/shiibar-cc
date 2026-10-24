@@ -276,27 +276,44 @@ Release は作らず zip を workflow artifact に置く。
    **draft** の GitHub Release を作る。ノート本文は自動生成(コミット件名の列挙)なので、
    **draft の冒頭に利用者向けの概要を足す**: リード 1 文 + 利用者視点の節(機能 / Fixed / Changed)、
    自動生成の一覧は `## Commits` 見出しの下にそのまま残す。文言は所有者確認を経てから publish へ。
-   draft の API 操作はタグ名経由(`gh release edit <tag>`)が不安定なことがある —
-   release ID 直指定(`gh api repos/…/releases/<id>`)が確実(ID は
-   `gh api repos/bufferings/shiibar-cc/releases --jq '.[] | select(.draft) | .id'` で取れる)
+   本文の差し替えは `scripts/release/draft.sh notes vX.Y.Z <notes-file>` で行う。
+   **draft を API で直接 PATCH しない**: `tag_name` を含めずに本文だけを PATCH すると、draft の
+   `tag_name` が `untagged-…` になることがある(v0.5.2 で、PATCH 直前の読み取りでは `v0.5.2`、
+   本文だけの PATCH の応答では `untagged-…` だったことを確認。同じ手順を踏んだ v0.5.0 も同じ原因と
+   推定している)。
+   `draft.sh` は毎回の PATCH に `tag_name` を含め、操作の前後に `tag_name` を読み直して、
+   食い違えば止まる。draft は release ID で特定する(タグ名経由の `gh release edit <tag>` は
+   draft に対して不安定で、`tag_name` を失った draft はタグ名では見つからない)
 4. 所有者が draft の zip を実機スモークする
-5. スモーク OK なら draft を publish する(この操作が正式な公開)。
-   **publish 直後に、release がタグに着地したことを機械検証する**:
-   `curl -sI https://github.com/bufferings/shiibar-cc/releases/download/vX.Y.Z/shiibar-cc-X.Y.Z-arm64.zip`
-   が 302/200 なら OK。404 なら release の `tag_name` が `untagged-…` のまま公開されている
-   (publish と API 障害が重なると起きる — v0.5.0 で実例)。復旧は `tag_name` を PATCH した上で
-   **draft に戻して再 publish**(asset と release ID は保持される)。bump-cask の rerun は
+5. スモーク OK なら `scripts/release/draft.sh publish vX.Y.Z` で draft を publish する(この操作が
+   正式な公開)。`draft.sh` は publish の前後に `tag_name` を確認し、最後に
+   `https://github.com/bufferings/shiibar-cc/releases/download/vX.Y.Z/shiibar-cc-X.Y.Z-arm64.zip`
+   が 302/200 を返すことを確認する。この確認では URL にクエリ文字列を付ける: 素の URL は、404 を
+   返していた間の応答が 1 分ほど返り続けることがある(v0.5.2 で、復旧後も素の URL は 404 のまま、
+   クエリ付きの URL は 302 を返したことを確認)。`brew` も素の URL を取得するので、その間は同じ
+   404 を受けうる。
+   それでも `tag_name` が `untagged-…` のまま release が公開された場合の復旧は、`tag_name` を
+   PATCH した上で **draft に戻して再 publish** する(asset と release ID は保持される):
+   `gh api -X PATCH repos/bufferings/shiibar-cc/releases/<id> -f tag_name=vX.Y.Z -F draft=true`
+   のあと `scripts/release/draft.sh publish vX.Y.Z` を再実行する(`<id>` は `draft.sh` の
+   エラー出力に出る)。bump-cask の rerun は
    壊れた元イベントを再生するだけなので直らない — 正しい `tag_name` は新しい
    `release: published` イベントでしか届かない。復旧後に `git ls-remote --tags origin` を確認する —
    壊れた publish は `untagged-…` という名前の**実タグ**をリポジトリに作ることがあり、
    残骸なら削除する(`git push origin --delete untagged-…`。v0.5.0 の実例では v0.5.0 と
    同一コミットを指す重複だった)
 6. `release: published` をトリガーに `bump-cask.yml` が起動し、公開済みの zip から sha256 を
-   再計算して tap の cask を更新する(完走後、tap の `version` / `sha256` を確認する)
+   再計算して tap の cask を更新する(完走後、tap の `version` / `sha256` を確認する)。
+   `tag_name` が `vX.Y.Z` の形でないイベントでは、`bump-cask.yml` は tap を更新せずに失敗する
+   (`untagged-…` のまま公開されたイベントで、tap の cask を `version "untagged-…"` に
+   書き換えないためのガード)。失敗していたら、手順 5 の復旧で再 publish する
 7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
    bump してコミットする(`plugin.json` は上げない — 次のリリースコミットまで公開済みの番号を保つ)
 
-**公開後のタグは再利用禁止**。公開前に失敗した draft は、そのタグごと削除してよい。
+**公開後のタグは再利用禁止**。公開前に失敗した draft は削除してよいが、タグは削除できない
+(ルールセット `protect-release-tags` が `v*` タグの削除と付け替えを禁止している)。タグを付け替える必要が
+生じたら、そのバージョンは飛ばして次の patch としてリリースする(v0.5.1 の実例: 公証の失敗と cargo-deny の
+失敗のあと、修正を v0.5.2 としてリリースした。`v0.5.1` のタグはリリースのないまま残っている)。
 
 ### バージョンの原則
 
