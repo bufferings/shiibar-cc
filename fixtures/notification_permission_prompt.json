@@ -1,7 +1,7 @@
 {
   "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
-  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
-  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-src-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/src/shiibar-cc",
   "prompt_id": "a56becfe-c533-431d-b07a-e23e45f16671",
   "hook_event_name": "Notification",
   "message": "Claude needs your permission",

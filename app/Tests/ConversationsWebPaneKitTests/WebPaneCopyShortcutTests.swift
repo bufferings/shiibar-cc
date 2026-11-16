@@ -247,9 +247,9 @@ final class WebPaneCopyShortcutTests: XCTestCase {
         waitForSelectionState(false, in: controller)
 
         // No selection -> WebKit provides no Copy item at all; the pane
-        // still shows both verbs, disabled (§4.6/§8.38(6): round 1's
-        // "disabled item swallows cmd-C" was really the missing Edit menu —
-        // keys never route through this menu).
+        // still shows both verbs, disabled (§4.6/§8.38(6): the disabled
+        // item does not swallow cmd-C — keys never route through this
+        // menu).
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Look Up selection", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())

@@ -3,7 +3,7 @@ import XCTest
 @testable import ConversationsWebPaneKit
 
 /// The find bar's segmented control sizing (§8.38(8)): it stretched across
-/// the whole pane in the owner's build. The control must report a small
+/// the whole pane in the built app. The control must report a small
 /// finite content size (what SwiftUI's .fixedSize pins to) and must resist
 /// stretching at the AppKit level too.
 final class FindBarControlsTests: XCTestCase {

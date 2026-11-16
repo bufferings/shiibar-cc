@@ -43,9 +43,9 @@ final class ConversationsEmphasisSupplementTests: XCTestCase {
         XCTAssertEqual(styledRuns(result).map(\.1), [false, true, false])
     }
 
-    func testOwnersExactExampleInSentenceContext() {
-        // The smoke finding: "M36 deha **(table-and-quote quote)** toshita"
-        // rendered with literal asterisks. Post-supplement it is bold.
+    func testBoldEndingWithCJKBracketInsideASentence() {
+        // Bold that ends with a CJK closing bracket inside a sentence:
+        // without the supplement it renders with literal asterisks.
         let sentence = "M36 \u{3067}\u{306F}**\u{8868}\u{3068}\u{5F15}\u{7528}\u{306F}"
             + "\u{300C}\u{7D20}\u{306E}\u{30C6}\u{30AD}\u{30B9}\u{30C8}\u{306E}\u{307E}\u{307E}\u{300D}**"
             + "\u{3068}\u{3057}\u{305F}"

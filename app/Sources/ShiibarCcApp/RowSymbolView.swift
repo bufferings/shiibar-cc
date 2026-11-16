@@ -85,7 +85,8 @@ struct RowSymbolView: View {
     /// symbols' optical weight wants a final on-device pass, same idea as
     /// `TrayIconMetrics`. If the smaller-faced spinner frames (✳ ✶)
     /// visibly shrink mid-cycle on device, a per-frame scale table is the
-    /// sanctioned fix (M22 brief) — left uniform until the owner judges.
+    /// sanctioned fix (M22 brief) — left uniform unless that shrink is seen
+    /// on device.
     private static let glyphSizeRatio: CGFloat = 15.5 / 20
     /// window-design.html waiting symbol: stroke-width 1.7 on a 20-unit box.
     private static let waitingLineWidthRatio: CGFloat = 1.7 / 20

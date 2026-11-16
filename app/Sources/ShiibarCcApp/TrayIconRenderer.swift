@@ -35,7 +35,7 @@
 // tweak after looking at the real menu bar. `emblemFontSize` is a starting
 // point (M24 brief: 9.5, legibility outranks the exact number — bump back
 // toward 10.5 on-device if the ✻ petals collapse on a real Retina menu
-// bar). Badge size/position are unchanged from the pre-M24 on-device round.
+// bar).
 //
 // Coordinates are y-up (CoreGraphics/AppKit convention, `flipped: false`
 // below) — menubar-design.html's SVG mock shows the same shape y-flipped.
@@ -73,9 +73,9 @@ enum TrayIconMetrics {
 
     // Red unreviewed badge, overhanging the frame's top-right corner, with a
     // light halo ring always drawn (invisible on light bars by design).
-    // Unchanged by M24 T1 (pre-M24 on-device round 2026-07-05: r 2.2 was too
-    // small to register as a badge next to real menu bar neighbors; grown
-    // and pulled slightly inward so dot + halo still fit the 18pt canvas).
+    // Radius 3.6: r 2.2 is too small to register as a badge next to real
+    // menu bar neighbors. The center is pulled slightly inward so dot +
+    // halo still fit the 18pt canvas.
     static let badgeCenter = NSPoint(x: 15.6, y: 13.9)
     static let badgeRadius: CGFloat = 3.6
     static let haloLineWidth: CGFloat = 0.9

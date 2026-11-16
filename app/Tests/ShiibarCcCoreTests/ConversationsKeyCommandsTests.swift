@@ -59,9 +59,9 @@ final class ConversationsKeyCommandsTests: XCTestCase {
 
 /// Find-bar navigation targets (§4.6/§8.38(7)(8)): wrapping at the ends
 /// (the ⌘G convention) and always producing a target while hits exist —
-/// the regression pin for the round-4 "single hit / folded hit doesn't
-/// navigate" defect, whose cause was navigation guards that skipped the
-/// jump when the index had nowhere to move.
+/// the regression pin for "a single hit / a folded hit doesn't navigate",
+/// which occurs when navigation guards skip the jump because the index
+/// has nowhere to move.
 final class ConversationsHitNavigationTests: XCTestCase {
     func testSingleHitWrapsOntoItselfAndStillJumps() {
         // One hit: the wrap lands on the same index, and a target IS

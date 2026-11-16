@@ -152,8 +152,8 @@ public enum ConversationHits {
 /// Find-bar navigation targets (§4.6/§8.38(7)(8)): WRAPPING at the ends
 /// (the ⌘G convention), and ALWAYS producing a target while hits exist —
 /// every press scrolls to the current hit even when the index lands on the
-/// same place (a single hit wraps onto itself; the round-4 defect was a
-/// guard that skipped the jump entirely when the index had nowhere to go).
+/// same place (a single hit wraps onto itself; a guard that skips the jump
+/// when the index has nowhere to go would leave such a press with no effect).
 public enum ConversationsHitNavigation {
     /// ⌘G / the › segment: toward newer hits, wrapping past the newest back
     /// to the oldest.

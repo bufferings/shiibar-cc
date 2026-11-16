@@ -189,7 +189,7 @@ struct SettingsView: View {
             // cmd-plus / cmd-minus / cmd-0 adjust in the popover and the
             // window.
             // A popup (same control family as the sound pickers above) lets
-            // the owner jump straight to a size while watching the preview
+            // the user jump straight to a size while watching the preview
             // (§8.44).
             Section("Conversations") {
                 Picker("Text size", selection: Binding(

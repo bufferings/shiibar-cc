@@ -1,7 +1,7 @@
 {
   "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
-  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
-  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-src-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/src/shiibar-cc",
   "prompt_id": "a56becfe-c533-431d-b07a-e23e45f16671",
   "permission_mode": "default",
   "effort": {
@@ -13,7 +13,7 @@
     "file_path": "/no/such/path.txt"
   },
   "tool_use_id": "toolu_012knLUPdA3AUkyKNMRkDMBf",
-  "error": "File does not exist. Note: your current working directory is /Users/example/Documents/my/shiibar-cc.",
+  "error": "File does not exist. Note: your current working directory is /Users/example/src/shiibar-cc.",
   "is_interrupt": false,
   "duration_ms": 31
 }

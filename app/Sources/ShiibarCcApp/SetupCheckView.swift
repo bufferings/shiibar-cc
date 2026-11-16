@@ -79,7 +79,7 @@ final class SetupCheckViewModel: ObservableObject {
     /// closed (with `isVisible` still `true`), and if it is closed while no
     /// longer key, no resign fires at close time at all — an
     /// `isVisible`-at-resign heuristic left `isWindowCurrentlyOpen` stuck
-    /// `true` and permanently blocked re-runs (owner-observed on the real
+    /// `true` and permanently blocked re-runs (observed on the real
     /// app, then reproduced in the harness).
     ///
     /// So: `didBecomeKey` + "was not already open" = genuine (re)open →

@@ -1,7 +1,7 @@
 {
   "session_id": "f27c326c-213e-4728-a79c-f0f8f3afa0f2",
-  "transcript_path": "/Users/example/.claude/projects/-Users-example-Documents-my-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
-  "cwd": "/Users/example/Documents/my/shiibar-cc",
+  "transcript_path": "/Users/example/.claude/projects/-Users-example-src-shiibar-cc/f27c326c-213e-4728-a79c-f0f8f3afa0f2.jsonl",
+  "cwd": "/Users/example/src/shiibar-cc",
   "prompt_id": "ee4066db-6413-4962-92f2-8fb5e384408e",
   "permission_mode": "default",
   "effort": {
@@ -10,7 +10,7 @@
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "ls /Users/example/Documents/my/shiibar-cc",
+    "command": "ls /Users/example/src/shiibar-cc",
     "description": "List files in project root"
   },
   "tool_response": {

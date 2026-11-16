@@ -42,7 +42,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// the macOS standard sound name (extension-stripped, `SoundCatalog`) to
     /// attach to a waiting / done notification's banner. Defaults to
     /// `SoundCatalog.defaultSoundName` ("Glass") for both, unchanged from
-    /// the pre-M14 behavior, until the owner picks something else.
+    /// the pre-M14 behavior, until the user picks something else.
     private static let waitingSoundNameKey = "cc.shiibar.waitingSoundName"
     private static let doneSoundNameKey = "cc.shiibar.doneSoundName"
     var waitingSoundName: String {

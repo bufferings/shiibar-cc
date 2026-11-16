@@ -4,9 +4,9 @@ import XCTest
 /// Launch-safety regression guard: `AppDelegate.init` runs during the App
 /// struct's body evaluation, BEFORE NSApplication is set up — anything on
 /// that path that touches process-global app state (the implicitly
-/// unwrapped `NSApp`, key windows, ...) traps at every launch, as the
-/// round-7 `hasClosableWindow` initializer did (5 crash reports/minute in
-/// the field). This constructs the real init chain cold.
+/// unwrapped `NSApp`, key windows, ...) traps at every launch — for
+/// example, an initializer that reads the key window to compute
+/// `hasClosableWindow`. This constructs the real init chain cold.
 ///
 /// What this CAN catch: a trap or assertion anywhere in the
 /// AppDelegate/AppState/AppMenuModel construction chain, and any future
@@ -16,7 +16,7 @@ import XCTest
 /// order is not controllable) — the structural rule "init reads no global
 /// app state, providers run only from post-launch callbacks" is the real
 /// protection; this guard makes violations loud in most runs instead of at
-/// the owner's launch.
+/// the launch of the real app.
 @MainActor
 final class LaunchSafetyTests: XCTestCase {
     func testAppDelegateInitChainConstructsCold() {

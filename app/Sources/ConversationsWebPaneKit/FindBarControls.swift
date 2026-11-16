@@ -1,6 +1,6 @@
 // The find bar's back/forward segmented control (DESIGN.md §4.6/§8.38(8)):
-// a native momentary NSSegmentedControl, CONTENT-SIZED — the round-5 owner
-// build had it stretched across the whole pane because the SwiftUI host let
+// a native momentary NSSegmentedControl, CONTENT-SIZED — without that, it
+// stretches across the whole pane because the SwiftUI host lets
 // it take the full width proposal. The factory lives in this (AppKit-linked,
 // testable) kit so its sizing is pinned by a test; the SwiftUI side must
 // additionally wrap it in .fixedSize() so the intrinsic size is what lays

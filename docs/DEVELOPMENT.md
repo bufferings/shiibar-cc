@@ -109,11 +109,11 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
   なお v0.1.0 移行時(2026-07-09)に「アプリだけ入って symlink・postflight が無い」
   中途半端な状態を一度観測した(発生経路は未特定)。アプリを消して `brew install` し直すことで解消した
 - **GitHub Actions の Secrets**(shiibar-cc に 6 つ。名前と用途は release.yml / bump-cask.yml):
-  値と鍵ファイルの原本はすべて所有者の 1Password にあり、リポジトリにも会話ログにも置かない。
+  値と鍵ファイルの原本はリポジトリの外で保管し、リポジトリにも会話ログにも配置しない。
   期限があるのは `TAP_PUSH_TOKEN` だけ(fine-grained PAT。対象 = homebrew-tap のみ・
   権限 = contents: write・期限 1 年): **切れると release publish 後の bump-cask が認証エラーで落ちる**。
   対処は GitHub で PAT を再発行 → `gh secret set TAP_PUSH_TOKEN -R bufferings/shiibar-cc`。
-  Developer ID 証明書は約 5 年で期限切れ(1Password のアイテムに期限を記録済み)。
+  Developer ID 証明書は約 5 年で期限切れ。
   App Store Connect API キーには期限を設定していない(失効は手動)
 
 ## hooks の検証

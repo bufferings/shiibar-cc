@@ -467,11 +467,11 @@ public final class PaneWebView: WKWebView {
         // disabled while nothing is selected. With a selection WebKit's own
         // Copy item is reused (never duplicated — it manages its enabled
         // state; found by identifier first because the action-selector
-        // match missed it in the owner's smoke). Without one, WebKit
+        // match misses it in the real app). Without one, WebKit
         // supplies no Copy item, so a disabled placeholder stands in
         // (harmless: keys are handled in performKeyEquivalent, never
-        // through this menu — round 1's "swallowed ⌘C" was the missing
-        // Edit menu, not the disabled item). Every other standard item
+        // through this menu — a disabled item does not swallow ⌘C; a
+        // missing Edit menu does). Every other standard item
         // (Look Up, Translate, Search, Share, Speech, separators, ...) is
         // removed.
         let hasSelection = controller?.pageHasSelection == true
@@ -564,7 +564,7 @@ private final class BridgeHandler: NSObject, WKScriptMessageHandler, WKNavigatio
     }
 
     /// A dead WebContent process leaves the view blank until the next
-    /// interaction — one suspected cause of the owner's white-pane report.
+    /// interaction — one suspected cause of a blank white pane.
     /// Recovery is a page reload + state replay (§8.38(7)).
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Task { @MainActor [weak owner] in owner?.recoverFromProcessTermination() }

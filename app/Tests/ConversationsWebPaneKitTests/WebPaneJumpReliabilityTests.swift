@@ -8,8 +8,8 @@ import XCTest
 /// hit) — and a jump into a folded message auto-expands, scrolls to the
 /// now-visible hit, repaints highlights, and refreshes the minimap hit
 /// lines. Written as
-/// reproducing tests before the fix (owner report: "jumping to a hit in a
-/// folded message doesn't navigate; with a single hit it doesn't navigate").
+/// reproducing tests before the fix (the defect: jumping to a hit in a
+/// folded message did not navigate; with a single hit it did not navigate).
 final class WebPaneJumpReliabilityTests: XCTestCase {
     @MainActor
     private func loadedController(_ messages: [ConversationMessage]) -> WebPaneController {

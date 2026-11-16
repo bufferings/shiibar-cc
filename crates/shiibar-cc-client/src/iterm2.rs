@@ -183,7 +183,7 @@ end if
 /// directly as the session's process, bypassing login-shell PATH setup.
 /// This choice could not be confirmed on a real machine in this environment
 /// (no TCC Automation grant / no iTerm2 available) — it is the provisional
-/// method the task brief calls for in that case; the owner's real-machine
+/// method the task brief calls for in that case; a real-machine
 /// smoke test is what confirms or overturns it (see M33 completion report).
 ///
 /// The shell command line is embedded as an AppleScript string literal, so
