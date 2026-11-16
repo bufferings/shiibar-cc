@@ -39,8 +39,8 @@ final class GlyphCycleSpinnerTests: XCTestCase {
 
     func testFrameIndexStaysInBoundsAcrossASweptRangeOfTimes() {
         // A cheap sanity check that the formula never rounds outside the
-        // array — every reader (RowSymbolView, TrayIconRenderer) indexes
-        // straight into `glyphs` with this value.
+        // array — the reader (RowSymbolView) indexes straight into
+        // `glyphs` with this value.
         var t: TimeInterval = 0
         while t < GlyphCycleSpinner.periodSeconds * 3 {
             let index = GlyphCycleSpinner.frameIndex(atReferenceTime: t)

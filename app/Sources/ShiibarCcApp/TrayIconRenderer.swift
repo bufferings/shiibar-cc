@@ -1,9 +1,11 @@
 // AppKit renderer for the tray icon (the tray section of menubar-design.html,
 // DESIGN.md §4.5 / M24 T1's "window + one glyph" geometry): draws the
-// rounded window frame + one emblem-slot glyph carrying the whole rollup
-// (+ red unreviewed badge) into an NSImage, redrawn on every state change
-// (and, only while the rollup shows `working`, on every animation tick —
-// see `AppState`'s working-animation timer).
+// rounded window frame + one emblem-slot glyph (+ three dots while
+// working, + red unreviewed badge) into an NSImage, redrawn on every state change.
+// Every state, `working` included, is a static image: each change of the
+// status item's image makes AppKit re-snapshot the status item on the main
+// thread at a fixed cost, so an animated icon would use CPU for as long as
+// any session is working.
 //
 // Why an NSImage and not composed SwiftUI views: the MenuBarExtra label is
 // not a normal rendering context. On-device it dropped Shape strokes and
@@ -23,15 +25,13 @@
 //                 halo. This is the spec's sanctioned fallback
 //                 (appearance-observed non-template compositing).
 //
-// M24 T1 unified the tray's whole rollup into ONE emblem-slot glyph (top-
-// left, x 6.4): idle/none show the static `✻` (plain U+273B, forced to text
+// The emblem slot holds one glyph (top-left, x 6.4): idle/none show the static `✻` (plain U+273B, forced to text
 // presentation with trailing U+FE0E so it never renders as a colored emoji
 // glyph — it must not be reshaped toward the Anthropic sunburst logo
-// either); working swaps in the same `GlyphCycleSpinner` cycle
-// (ShiibarCcCore) the Running row symbol animates (§9); waiting swaps in a
-// bold "!" at ~1.1x the emblem size. The old bottom-right lit-dot working
-// indicator and bottom-right "!" are gone — the emblem slot IS the rollup
-// now. All geometry lives in `TrayIconMetrics` below — single place to
+// either); working keeps the same static ✻ and adds three small filled
+// dots below it; waiting swaps in a bold "!" at ~1.1x the emblem size.
+// The emblem-slot glyph and the presence of the dots together show the
+// rollup. All geometry lives in `TrayIconMetrics` below — single place to
 // tweak after looking at the real menu bar. `emblemFontSize` is a starting
 // point (M24 brief: 9.5, legibility outranks the exact number — bump back
 // toward 10.5 on-device if the ✻ petals collapse on a real Retina menu
@@ -55,9 +55,9 @@ enum TrayIconMetrics {
     static let frameLineWidth: CGFloat = 1.4
 
     // Emblem slot, top-left — the ENTIRE rollup lives here now (M24 T1):
-    // idle/none draw the static ✻ (plain U+273B, forced text presentation),
-    // working cycles GlyphCycleSpinner's frames, waiting swaps in a bold "!"
-    // at `waitingBangScale` times this size.
+    // idle/none/working draw the static ✻ (plain U+273B, forced text
+    // presentation), waiting swaps in a bold "!" at `waitingBangScale`
+    // times this size.
     static let emblemText = "\u{273B}\u{FE0E}"
     static let emblemCenter = NSPoint(x: 6.4, y: 11.2)
     // M24 brief starting point: 9.5 ("legibility outranks the number" — the
@@ -70,6 +70,17 @@ enum TrayIconMetrics {
     // Waiting "!": swapped into the emblem slot in place of the ✻, ~1.1x
     // its size (M24 brief), heavy weight.
     static let waitingBangScale: CGFloat = 1.1
+
+    // Working dots: three filled circles in a row below the ✻, drawn in
+    // the same color as the frame and emblem. They are static, like every
+    // other tray state, because each status-item image change has a fixed
+    // AppKit cost.
+    static let workingDotCenters = [
+        NSPoint(x: 5.0, y: 4.0),
+        NSPoint(x: 8.8, y: 4.0),
+        NSPoint(x: 12.6, y: 4.0),
+    ]
+    static let workingDotRadius: CGFloat = 0.9
 
     // Red unreviewed badge, overhanging the frame's top-right corner, with a
     // light halo ring always drawn (invisible on light bars by design).
@@ -122,10 +133,9 @@ enum TrayIconRenderer {
         frame.lineWidth = m.frameLineWidth
         frame.stroke()
 
-        // 2. Emblem slot — the ENTIRE rollup lives here now (M24 T1):
-        // waiting swaps in a bold "!", working cycles the same glyph-cycle
-        // spinner as the Running row symbol (`GlyphCycleSpinner`,
-        // ShiibarCcCore), idle/none show the static ✻. Core's Rollup
+        // 2. Emblem slot, plus the working dots: waiting swaps in a bold
+        // "!", working shows the static ✻ plus three dots, idle/none show
+        // the static ✻. Core's Rollup
         // priority (waiting > working > idle) is untouched — this switch
         // only picks which glyph represents the priority `state.glyph`
         // already carries.
@@ -138,9 +148,17 @@ enum TrayIconRenderer {
                 weight: .heavy,
                 color: glyphColor
             )
-        case .working(let frame):
-            let glyph = GlyphCycleSpinner.glyphs[frame % GlyphCycleSpinner.glyphs.count]
-            drawGlyphText(glyph, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
+        case .working:
+            drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
+            glyphColor.setFill()
+            for center in m.workingDotCenters {
+                NSBezierPath(ovalIn: NSRect(
+                    x: center.x - m.workingDotRadius,
+                    y: center.y - m.workingDotRadius,
+                    width: m.workingDotRadius * 2,
+                    height: m.workingDotRadius * 2
+                )).fill()
+            }
         case .idle, .none:
             drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
         }

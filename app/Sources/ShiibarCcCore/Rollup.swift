@@ -1,5 +1,6 @@
 // Tray icon rollup (the tray section of menubar-design.html, DESIGN.md §4.5):
-// one status glyph represents the whole agent table, plus an independent
+// one status glyph (and, while working, three dots) represents the whole
+// agent table, plus an independent
 // red-dot flag for "any agent unreviewed".
 
 import Foundation
@@ -9,15 +10,14 @@ import Foundation
 /// agents" (or, per DESIGN.md §4.5, "daemon disconnected" — the tray must
 /// not show a stale rollup while disconnected).
 ///
-/// `.working` carries the current `GlyphCycleSpinner` frame index (M24 T1:
-/// the tray emblem slot runs the same glyph-cycle spinner as the Running
-/// row symbol, §9) — the glyph alone doesn't say which cycle frame is
-/// current, so the frame index travels with it. `.idle` and `.none` both
-/// render the static ✻ in the emblem slot (M24 T1); they differ only in
+/// Every glyph is a static image: each change of the status item's image
+/// costs AppKit a fixed re-snapshot on the main thread, so `.working`
+/// carries no animation frame. `.idle` and `.none` both render the static
+/// ✻ in the emblem slot (M24 T1); they differ only in
 /// `TrayIconState.dim`.
 public enum TrayGlyph: Equatable, Sendable {
     case waiting
-    case working(frame: Int)
+    case working
     case idle
     case none
 }
@@ -54,10 +54,6 @@ public enum Rollup {
     ///   - daemonConnected: `false` while reconnecting (§4.5); forces the
     ///     "no agents" dim level regardless of `statuses`, since a stale
     ///     rollup must not be shown as current.
-    ///   - workingFrame: the current `GlyphCycleSpinner` frame index
-    ///     (0..<`GlyphCycleSpinner.glyphs.count`) to stamp onto a `.working`
-    ///     result; irrelevant otherwise. Defaults to 0 for callers that
-    ///     don't animate (e.g. tests).
     ///
     /// An `.unknown` status (forward-compat fallback) is ignored entirely
     /// (DESIGN.md §4.2/§4.5: clients ignore unknown statuses): it does not
@@ -66,8 +62,7 @@ public enum Rollup {
     public static func icon(
         statuses: [AgentStatus],
         hasUnreviewed: Bool,
-        daemonConnected: Bool,
-        workingFrame: Int = 0
+        daemonConnected: Bool
     ) -> TrayIconState {
         guard daemonConnected else {
             return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
@@ -80,7 +75,7 @@ public enum Rollup {
             return TrayIconState(glyph: .waiting, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
         if known.contains(.working) {
-            return TrayIconState(glyph: .working(frame: workingFrame), dim: normalDim, hasUnreviewedDot: hasUnreviewed)
+            return TrayIconState(glyph: .working, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
         }
         return TrayIconState(glyph: .idle, dim: idleDim, hasUnreviewedDot: hasUnreviewed)
     }

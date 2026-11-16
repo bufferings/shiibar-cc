@@ -204,6 +204,13 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
 - **トレイアイコン**: 描画は `app/Sources/ShiibarCcApp/TrayIconRenderer.swift`(数値は `TrayIconMetrics` に集約)。
   見た目の正は `docs/menubar-design.html`。数値を変えたら menubar-design.html のモック SVG も同じ値に更新する
+- **トレイアイコンの更新経路を変更したときの CPU の確認**: 画像を設定する前の判定(DESIGN.md §4.5)を
+  経由せずに画像を設定すると、操作をしない状態でも CPU を使用し続ける。判定の単体テストは
+  `TrayImageGateTests` である。実機では、ポップオーバーとウィンドウを閉じた状態で
+  (working のセッションの有無は問わない)、`ps -o pcpu= -p "$(pgrep -x ShiibarCcApp)"` を
+  数秒の間隔で数回実行し、どの回も 1% 未満であることを確認する。メニューバーの明暗が異なる複数の
+  ディスプレイを接続している場合は、その構成でも確認する。1% 以上の場合は、`sample ShiibarCcApp 3` の
+  出力に `-[NSStatusItem _updateReplicants]` が継続して現れるかどうかを確認する
 - **アプリアイコン**: `scripts/generate-app-icon.swift` が唯一の原本。dev-install.sh がこれを実行して
   `.icns` を生成・同梱するので、リポジトリに `.icns` はコミットしない。
   例外は README 用の `docs/assets/app-icon.png`(コミット済みの生成物)— デザインを変えたら

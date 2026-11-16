@@ -58,9 +58,9 @@ struct RowSymbolView: View {
             // (e.g. a list update moves the row), which froze the
             // old arc spinner. Deriving the frame from wall-clock time has
             // no animation state to cancel — and all rows stay in phase
-            // with each other AND with the tray emblem (`TrayIconRenderer`,
-            // M24 T1) for free, since both read `GlyphCycleSpinner` off the
-            // same reference clock.
+            // with each other for free, since every row reads
+            // `GlyphCycleSpinner` off the same reference clock. (The tray
+            // shows a static working image, not this cycle.)
             TimelineView(.animation(minimumInterval: GlyphCycleSpinner.tickIntervalSeconds, paused: !spinning)) { context in
                 statusGlyph(GlyphCycleSpinner.glyph(atReferenceTime: context.date.timeIntervalSinceReferenceDate))
                     .foregroundStyle(Color.primary)

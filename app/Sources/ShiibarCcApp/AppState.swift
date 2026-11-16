@@ -13,20 +13,14 @@ import ShiibarCcCore
 
 @MainActor
 final class AppState: ObservableObject {
-    /// The working animation timer (M5 T8) only cares whether the current
-    /// rollup shows `working`, so both mutation points refresh it.
     @Published private(set) var agents: [Agent] = [] {
         didSet {
-            refreshWorkingAnimationTimer()
             rememberObservedTerminal()
             surface.agentsUpdated(agents)
         }
     }
     @Published private(set) var connected = false {
-        didSet {
-            refreshWorkingAnimationTimer()
-            pushWarnings()
-        }
+        didSet { pushWarnings() }
     }
     /// Either focus, resume, or reconcile returned exit 3 (§4.5: not
     /// focus-only — a reconcile silenced by a missing Automation permission
@@ -54,12 +48,6 @@ final class AppState: ObservableObject {
     /// regardless (§4.5).
     @Published private(set) var appearanceSetting: AppearanceSetting
     private static let appearanceKey = "cc.shiibar.appearance"
-    /// Current `GlyphCycleSpinner` frame index of the tray's working
-    /// animation (M5 T8, M24 T1). Only meaningful while
-    /// `workingAnimationTimer` is running; `trayIcon` reads it on every
-    /// render regardless.
-    @Published private(set) var workingAnimationFrame = 0
-    private var workingAnimationTimer: Timer?
 
     let notificationManager: NotificationManager
     /// The conversation pane's body text size (§4.6/§4.5): a single shared
@@ -164,7 +152,6 @@ final class AppState: ObservableObject {
     }
 
     deinit {
-        workingAnimationTimer?.invalidate()
         periodicReconcileScheduler?.invalidate()
         conversationsIndexScheduler?.invalidate()
     }
@@ -378,8 +365,7 @@ final class AppState: ObservableObject {
         Rollup.icon(
             statuses: agents.map(\.status),
             hasUnreviewed: agents.contains { $0.unreviewed },
-            daemonConnected: connected,
-            workingFrame: workingAnimationFrame
+            daemonConnected: connected
         )
     }
 
@@ -402,57 +388,6 @@ final class AppState: ObservableObject {
         } else {
             NSApp.appearance = nil
         }
-    }
-
-    // MARK: - Tray working animation (M5 T8, M24 T1)
-
-    /// Start/stop the `GlyphCycleSpinner.tickIntervalSeconds`-tick animation
-    /// timer (§9, 50ms) to match whether the rollup currently shows
-    /// `working` — called whenever `agents` or `connected` changes (their
-    /// `didSet`s above), since either can flip the rollup in or out of
-    /// `working`. `hasUnreviewed` doesn't affect this decision (the badge
-    /// overlay doesn't change which glyph is shown), so `false` is passed
-    /// as a cheap placeholder.
-    private func refreshWorkingAnimationTimer() {
-        let rollupGlyph = Rollup.icon(
-            statuses: agents.map(\.status),
-            hasUnreviewed: false,
-            daemonConnected: connected
-        ).glyph
-        let isWorking: Bool
-        if case .working = rollupGlyph {
-            isWorking = true
-        } else {
-            isWorking = false
-        }
-
-        switch (isWorking, workingAnimationTimer) {
-        case (true, .none):
-            advanceWorkingAnimationFrame()
-            workingAnimationTimer = Timer.scheduledTimer(
-                withTimeInterval: GlyphCycleSpinner.tickIntervalSeconds,
-                repeats: true
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    self?.advanceWorkingAnimationFrame()
-                }
-            }
-        case (false, .some(let timer)):
-            timer.invalidate()
-            workingAnimationTimer = nil
-            workingAnimationFrame = 0
-        default:
-            break // already in the right state (running / not running)
-        }
-    }
-
-    /// Re-derive the current frame from wall-clock time (same
-    /// `GlyphCycleSpinner` formula as `RowSymbolView`'s `TimelineView`)
-    /// rather than incrementing a counter — a pure function of "now" needs
-    /// no separate reset-to-0 handling and stays in phase with every other
-    /// spinner in the process for free.
-    private func advanceWorkingAnimationFrame() {
-        workingAnimationFrame = GlyphCycleSpinner.frameIndex(atReferenceTime: Date().timeIntervalSinceReferenceDate)
     }
 
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)

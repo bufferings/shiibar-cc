@@ -48,6 +48,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// Redraws the tray when the menu bar's appearance flips (the badge
     /// variant is not a template image and picks its glyph color by hand).
     private var appearanceObservation: NSKeyValueObservation?
+    /// Skips tray image assignments that would depict the same thing (see
+    /// `refreshTrayImage`).
+    private var trayImageGate = TrayImageGate()
     /// Opens the Settings / Setup Check `Window` scenes (captured from a
     /// SwiftUI view — see `SceneOpenerView`).
     var openSceneWindow: ((String) -> Void)?
@@ -77,8 +80,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         state.willOpenAuxiliaryWindow = { [weak self] in self?.closePopover() }
         state.raiseMainWindow = { [weak self] in self?.raiseWindow() }
         state.hotKey.onPressed = { [weak self] in self?.hotKeyPressed() }
-        // Redraw the tray on every state change (§4.5): agents, connection,
-        // and the working-animation frame.
+        // Redraw the tray on every state change (§4.5): agents and
+        // connection.
         state.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshTrayImage() }
@@ -106,7 +109,13 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private func refreshTrayImage() {
         guard let button = statusItem?.button else { return }
         let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        button.image = TrayIconRenderer.render(state: state.trayIcon, darkMenuBar: dark)
+        let icon = state.trayIcon
+        // Assign only when the depicted state or the menu bar appearance
+        // changed: setting the image schedules a replicant redraw that sets
+        // the button's appearance and re-fires `appearanceObservation`, so an
+        // unconditional assignment never stops redrawing.
+        guard trayImageGate.shouldRender(state: icon, darkMenuBar: dark) else { return }
+        button.image = TrayIconRenderer.render(state: icon, darkMenuBar: dark)
     }
 
     /// The window is open: on screen or minimized to the Dock (closing
