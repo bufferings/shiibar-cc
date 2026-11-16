@@ -121,8 +121,8 @@ end if
 /// string literal, so it goes through `escape_as_string_literal` on top of
 /// `build_resume_shell_command`'s shell single-quoting (the double escaping
 /// the spec flags). Prints `OK` as the last line of stdout on success.
-pub fn build_resume_script(cwd: &str, session_id: &str) -> String {
-    let shell_command = build_resume_shell_command(cwd, session_id);
+pub fn build_resume_script(cwd: &str, session_id: &str, fork: bool) -> String {
+    let shell_command = build_resume_shell_command(cwd, session_id, fork);
     let escaped_command = escape_as_string_literal(&shell_command);
     format!(
         r#"tell application "Terminal"
@@ -298,17 +298,19 @@ pub fn probe(runner: &dyn AppleScriptRunner) -> TerminalResult<ProbeOutcome> {
     parse_probe_output(&output)
 }
 
-/// `open_resume_window(cwd, session_id)` (DESIGN.md §4.3): open a new
+/// `open_resume_window(cwd, session_id, fork)` (DESIGN.md §4.3): open a new
 /// Terminal.app window and run `claude --resume <session_id>` there, `cd`-ed
-/// into `cwd`. `cwd` and `session_id` are escaped, not validated —
+/// into `cwd` (with `--fork-session` appended when `fork` is true — same as
+/// iterm2, §4.3/§4.4). `cwd` and `session_id` are escaped, not validated —
 /// `shiibar-cc resume` checks `cwd` first (§4.4).
 pub fn open_resume_window(
     cwd: &str,
     session_id: &str,
+    fork: bool,
     runner: &dyn AppleScriptRunner,
 ) -> TerminalResult<()> {
     let output = runner
-        .run(&build_resume_script(cwd, session_id))
+        .run(&build_resume_script(cwd, session_id, fork))
         .map_err(|e| TerminalError::Other(e.to_string()))?;
     parse_resume_output(&output)
 }
@@ -499,7 +501,7 @@ mod tests {
         // Unlike build_focus_script, must NOT gate on "is running" —
         // open_resume_window is expected to launch Terminal.app (§4.3), and
         // the launch method is `do script` (new window).
-        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
         assert!(!script.contains("is running"));
         assert!(script.contains(r#"tell application "Terminal""#));
         assert!(script.contains("do script"));
@@ -507,7 +509,7 @@ mod tests {
 
     #[test]
     fn resume_script_contains_the_cd_and_resume_command() {
-        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
         assert!(script.contains("cd '/Users/example/project'"));
         assert!(script.contains("claude --resume 'SESSION-1'"));
         assert!(script.contains("\"OK\""));
@@ -518,14 +520,38 @@ mod tests {
         // Shell single-quote escaping first (a no-op for `"` inside single
         // quotes), then AppleScript string-literal escaping on top (§4.3
         // double escaping) — which turns the embedded `"` into `\"`.
-        let script = build_resume_script(r#"/Users/example/My "great" project"#, "SESSION-1");
+        let script =
+            build_resume_script(r#"/Users/example/My "great" project"#, "SESSION-1", false);
         assert!(script.contains(r#"cd '/Users/example/My \"great\" project'"#));
     }
 
     #[test]
     fn resume_script_escapes_a_cwd_containing_a_single_quote() {
-        let script = build_resume_script("/Users/example/O'Brien", "SESSION-1");
+        let script = build_resume_script("/Users/example/O'Brien", "SESSION-1", false);
         assert!(script.contains(r#"cd '/Users/example/O'\\''Brien'"#));
+    }
+
+    #[test]
+    fn resume_script_without_fork_has_no_fork_session_flag() {
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
+        assert!(!script.contains("--fork-session"));
+    }
+
+    #[test]
+    fn resume_script_with_fork_appends_fork_session_at_the_end_of_the_command() {
+        // §4.3/§4.4: same fork handling as iterm2 — `--fork-session` last.
+        let script = build_resume_script("/Users/example/project", "SESSION-1", true);
+        assert!(script.contains(
+            r#"do script "cd '/Users/example/project' && claude --resume 'SESSION-1' --fork-session""#
+        ));
+    }
+
+    #[test]
+    fn resume_script_with_fork_keeps_the_existing_double_escaping() {
+        let script = build_resume_script("/Users/example/O'Brien", "weird'id", true);
+        assert!(script.contains(
+            r#"cd '/Users/example/O'\\''Brien' && claude --resume 'weird'\\''id' --fork-session""#
+        ));
     }
 
     // ---- output parsing ----
@@ -711,7 +737,7 @@ mod tests {
     fn open_resume_window_success_end_to_end() {
         let runner = FakeRunner { output: out(true, "OK\n", "") };
         assert_eq!(
-            open_resume_window("/Users/example/project", "SESSION-1", &runner),
+            open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
             Ok(())
         );
     }

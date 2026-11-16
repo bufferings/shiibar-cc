@@ -194,17 +194,24 @@ pub(crate) fn escape_shell_single_quoted(s: &str) -> String {
 }
 
 /// The `cd <cwd> && claude --resume <session_id>` shell command line run in
-/// the new window (DESIGN.md §4.3). Each argument is POSIX single-quote
+/// the new window (DESIGN.md §4.3). When `fork` is true, `--fork-session` is
+/// appended at the end (`... claude --resume <session_id> --fork-session`,
+/// §4.4): the conversation continues as a copy under a new session ID and the
+/// original is left unchanged (§7-6). Each argument is POSIX single-quote
 /// escaped independently — `cwd` may contain spaces, quotes, or `$`, and
 /// `session_id` is expected to be a UUID but is escaped the same way rather
 /// than trusted (§4.3: "escape it, don't validate it"). Shared by both
 /// terminals' resume scripts.
-pub(crate) fn build_resume_shell_command(cwd: &str, session_id: &str) -> String {
-    format!(
+pub(crate) fn build_resume_shell_command(cwd: &str, session_id: &str, fork: bool) -> String {
+    let mut command = format!(
         "cd {} && claude --resume {}",
         escape_shell_single_quoted(cwd),
         escape_shell_single_quoted(session_id)
-    )
+    );
+    if fork {
+        command.push_str(" --fork-session");
+    }
+    command
 }
 
 /// Normalize a tty for comparison: `ps` prints it bare (`ttys003`), the
@@ -302,17 +309,19 @@ pub fn focused(runner: &dyn AppleScriptRunner) -> TerminalResult<Option<String>>
 }
 
 /// `open_resume_window` dispatch (DESIGN.md §4.3/§4.4): open a new window in
-/// the chosen terminal and run `claude --resume <session_id>` there.
+/// the chosen terminal and run `claude --resume <session_id>` there (with
+/// `--fork-session` appended when `fork` is true — §4.4).
 pub fn open_resume_window(
     kind: TerminalKind,
     cwd: &str,
     session_id: &str,
+    fork: bool,
     runner: &dyn AppleScriptRunner,
 ) -> TerminalResult<()> {
     match kind {
-        TerminalKind::Iterm2 => crate::iterm2::open_resume_window(cwd, session_id, runner),
+        TerminalKind::Iterm2 => crate::iterm2::open_resume_window(cwd, session_id, fork, runner),
         TerminalKind::AppleTerminal => {
-            crate::apple_terminal::open_resume_window(cwd, session_id, runner)
+            crate::apple_terminal::open_resume_window(cwd, session_id, fork, runner)
         }
     }
 }
@@ -379,8 +388,25 @@ mod tests {
     #[test]
     fn build_resume_shell_command_joins_cd_and_resume() {
         assert_eq!(
-            build_resume_shell_command("/Users/example/proj", "SESSION-1"),
+            build_resume_shell_command("/Users/example/proj", "SESSION-1", false),
             "cd '/Users/example/proj' && claude --resume 'SESSION-1'"
+        );
+    }
+
+    #[test]
+    fn build_resume_shell_command_appends_fork_session_last_when_forking() {
+        // §4.4: `--fork` adds `--fork-session` at the end of the command.
+        assert_eq!(
+            build_resume_shell_command("/Users/example/proj", "SESSION-1", true),
+            "cd '/Users/example/proj' && claude --resume 'SESSION-1' --fork-session"
+        );
+    }
+
+    #[test]
+    fn build_resume_shell_command_escapes_the_same_way_when_forking() {
+        assert_eq!(
+            build_resume_shell_command("/Users/example/O'Brien", "weird'id", true),
+            r#"cd '/Users/example/O'\''Brien' && claude --resume 'weird'\''id' --fork-session"#
         );
     }
 

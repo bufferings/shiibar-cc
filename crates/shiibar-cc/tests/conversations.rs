@@ -158,7 +158,13 @@ fn index_emits_start_progress_shape_and_is_idempotent() {
     let deps = fx.deps();
     let mut events = Vec::new();
     run_index(&deps, &mut |e| events.push(e)).unwrap();
-    assert_eq!(events.first(), Some(&ProgressEvent::Start { total: 1 }));
+    assert_eq!(
+        events.first(),
+        Some(&ProgressEvent::Start {
+            total: 1,
+            full_build: true
+        })
+    );
     assert_eq!(
         events.last(),
         Some(&ProgressEvent::Done {
@@ -551,6 +557,49 @@ fn schema_version_mismatch_triggers_a_full_rebuild() {
     let rows = run_search(&deps, Some("survives"), &mut || full_build_seen = true).unwrap();
     assert_eq!(rows.len(), 1);
     assert!(full_build_seen, "version mismatch must be a full build");
+    assert_eq!(rows[0].last_prompt.as_deref(), Some("survives rebuild"));
+}
+
+#[test]
+fn a_previous_schema_without_last_prompt_is_rebuilt_and_gains_it() {
+    // Simulate an index written by the previous schema (version 2, no
+    // `last_prompt` column): the next search must detect the version
+    // mismatch, rebuild in full, and answer with `last_prompt` filled in.
+    let fx = Fixture::new();
+    fx.write_transcript(
+        "slug",
+        "s1",
+        &[
+            user_line("u1", None, "older prompt"),
+            assistant_line("a1", Some("u1"), "answer"),
+            user_line("u2", Some("a1"), "newest prompt\nwith a second line"),
+        ],
+        1_000,
+    );
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+
+    let conn = rusqlite::Connection::open(&fx.db_path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE conversations DROP COLUMN last_prompt;
+         UPDATE meta SET value='2' WHERE key='schema_version';",
+    )
+    .unwrap();
+    drop(conn);
+
+    let mut full_build_seen = false;
+    let rows = run_search(&deps, None, &mut || full_build_seen = true).unwrap();
+    assert!(
+        full_build_seen,
+        "an older schema version must be a full build"
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].last_prompt.as_deref(), Some("newest prompt"));
+
+    // Converged: the following search is an ordinary diff catch-up.
+    let mut second_full_build = false;
+    run_search(&deps, None, &mut || second_full_build = true).unwrap();
+    assert!(!second_full_build);
 }
 
 #[test]
@@ -603,7 +652,7 @@ fn waiting_index_relays_the_holders_progress() {
     let lock_path = lock::lock_path_for(&fx.db_path);
     let held = lock::try_acquire(&lock_path).unwrap().expect("lock free");
     let (mut db, _) = db::open_rw(&fx.db_path).unwrap();
-    db.reset_progress(7).unwrap(); // done=0 / total=7
+    db.reset_progress(7, true).unwrap(); // done=0 / total=7, full build
     drop(db);
 
     // A second index (same deps, separate thread) must wait AND relay.
@@ -636,7 +685,10 @@ fn waiting_index_relays_the_holders_progress() {
         }
     }
     assert!(
-        relayed.contains(&ProgressEvent::Start { total: 7 }),
+        relayed.contains(&ProgressEvent::Start {
+            total: 7,
+            full_build: true
+        }),
         "expected a relayed start, got {relayed:?}"
     );
     assert!(
@@ -655,6 +707,162 @@ fn waiting_index_relays_the_holders_progress() {
         matches!(all.last(), Some(ProgressEvent::Done { .. })),
         "expected a final done event, got {all:?}"
     );
+}
+
+// ---------- full_build flag on `start` (§4.4) ----------
+
+fn first_start(deps: &Deps) -> ProgressEvent {
+    let mut events = Vec::new();
+    run_index(deps, &mut |e| events.push(e)).unwrap();
+    *events
+        .iter()
+        .find(|e| matches!(e, ProgressEvent::Start { .. }))
+        .expect("a start event")
+}
+
+#[test]
+fn first_build_start_is_a_full_build() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    assert_eq!(
+        first_start(&fx.deps()),
+        ProgressEvent::Start {
+            total: 1,
+            full_build: true
+        }
+    );
+}
+
+#[test]
+fn incremental_catch_up_start_is_not_a_full_build() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    // One changed and one new transcript: a non-zero total, still an
+    // incremental catch-up.
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "more"), 2_000);
+    fx.write_transcript("slug", "s2", &simple_conversation("another", "ok"), 3_000);
+    assert_eq!(
+        first_start(&deps),
+        ProgressEvent::Start {
+            total: 2,
+            full_build: false
+        }
+    );
+    // Nothing changed: total 0, not a full build either.
+    assert_eq!(
+        first_start(&deps),
+        ProgressEvent::Start {
+            total: 0,
+            full_build: false
+        }
+    );
+}
+
+#[test]
+fn schema_mismatch_rebuild_start_is_a_full_build() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    let conn = rusqlite::Connection::open(&fx.db_path).unwrap();
+    conn.execute(
+        "UPDATE meta SET value='999999' WHERE key='schema_version'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    assert_eq!(
+        first_start(&deps),
+        ProgressEvent::Start {
+            total: 1,
+            full_build: true
+        }
+    );
+}
+
+#[test]
+fn corruption_recovery_start_is_a_full_build() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    fs::create_dir_all(fx.db_path.parent().unwrap()).unwrap();
+    fs::write(&fx.db_path, "this is not a sqlite database at all").unwrap();
+    assert_eq!(
+        first_start(&fx.deps()),
+        ProgressEvent::Start {
+            total: 1,
+            full_build: true
+        }
+    );
+}
+
+#[test]
+fn relayed_start_carries_the_builders_incremental_flag() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+
+    // Pose as an incremental builder holding the lock.
+    let lock_path = lock::lock_path_for(&fx.db_path);
+    let held = lock::try_acquire(&lock_path).unwrap().expect("lock free");
+    let (mut db, _) = db::open_rw(&fx.db_path).unwrap();
+    db.reset_progress(3, false).unwrap();
+    drop(db);
+
+    let (event_tx, event_rx) = std::sync::mpsc::channel::<ProgressEvent>();
+    let projects = fx.projects.clone();
+    let sessions = fx.sessions.clone();
+    let db_path = fx.db_path.clone();
+    let waiter = std::thread::spawn(move || {
+        let deps = Deps {
+            projects_dir: projects,
+            sessions_dir: sessions,
+            db_path,
+            probe: Box::new(FakeProbe { live: vec![] }),
+        };
+        run_index(&deps, &mut |e| {
+            let _ = event_tx.send(e);
+        })
+    });
+
+    let mut relayed = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if let Ok(e) = event_rx.recv_timeout(Duration::from_millis(100)) {
+            relayed.push(e);
+            if matches!(e, ProgressEvent::Start { .. }) {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        relayed.first(),
+        Some(&ProgressEvent::Start {
+            total: 3,
+            full_build: false
+        }),
+        "got {relayed:?}"
+    );
+    drop(held);
+    waiter.join().unwrap().unwrap();
+}
+
+#[test]
+fn relay_reads_a_missing_flag_as_incremental() {
+    // A meta table with counters but no full_build flag (written by a
+    // builder that predates the flag) reads as an incremental build.
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("hello", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    let conn = rusqlite::Connection::open(&fx.db_path).unwrap();
+    conn.execute("DELETE FROM meta WHERE key='progress_full_build'", [])
+        .unwrap();
+    drop(conn);
+    let progress = db::open_ro(&fx.db_path).unwrap().read_progress().unwrap();
+    assert!(!progress.full_build);
 }
 
 // ---------- black-box binary contract (exit codes + JSON shapes) ----------
@@ -694,7 +902,11 @@ fn binary_search_json_has_the_contract_fields() {
     write_home_transcript(
         home.path(),
         "abc-123",
-        &simple_conversation("find this marker", "ok"),
+        &[
+            user_line("u1", None, "find this marker"),
+            assistant_line("a1", Some("u1"), "ok"),
+            user_line("u2", Some("a1"), "the last prompt\nsecond line"),
+        ],
     );
     let out = run_binary(home.path(), &["search", "marker", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -705,6 +917,29 @@ fn binary_search_json_has_the_contract_fields() {
     assert!(conv["title"].is_string());
     assert!(conv["updated_at"].is_i64());
     assert_eq!(conv["live"], false);
+    // §4.4: head (first line) of the LAST human utterance.
+    assert_eq!(conv["last_prompt"], "the last prompt");
+}
+
+#[test]
+fn binary_search_json_last_prompt_is_null_without_a_human_utterance() {
+    let home = tempfile::tempdir().unwrap();
+    write_home_transcript(
+        home.path(),
+        "no-prompt",
+        &[
+            r#"{"type":"ai-title","aiTitle":"Only a title","sessionId":"no-prompt"}"#.to_string(),
+            assistant_line("a1", None, "an answer without any prompt"),
+        ],
+    );
+    let out = run_binary(home.path(), &["search", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+    let conv = &v["conversations"][0];
+    assert_eq!(conv["session_id"], "no-prompt");
+    // Present as an explicit null, not omitted (§4.4: null-allowed field).
+    assert!(conv.as_object().unwrap().contains_key("last_prompt"));
+    assert!(conv["last_prompt"].is_null());
 }
 
 #[test]
@@ -771,10 +1006,23 @@ fn binary_index_json_streams_events() {
         .collect();
     assert_eq!(events.first().unwrap()["event"], "start");
     assert_eq!(events.first().unwrap()["total"], 1);
+    // First build ever = full build (§4.4).
+    assert_eq!(events.first().unwrap()["full_build"], true);
     let last = events.last().unwrap();
     assert_eq!(last["event"], "done");
     assert_eq!(last["indexed"], 1);
     assert_eq!(last["removed"], 0);
+
+    // A second run with a new transcript is an incremental catch-up: the
+    // start line carries full_build false even with a non-zero total.
+    write_home_transcript(home.path(), "def-456", &simple_conversation("again", "ok"));
+    let out = run_binary(home.path(), &["index", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let first: serde_json::Value =
+        serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(first["event"], "start");
+    assert_eq!(first["total"], 1);
+    assert_eq!(first["full_build"], false);
 }
 
 #[test]

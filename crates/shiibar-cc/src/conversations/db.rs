@@ -23,7 +23,10 @@ use std::time::Duration;
 // 8.38(12) - NFD dakuten from IME input never matched the composed index;
 // the bump triggers the automatic full rebuild so every existing row gets
 // normalized regardless of how it was written).
-const SCHEMA_VERSION: i64 = 2;
+// v3: per-conversation `last_prompt` column (DESIGN.md 4.6 - head of the
+// last human utterance, surfaced as search's `last_prompt`, 4.4); the bump
+// rebuilds the index once so every existing row gets the new column.
+const SCHEMA_VERSION: i64 = 3;
 
 /// Explicit SQLite lock wait (DESIGN.md §4.6: never rely on the default).
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -32,7 +35,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// same term queries as the body; `show` filters it out.
 const META_ROLE: &str = "meta";
 
-/// One `search` result row (the five public fields of §4.4 come from
+/// One `search` result row (the six public fields of §4.4 come from
 /// here).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationRow {
@@ -41,6 +44,7 @@ pub struct ConversationRow {
     pub title: Option<String>,
     pub updated_at: i64,
     pub live: bool,
+    pub last_prompt: Option<String>,
 }
 
 /// One `show` result.
@@ -197,7 +201,8 @@ impl Db {
                  cwd        TEXT,
                  title      TEXT,
                  live       INTEGER NOT NULL DEFAULT 0,
-                 updated_at INTEGER NOT NULL
+                 updated_at INTEGER NOT NULL,
+                 last_prompt TEXT
              );
              CREATE VIRTUAL TABLE messages USING fts5(
                  text,
@@ -258,8 +263,8 @@ impl Db {
             params![session_id],
         )?;
         tx.execute(
-            "INSERT INTO conversations(session_id, path, mtime_ns, size, cwd, title, live, updated_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+            "INSERT INTO conversations(session_id, path, mtime_ns, size, cwd, title, live, updated_at, last_prompt)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
             params![
                 session_id,
                 path,
@@ -267,7 +272,8 @@ impl Db {
                 size,
                 extracted.cwd,
                 extracted.title,
-                updated_at
+                updated_at,
+                extracted.last_prompt
             ],
         )?;
         // Synthetic row: title + cwd share the body's search path (§4.6
@@ -312,19 +318,26 @@ impl Db {
         tx.commit()
     }
 
-    /// Reset the build progress rows (start of a catch-up).
-    pub fn reset_progress(&mut self, total: u64) -> rusqlite::Result<()> {
+    /// Reset the build progress rows (start of a catch-up). `full_build`
+    /// is recorded next to the counters so a relaying waiter reports the
+    /// builder's value in its own `start` event (DESIGN.md §4.4).
+    pub fn reset_progress(&mut self, total: u64, full_build: bool) -> rusqlite::Result<()> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         write_progress(&tx, 0, total)?;
+        tx.execute(
+            "INSERT INTO meta(key, value) VALUES('progress_full_build', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![if full_build { "1" } else { "0" }],
+        )?;
         tx.commit()
     }
 
     /// Build progress as recorded by the current lock holder, if the DB
     /// speaks the current schema version. Used by waiting `index`
     /// processes to relay progress (§4.4) — any failure reads as None.
-    pub fn read_progress(&self) -> Option<(u64, u64)> {
+    pub fn read_progress(&self) -> Option<BuildProgress> {
         let version: String = self
             .conn
             .query_row(
@@ -347,7 +360,13 @@ impl Db {
                 .parse()
                 .ok()
         };
-        Some((get("progress_done")?, get("progress_total")?))
+        Some(BuildProgress {
+            done: get("progress_done")?,
+            total: get("progress_total")?,
+            // A missing flag (no catch-up recorded one yet) reads as an
+            // incremental build.
+            full_build: get("progress_full_build") == Some(1),
+        })
     }
 
     /// Set the live flags: everything in `live` is 1, the rest 0 (§4.6).
@@ -368,7 +387,7 @@ impl Db {
     /// All conversations, newest first (browse).
     pub fn all_conversations(&self) -> rusqlite::Result<Vec<ConversationRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, cwd, title, updated_at, live FROM conversations
+            "SELECT session_id, cwd, title, updated_at, live, last_prompt FROM conversations
              ORDER BY updated_at DESC, session_id",
         )?;
         let rows = stmt.query_map([], row_to_conversation)?;
@@ -385,7 +404,7 @@ impl Db {
         }
         let placeholders = vec!["?"; ids.len()].join(",");
         let sql = format!(
-            "SELECT session_id, cwd, title, updated_at, live FROM conversations
+            "SELECT session_id, cwd, title, updated_at, live, last_prompt FROM conversations
              WHERE session_id IN ({placeholders})
              ORDER BY updated_at DESC, session_id"
         );
@@ -464,7 +483,16 @@ fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation
         title: row.get(2)?,
         updated_at: row.get(3)?,
         live: row.get::<_, i64>(4)? != 0,
+        last_prompt: row.get(5)?,
     })
+}
+
+/// Build progress recorded by the catch-up lock holder (§4.4 / §4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildProgress {
+    pub done: u64,
+    pub total: u64,
+    pub full_build: bool,
 }
 
 /// Progress rows travel inside the caller's transaction so they commit
@@ -581,6 +609,7 @@ mod tests {
                 role: crate::conversations::transcript::Role::Assistant,
                 text: text.to_string(),
             }],
+            last_prompt: None,
         };
         db.replace_conversation("s1", "/Users/example/demo/s1.jsonl", 1, 1, 1, &extracted, 1, 1)
             .unwrap();

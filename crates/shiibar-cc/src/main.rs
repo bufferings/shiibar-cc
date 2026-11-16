@@ -205,8 +205,13 @@ fn cmd_resume(args: &[String]) -> i32 {
         }
     };
     let runner = Osascript;
-    let report =
-        shiibar_cc::resume_cmd::run_resume(&parsed.cwd, &parsed.session_id, parsed.terminal, &runner);
+    let report = shiibar_cc::resume_cmd::run_resume(
+        &parsed.cwd,
+        &parsed.session_id,
+        parsed.terminal,
+        parsed.fork,
+        &runner,
+    );
     if let Some(m) = report.message {
         eprintln!("{m}");
     }

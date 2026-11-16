@@ -39,9 +39,21 @@ pub struct Deps {
 /// while relaying) — consumers always draw the latest line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProgressEvent {
-    Start { total: u64 },
-    Progress { done: u64, total: u64 },
-    Done { indexed: u64, removed: u64 },
+    /// `full_build`: this build is a full build (first build, schema
+    /// version rebuild, corruption recovery) rather than an incremental
+    /// catch-up (§4.4).
+    Start {
+        total: u64,
+        full_build: bool,
+    },
+    Progress {
+        done: u64,
+        total: u64,
+    },
+    Done {
+        indexed: u64,
+        removed: u64,
+    },
 }
 
 /// Emission throttle for progress events: every N files or every interval
@@ -61,8 +73,8 @@ pub fn run_index(deps: &Deps, emit: &mut dyn FnMut(ProgressEvent)) -> anyhow::Re
         Some(l) => l,
         None => wait_relaying_progress(&lock_path, &deps.db_path, emit)?,
     };
-    let (mut db, _full_build) = db::open_rw(&deps.db_path)?;
-    let outcome = catch_up(deps, &mut db, emit)?;
+    let (mut db, full_build) = db::open_rw(&deps.db_path)?;
+    let outcome = catch_up(deps, &mut db, full_build, emit)?;
     emit(ProgressEvent::Done {
         indexed: outcome.indexed,
         removed: outcome.removed,
@@ -110,7 +122,7 @@ pub fn run_search(
     if full_build {
         on_full_build();
     }
-    catch_up(deps, &mut db, &mut |_| {})?;
+    catch_up(deps, &mut db, full_build, &mut |_| {})?;
 
     if terms.is_empty() {
         return Ok(db.all_conversations()?);
@@ -267,9 +279,11 @@ struct CatchUpOutcome {
 /// The catch-up (§4.6): stat sweep -> full re-read of changed files with
 /// wholesale row replacement (one commit per conversation) -> removal of
 /// vanished files -> live/past flag update. Caller must hold the flock.
+/// `full_build` is what `db::open_rw` reported for this open.
 fn catch_up(
     deps: &Deps,
     db: &mut db::Db,
+    full_build: bool,
     emit: &mut dyn FnMut(ProgressEvent),
 ) -> anyhow::Result<CatchUpOutcome> {
     let swept = sweep(&deps.projects_dir)?;
@@ -294,8 +308,8 @@ fn catch_up(
         .collect();
 
     let total = changed.len() as u64;
-    db.reset_progress(total)?;
-    emit(ProgressEvent::Start { total });
+    db.reset_progress(total, full_build)?;
+    emit(ProgressEvent::Start { total, full_build });
 
     let mut throttle_mark = Instant::now();
     let mut last_emitted_done: u64 = 0;
@@ -354,20 +368,27 @@ fn wait_relaying_progress(
     std::thread::spawn(move || {
         let _ = tx.send(lock::acquire_blocking(&lock_path));
     });
-    let mut last: Option<(u64, u64)> = None;
+    let mut last: Option<db::BuildProgress> = None;
     loop {
         match rx.recv_timeout(RELAY_POLL_INTERVAL) {
             Ok(result) => return Ok(result?),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let Some((done, total)) = read_progress_best_effort(db_path) else {
+                let Some(now) = read_progress_best_effort(db_path) else {
                     continue;
                 };
-                if last.map(|(_, t)| t) != Some(total) {
-                    emit(ProgressEvent::Start { total });
+                let db::BuildProgress {
+                    done,
+                    total,
+                    full_build,
+                } = now;
+                // A new total or a new build kind = a (new) builder's start;
+                // the relayed start carries the builder's flag (§4.4).
+                if last.map(|p| (p.total, p.full_build)) != Some((total, full_build)) {
+                    emit(ProgressEvent::Start { total, full_build });
                 }
-                if last != Some((done, total)) {
+                if last != Some(now) {
                     emit(ProgressEvent::Progress { done, total });
-                    last = Some((done, total));
+                    last = Some(now);
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -377,7 +398,7 @@ fn wait_relaying_progress(
     }
 }
 
-fn read_progress_best_effort(db_path: &Path) -> Option<(u64, u64)> {
+fn read_progress_best_effort(db_path: &Path) -> Option<db::BuildProgress> {
     db::open_ro(db_path).ok()?.read_progress()
 }
 

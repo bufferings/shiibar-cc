@@ -191,8 +191,8 @@ end if
 /// `escape_shell_single_quoted` — the double escaping the task brief flags
 /// (AppleScript string quoting, then shell quoting inside that string).
 /// Prints `OK` as the last line of stdout on success.
-pub fn build_resume_script(cwd: &str, session_id: &str) -> String {
-    let shell_command = build_resume_shell_command(cwd, session_id);
+pub fn build_resume_script(cwd: &str, session_id: &str, fork: bool) -> String {
+    let shell_command = build_resume_shell_command(cwd, session_id, fork);
     let escaped_command = escape_as_string_literal(&shell_command);
     format!(
         r#"tell application "iTerm2"
@@ -313,18 +313,20 @@ pub fn probe(runner: &dyn AppleScriptRunner) -> TerminalResult<ProbeOutcome> {
     parse_probe_output(&output)
 }
 
-/// `open_resume_window(cwd, session_id)` (DESIGN.md §4.3): open a new
+/// `open_resume_window(cwd, session_id, fork)` (DESIGN.md §4.3): open a new
 /// iTerm2 window and run `claude --resume <session_id>` there, `cd`-ed into
-/// `cwd`. Called by `shiibar-cc resume` (§4.4), which is what Conversations'
-/// Resume button shells out to (§4.6). `cwd` and `session_id` are taken as
+/// `cwd` (with `--fork-session` appended when `fork` is true — §4.4). Called
+/// by `shiibar-cc resume` (§4.4), which is what Conversations' Resume and
+/// Branch buttons shell out to (§4.6). `cwd` and `session_id` are taken as
 /// given and escaped, not validated — `shiibar-cc resume` is responsible for
 /// checking `cwd` is an absolute, existing directory before this is called.
 pub fn open_resume_window(
     cwd: &str,
     session_id: &str,
+    fork: bool,
     runner: &dyn AppleScriptRunner,
 ) -> TerminalResult<()> {
-    let script = build_resume_script(cwd, session_id);
+    let script = build_resume_script(cwd, session_id, fork);
     let output = runner
         .run(&script)
         .map_err(|e| TerminalError::Other(e.to_string()))?;
@@ -610,7 +612,7 @@ mod tests {
     fn resume_script_launches_iterm2_without_a_running_guard() {
         // Unlike build_focus_script, this must NOT gate on "is running" —
         // open_resume_window is expected to launch iTerm2 (DESIGN.md §4.3).
-        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
         assert!(!script.contains("is running"));
         assert!(script.contains(r#"tell application "iTerm2""#));
         assert!(script.contains("create window"));
@@ -618,7 +620,7 @@ mod tests {
 
     #[test]
     fn resume_script_contains_the_cd_and_resume_command() {
-        let script = build_resume_script("/Users/example/project", "SESSION-1");
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
         assert!(script.contains("cd '/Users/example/project'"));
         assert!(script.contains("claude --resume 'SESSION-1'"));
         assert!(script.contains("write text"));
@@ -632,7 +634,8 @@ mod tests {
         // escaping inside a shell single-quoted string), then AppleScript
         // string-literal escaping on top of that (task brief T1: "double
         // escaping") — which is what turns the embedded `"` into `\"`.
-        let script = build_resume_script(r#"/Users/example/My "great" project"#, "SESSION-1");
+        let script =
+            build_resume_script(r#"/Users/example/My "great" project"#, "SESSION-1", false);
         assert!(script.contains(r#"cd '/Users/example/My \"great\" project'"#));
     }
 
@@ -642,7 +645,7 @@ mod tests {
         // quote, reopen quote). AppleScript layer then doubles that
         // sequence's one backslash into two, since the shell-escaped text
         // is itself embedded as an AppleScript string literal.
-        let script = build_resume_script("/Users/example/O'Brien", "SESSION-1");
+        let script = build_resume_script("/Users/example/O'Brien", "SESSION-1", false);
         assert!(script.contains(r#"cd '/Users/example/O'\\''Brien'"#));
     }
 
@@ -650,8 +653,31 @@ mod tests {
     fn resume_script_escapes_a_session_id_needing_shell_escaping() {
         // session_id is expected to be a UUID, but is escaped rather than
         // trusted (task brief T1). Same double-escaping as the cwd case.
-        let script = build_resume_script("/Users/example/project", "weird'id");
+        let script = build_resume_script("/Users/example/project", "weird'id", false);
         assert!(script.contains(r#"claude --resume 'weird'\\''id'"#));
+    }
+
+    #[test]
+    fn resume_script_without_fork_has_no_fork_session_flag() {
+        let script = build_resume_script("/Users/example/project", "SESSION-1", false);
+        assert!(!script.contains("--fork-session"));
+    }
+
+    #[test]
+    fn resume_script_with_fork_appends_fork_session_at_the_end_of_the_command() {
+        // §4.4: `--fork-session` is the last token of the typed command.
+        let script = build_resume_script("/Users/example/project", "SESSION-1", true);
+        assert!(script.contains(
+            r#"write text "cd '/Users/example/project' && claude --resume 'SESSION-1' --fork-session""#
+        ));
+    }
+
+    #[test]
+    fn resume_script_with_fork_keeps_the_existing_double_escaping() {
+        let script = build_resume_script("/Users/example/O'Brien", "weird'id", true);
+        assert!(script.contains(
+            r#"cd '/Users/example/O'\\''Brien' && claude --resume 'weird'\\''id' --fork-session""#
+        ));
     }
 
     // ---- parse_resume_output ----
@@ -850,7 +876,7 @@ mod tests {
             output: out(true, "OK\n", ""),
         };
         assert_eq!(
-            open_resume_window("/Users/example/project", "SESSION-1", &runner),
+            open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
             Ok(())
         );
     }
@@ -865,7 +891,7 @@ mod tests {
             ),
         };
         assert_eq!(
-            open_resume_window("/Users/example/project", "SESSION-1", &runner),
+            open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
             Err(TerminalError::PermissionDenied)
         );
     }

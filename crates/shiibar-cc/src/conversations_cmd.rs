@@ -13,7 +13,7 @@ use crate::exitcode;
 use serde::Serialize;
 use std::io::Write;
 
-/// §4.4: `{"conversations":[{"session_id","cwd","title","updated_at","live"}]}`.
+/// §4.4: `{"conversations":[{"session_id","cwd","title","updated_at","live","last_prompt"}]}`.
 #[derive(Serialize)]
 struct SearchJson<'a> {
     conversations: Vec<ConversationJson<'a>>,
@@ -26,6 +26,8 @@ struct ConversationJson<'a> {
     title: Option<&'a str>,
     updated_at: i64,
     live: bool,
+    /// Head of the last human utterance; null when there is none (§4.4).
+    last_prompt: Option<&'a str>,
 }
 
 /// §4.4: `{"session_id","cwd","title","messages":[{"seq","role","text"}]}`.
@@ -48,7 +50,7 @@ struct MessageJson<'a> {
 #[derive(Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 enum IndexEventJson {
-    Start { total: u64 },
+    Start { total: u64, full_build: bool },
     Progress { done: u64, total: u64 },
     Done { indexed: u64, removed: u64 },
     Error { message: String },
@@ -67,7 +69,9 @@ pub fn run_index(deps: &Deps, json: bool, out: &mut dyn Write, err: &mut dyn Wri
     let result = conversations::run_index(deps, &mut |event| {
         if json {
             let e = match event {
-                ProgressEvent::Start { total } => IndexEventJson::Start { total },
+                ProgressEvent::Start { total, full_build } => {
+                    IndexEventJson::Start { total, full_build }
+                }
                 ProgressEvent::Progress { done, total } => IndexEventJson::Progress { done, total },
                 ProgressEvent::Done { indexed, removed } => {
                     IndexEventJson::Done { indexed, removed }
@@ -136,6 +140,7 @@ pub fn run_search(
                     title: r.title.as_deref(),
                     updated_at: r.updated_at,
                     live: r.live,
+                    last_prompt: r.last_prompt.as_deref(),
                 })
                 .collect(),
         };

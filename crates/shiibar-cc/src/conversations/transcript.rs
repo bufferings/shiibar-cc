@@ -52,12 +52,17 @@ pub struct Extracted {
     pub title: Option<String>,
     pub cwd: Option<String>,
     pub messages: Vec<Message>,
+    /// Head of the LAST user utterance on the active path (first line,
+    /// trimmed, same truncation as the title fallback); None when the
+    /// conversation has no human utterance (DESIGN.md §4.6; search's
+    /// `last_prompt`, §4.4).
+    pub last_prompt: Option<String>,
 }
 
-/// Head of the first user prompt used as the title fallback: first line,
-/// at most this many characters (mirrors §9's task truncation length; the
-/// spec fixes no constant for this fallback, see the M34 report).
-const TITLE_FALLBACK_MAX_CHARS: usize = 80;
+/// Head of a user prompt (the title fallback and `last_prompt`): first
+/// line, at most this many characters (same value as §9's task truncation
+/// length, DESIGN.md §4.4/§4.6).
+const PROMPT_HEAD_MAX_CHARS: usize = 80;
 
 /// User lines whose (string) content starts with one of these tags are
 /// machinery, not human utterances: automatic wake-ups and slash-command
@@ -202,11 +207,13 @@ pub fn extract(content: &str) -> Extracted {
     let title = last_custom_title
         .or(last_ai_title)
         .or_else(|| first_prompt_title(&messages));
+    let last_prompt = last_prompt(&messages);
 
     Extracted {
         title,
         cwd,
         messages,
+        last_prompt,
     }
 }
 
@@ -214,11 +221,26 @@ pub fn extract(content: &str) -> Extracted {
 /// utterance on the active path.
 fn first_prompt_title(messages: &[Message]) -> Option<String> {
     let first = messages.iter().find(|m| m.role == Role::User)?;
-    let head = first.text.trim().lines().next()?.trim();
+    prompt_head(&first.text)
+}
+
+/// `last_prompt`: head (first line, truncated) of the last user utterance
+/// on the active path (DESIGN.md §4.6). Works on the already-filtered
+/// utterance sequence, so machinery lines excluded from it are never
+/// candidates.
+fn last_prompt(messages: &[Message]) -> Option<String> {
+    let last = messages.iter().rev().find(|m| m.role == Role::User)?;
+    prompt_head(&last.text)
+}
+
+/// First line of `text`, trimmed, truncated to `PROMPT_HEAD_MAX_CHARS`
+/// characters. None when that line is empty.
+fn prompt_head(text: &str) -> Option<String> {
+    let head = text.trim().lines().next()?.trim();
     if head.is_empty() {
         return None;
     }
-    Some(head.chars().take(TITLE_FALLBACK_MAX_CHARS).collect())
+    Some(head.chars().take(PROMPT_HEAD_MAX_CHARS).collect())
 }
 
 /// Extract the human utterance from a `user` line, or `None` when the line
@@ -582,5 +604,127 @@ mod tests {
         assert_eq!(e.messages, vec![]);
         assert_eq!(e.title, None);
         assert_eq!(e.cwd, None);
+        assert_eq!(e.last_prompt, None);
+    }
+
+    // ---- last_prompt (DESIGN.md §4.6) ----
+
+    #[test]
+    fn last_prompt_is_the_last_user_utterance_not_the_first() {
+        let content = [
+            user_line("u1", None, "first question"),
+            assistant_text_line("a1", Some("u1"), "first answer"),
+            user_line("u2", Some("a1"), "second question"),
+            assistant_text_line("a2", Some("u2"), "second answer"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert_eq!(e.last_prompt.as_deref(), Some("second question"));
+        // The title fallback still uses the first prompt.
+        assert_eq!(e.title.as_deref(), Some("first question"));
+    }
+
+    #[test]
+    fn last_prompt_keeps_only_the_first_line_trimmed() {
+        let content = [user_line(
+            "u1",
+            None,
+            "\n   head line with padding   \nsecond line\nthird line",
+        )]
+        .join("\n");
+        assert_eq!(
+            extract(&content).last_prompt.as_deref(),
+            Some("head line with padding")
+        );
+    }
+
+    #[test]
+    fn last_prompt_truncates_a_long_line_to_80_characters() {
+        // Counted in characters, not bytes (multi-byte text must not split).
+        let long_line = "\u{3042}".repeat(120);
+        let content = [user_line("u1", None, &format!("{long_line}\nsecond line"))].join("\n");
+        assert_eq!(
+            extract(&content).last_prompt.unwrap(),
+            "\u{3042}".repeat(80)
+        );
+    }
+
+    #[test]
+    fn last_prompt_of_exactly_80_characters_is_kept_whole() {
+        let line = "y".repeat(80);
+        let content = [user_line("u1", None, &line)].join("\n");
+        assert_eq!(extract(&content).last_prompt.unwrap(), line);
+    }
+
+    #[test]
+    fn last_prompt_is_null_without_any_user_utterance() {
+        let tool_result = r#"{"type":"user","uuid":"tr","parentUuid":null,"isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}"#;
+        let content = [
+            tool_result.to_string(),
+            assistant_text_line("a1", Some("tr"), "an answer with no human prompt"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert_eq!(e.last_prompt, None);
+        assert_eq!(e.messages.len(), 1);
+    }
+
+    #[test]
+    fn last_prompt_is_null_for_a_title_only_file() {
+        let content = r#"{"type":"ai-title","aiTitle":"A title","sessionId":"s"}"#;
+        let e = extract(content);
+        assert_eq!(e.title.as_deref(), Some("A title"));
+        assert_eq!(e.last_prompt, None);
+    }
+
+    #[test]
+    fn last_prompt_skips_excluded_user_lines_after_the_last_real_prompt() {
+        // Every machinery kind the utterance extraction drops, appended
+        // AFTER the last real prompt: none of them may become last_prompt.
+        let tool_result = r#"{"type":"user","uuid":"tr","parentUuid":"a1","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file contents"}]}}"#;
+        let task_notification = r#"{"type":"user","uuid":"tn","parentUuid":"tr","isSidechain":false,"message":{"role":"user","content":"<task-notification>agent finished</task-notification>"}}"#;
+        let command = r#"{"type":"user","uuid":"cn","parentUuid":"tn","isSidechain":false,"message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#;
+        let command_message = r#"{"type":"user","uuid":"cm","parentUuid":"cn","isSidechain":false,"message":{"role":"user","content":"<command-message>clear</command-message>"}}"#;
+        let command_stdout = r#"{"type":"user","uuid":"cs","parentUuid":"cm","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>output</local-command-stdout>"}}"#;
+        let command_caveat = r#"{"type":"user","uuid":"cc","parentUuid":"cs","isSidechain":false,"message":{"role":"user","content":"<local-command-caveat>caveat</local-command-caveat>"}}"#;
+        let meta_injected = r#"{"type":"user","uuid":"mi","parentUuid":"cc","isSidechain":false,"isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /Users/example/skill"}]}}"#;
+        let empty = r#"{"type":"user","uuid":"em","parentUuid":"mi","isSidechain":false,"message":{"role":"user","content":"   "}}"#;
+        let content = [
+            user_line("u1", None, "the real last prompt"),
+            assistant_text_line("a1", Some("u1"), "real answer"),
+            tool_result.to_string(),
+            task_notification.to_string(),
+            command.to_string(),
+            command_message.to_string(),
+            command_stdout.to_string(),
+            command_caveat.to_string(),
+            meta_injected.to_string(),
+            empty.to_string(),
+            assistant_text_line("a2", Some("em"), "trailing answer"),
+        ]
+        .join("\n");
+        assert_eq!(
+            extract(&content).last_prompt.as_deref(),
+            Some("the real last prompt")
+        );
+    }
+
+    #[test]
+    fn last_prompt_ignores_sidechain_and_rewound_branches() {
+        // Off-path prompts (a rewound branch, a sidechain) are not in the
+        // utterance sequence, so they cannot be last_prompt either.
+        let sidechain = r#"{"type":"user","uuid":"sc","parentUuid":"a1","isSidechain":true,"message":{"role":"user","content":"sidechain prompt"}}"#;
+        let content = [
+            user_line("u1", None, "root prompt"),
+            assistant_text_line("a1", Some("u1"), "answer"),
+            user_line("old", Some("a1"), "rewound prompt"),
+            user_line("new", Some("a1"), "kept prompt"),
+            sidechain.to_string(),
+        ]
+        .join("\n");
+        assert_eq!(
+            extract(&content).last_prompt.as_deref(),
+            Some("kept prompt")
+        );
     }
 }

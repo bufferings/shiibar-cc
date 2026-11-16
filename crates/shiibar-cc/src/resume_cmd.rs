@@ -1,7 +1,10 @@
-//! `shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal]
+//! `shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] [--fork]
 //! <session-id>` (DESIGN.md §4.3/§4.4): open a new terminal window and resume
-//! a past conversation there. Called by the Conversations window's Resume
-//! button (§4.6), and usable standalone from a script. Unlike
+//! a past conversation there. With `--fork`, the command run in the terminal
+//! gets `--fork-session` appended, so the conversation continues as a copy
+//! under a new session ID and the original is left unchanged (§4.4/§7-6);
+//! nothing else differs. Called by the app's Resume action, and by its Branch
+//! action with `--fork` (§4.6), and usable standalone from a script. Unlike
 //! `focus`/`seen`/`remove`, this does NOT connect to the daemon and does NOT
 //! resolve a selector — `cwd`, `session_id`, and the terminal are taken as
 //! the caller's explicit, exact values (§4.4: resume makes no decisions of
@@ -33,7 +36,7 @@ fn err(code: i32, msg: impl Into<String>) -> ResumeReport {
     }
 }
 
-/// Parsed `--cwd <dir> [--terminal <t>] <session-id>` arguments. Pure token
+/// Parsed `--cwd <dir> [--terminal <t>] [--fork] <session-id>` arguments. Pure token
 /// parsing only — no filesystem access here (that's `run_resume`'s job, so
 /// the "cwd must be absolute and exist" check, DESIGN.md §4.4, can be tested
 /// without touching a real directory for the parsing half).
@@ -44,16 +47,19 @@ pub struct ResumeArgs {
     /// Which terminal to open in (§4.4). Defaults to `iterm2` when
     /// `--terminal` is omitted.
     pub terminal: TerminalKind,
+    /// `--fork` (§4.4): append `--fork-session` to the resume command.
+    pub fork: bool,
 }
 
 const USAGE: &str =
-    "usage: shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] <session-id>";
+    "usage: shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] [--fork] <session-id>";
 
 pub fn parse_resume_args(args: &[String]) -> Result<ResumeArgs, String> {
     let mut cwd: Option<PathBuf> = None;
     let mut session_id: Option<String> = None;
     // §4.4: `--terminal` defaults to iterm2 when omitted.
     let mut terminal = TerminalKind::Iterm2;
+    let mut fork = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -73,6 +79,7 @@ pub fn parse_resume_args(args: &[String]) -> Result<ResumeArgs, String> {
                     )
                 })?;
             }
+            "--fork" => fork = true,
             other if session_id.is_none() => session_id = Some(other.to_string()),
             other => {
                 return Err(format!("shiibar-cc resume: unexpected argument '{other}'"));
@@ -90,17 +97,20 @@ pub fn parse_resume_args(args: &[String]) -> Result<ResumeArgs, String> {
         cwd,
         session_id,
         terminal,
+        fork,
     })
 }
 
 /// `resume` (§4.4): validate `cwd` (absolute + exists — before touching
 /// AppleScript at all, since a transcript can outlive the folder it was
 /// recorded in, §4.4), then open a new window in `terminal` there running
-/// `claude --resume <session_id>`.
+/// `claude --resume <session_id>` (plus `--fork-session` when `fork` is
+/// true — the only difference, §4.4).
 pub fn run_resume(
     cwd: &Path,
     session_id: &str,
     terminal: TerminalKind,
+    fork: bool,
     runner: &dyn AppleScriptRunner,
 ) -> ResumeReport {
     if !cwd.is_absolute() {
@@ -125,7 +135,7 @@ pub fn run_resume(
         );
     };
 
-    match open_resume_window(terminal, cwd_str, session_id, runner) {
+    match open_resume_window(terminal, cwd_str, session_id, fork, runner) {
         Ok(()) => ok(),
         Err(TerminalError::PermissionDenied) => err(
             exitcode::TCC_DENIED,
@@ -216,6 +226,68 @@ mod tests {
     }
 
     #[test]
+    fn fork_defaults_to_false_when_omitted() {
+        let parsed = parse_resume_args(&args(&["--cwd", "/tmp/proj", "S"])).unwrap();
+        assert!(!parsed.fork);
+    }
+
+    #[test]
+    fn parses_fork_after_the_session_id() {
+        let parsed = parse_resume_args(&args(&["--cwd", "/tmp/proj", "S", "--fork"])).unwrap();
+        assert!(parsed.fork);
+        assert_eq!(parsed.session_id, "S");
+        assert_eq!(parsed.cwd, PathBuf::from("/tmp/proj"));
+    }
+
+    #[test]
+    fn parses_fork_first_before_every_other_argument() {
+        let parsed = parse_resume_args(&args(&[
+            "--fork",
+            "--terminal",
+            "apple-terminal",
+            "--cwd",
+            "/tmp/proj",
+            "S",
+        ]))
+        .unwrap();
+        assert!(parsed.fork);
+        assert_eq!(parsed.terminal, TerminalKind::AppleTerminal);
+        assert_eq!(parsed.session_id, "S");
+        assert_eq!(parsed.cwd, PathBuf::from("/tmp/proj"));
+    }
+
+    #[test]
+    fn parses_fork_between_other_options() {
+        let parsed = parse_resume_args(&args(&[
+            "--cwd",
+            "/tmp/proj",
+            "--fork",
+            "--terminal",
+            "iterm2",
+            "S",
+        ]))
+        .unwrap();
+        assert!(parsed.fork);
+        assert_eq!(parsed.terminal, TerminalKind::Iterm2);
+        assert_eq!(parsed.session_id, "S");
+    }
+
+    #[test]
+    fn fork_does_not_consume_the_following_token() {
+        // `--fork` takes no value: the next token is still the session id.
+        let parsed = parse_resume_args(&args(&["--fork", "S", "--cwd", "/tmp/proj"])).unwrap();
+        assert!(parsed.fork);
+        assert_eq!(parsed.session_id, "S");
+    }
+
+    #[test]
+    fn fork_alone_still_requires_cwd_and_session_id() {
+        assert!(parse_resume_args(&args(&["--fork"])).is_err());
+        assert!(parse_resume_args(&args(&["--fork", "S"])).is_err());
+        assert!(parse_resume_args(&args(&["--fork", "--cwd", "/tmp/proj"])).is_err());
+    }
+
+    #[test]
     fn missing_cwd_is_an_error() {
         assert!(parse_resume_args(&args(&["SESSION-1"])).is_err());
     }
@@ -250,7 +322,13 @@ mod tests {
                 panic!("osascript must not run for a relative --cwd");
             }
         }
-        let report = run_resume(Path::new("relative/path"), "SESSION-1", TerminalKind::Iterm2, &PanicRunner);
+        let report = run_resume(
+            Path::new("relative/path"),
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            false,
+            &PanicRunner,
+        );
         assert_eq!(report.exit_code, exitcode::ERROR);
         assert!(report.message.is_some());
     }
@@ -265,7 +343,13 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
-        let report = run_resume(&missing, "SESSION-1", TerminalKind::Iterm2, &PanicRunner);
+        let report = run_resume(
+            &missing,
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            false,
+            &PanicRunner,
+        );
         assert_eq!(report.exit_code, exitcode::ERROR);
         assert!(report.message.is_some());
     }
@@ -278,8 +362,19 @@ mod tests {
         let runner = ScriptedRunner {
             output: out(true, "OK\n", ""),
         };
-        let report = run_resume(dir.path(), "SESSION-1", TerminalKind::Iterm2, &runner);
-        assert_eq!(report.exit_code, exitcode::OK, "message={:?}", report.message);
+        let report = run_resume(
+            dir.path(),
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            false,
+            &runner,
+        );
+        assert_eq!(
+            report.exit_code,
+            exitcode::OK,
+            "message={:?}",
+            report.message
+        );
     }
 
     #[test]
@@ -292,7 +387,110 @@ mod tests {
                 "Not authorized to send Apple events to iTerm2. (-1743)",
             ),
         };
-        let report = run_resume(dir.path(), "SESSION-1", TerminalKind::Iterm2, &runner);
+        let report = run_resume(
+            dir.path(),
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            false,
+            &runner,
+        );
+        assert_eq!(report.exit_code, exitcode::TCC_DENIED);
+    }
+
+    /// Records the script it was asked to run, so a test can check the
+    /// command line that would be typed into the new window.
+    struct CapturingRunner {
+        scripts: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl CapturingRunner {
+        fn new() -> Self {
+            CapturingRunner {
+                scripts: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AppleScriptRunner for CapturingRunner {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            self.scripts.borrow_mut().push(script.to_string());
+            Ok(out(true, "OK\n", ""))
+        }
+    }
+
+    #[test]
+    fn fork_appends_fork_session_in_both_terminals() {
+        for terminal in [TerminalKind::Iterm2, TerminalKind::AppleTerminal] {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = CapturingRunner::new();
+            let report = run_resume(dir.path(), "SESSION-1", terminal, true, &runner);
+            assert_eq!(
+                report.exit_code,
+                exitcode::OK,
+                "message={:?}",
+                report.message
+            );
+            let scripts = runner.scripts.borrow();
+            assert_eq!(scripts.len(), 1);
+            assert!(
+                scripts[0].contains("claude --resume 'SESSION-1' --fork-session\""),
+                "{terminal:?}: {}",
+                scripts[0]
+            );
+        }
+    }
+
+    #[test]
+    fn no_fork_omits_fork_session_in_both_terminals() {
+        for terminal in [TerminalKind::Iterm2, TerminalKind::AppleTerminal] {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = CapturingRunner::new();
+            let report = run_resume(dir.path(), "SESSION-1", terminal, false, &runner);
+            assert_eq!(
+                report.exit_code,
+                exitcode::OK,
+                "message={:?}",
+                report.message
+            );
+            let scripts = runner.scripts.borrow();
+            assert_eq!(scripts.len(), 1);
+            assert!(scripts[0].contains("claude --resume 'SESSION-1'\""));
+            assert!(!scripts[0].contains("--fork-session"));
+        }
+    }
+
+    #[test]
+    fn fork_with_a_relative_cwd_is_still_exit_1_without_osascript() {
+        // §4.4: --fork changes nothing about the cwd check.
+        let runner = CapturingRunner::new();
+        let report = run_resume(
+            Path::new("relative/path"),
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            true,
+            &runner,
+        );
+        assert_eq!(report.exit_code, exitcode::ERROR);
+        assert!(runner.scripts.borrow().is_empty());
+    }
+
+    #[test]
+    fn fork_tcc_denied_is_still_exit_3() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = ScriptedRunner {
+            output: out(
+                false,
+                "",
+                "Not authorized to send Apple events to Terminal. (-1743)",
+            ),
+        };
+        let report = run_resume(
+            dir.path(),
+            "SESSION-1",
+            TerminalKind::AppleTerminal,
+            true,
+            &runner,
+        );
         assert_eq!(report.exit_code, exitcode::TCC_DENIED);
     }
 
@@ -302,7 +500,13 @@ mod tests {
         let runner = ScriptedRunner {
             output: out(false, "", "some other osascript error"),
         };
-        let report = run_resume(dir.path(), "SESSION-1", TerminalKind::Iterm2, &runner);
+        let report = run_resume(
+            dir.path(),
+            "SESSION-1",
+            TerminalKind::Iterm2,
+            false,
+            &runner,
+        );
         assert_eq!(report.exit_code, exitcode::ERROR);
     }
 }
