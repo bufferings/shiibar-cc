@@ -17,6 +17,7 @@ struct ConversationPaneView: View {
     @ObservedObject var model: MainSurfaceModel
     let pane: ConversationPaneModel
     let surface: MainSurface
+    @Environment(\.surfaceScale) private var scale
 
     /// One column (the detail page) vs the two-column right column.
     private var isDetailPage: Bool { pane.showsBackButton }
@@ -56,13 +57,14 @@ struct ConversationPaneView: View {
                 .foregroundStyle(SurfaceColors.secondary)
                 .help(ConversationPaneModel.backTooltip)
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: scale.paneTitleSpacing) {
                 Text(pane.title)
-                    .font(.system(size: isDetailPage ? 13.5 : 15, weight: .semibold))
+                    .font(.system(size: isDetailPage ? scale.paneTitleDetailFont : scale.paneTitleColumnFont,
+                                  weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(pane.subtitle)
-                    .font(.system(size: 11))
+                    .font(.system(size: scale.paneSubtitleFont))
                     .foregroundStyle(SurfaceColors.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -71,7 +73,7 @@ struct ConversationPaneView: View {
             if pane.showsBackButton {
                 if let position = pane.positionText {
                     Text(position)
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(.system(size: scale.panePositionFont).monospacedDigit())
                         .foregroundStyle(SurfaceColors.secondary)
                 }
                 ConversationStepper(
@@ -85,18 +87,19 @@ struct ConversationPaneView: View {
         .padding(.leading, isDetailPage ? 10 : 16)
         .padding(.trailing, 10)
         .padding(.top, headerTopPadding)
-        .padding(.bottom, 8)
+        .padding(.bottom, scale.paneHeaderBottom)
         .background(surface == .window ? WindowDragArea() : nil)
     }
 
-    /// `.hdr` 9pt (`.hdr.pad` 11pt in two columns). In the window's detail
-    /// page the header shares the traffic lights' vertical center (§4.5).
+    /// `.hdr` 9pt (`.hdr.pad` 11pt in two columns) at text size 13. In the
+    /// window the header keeps its vertical center at any text size: on the
+    /// traffic lights on the detail page, level with the list column's
+    /// header row in two columns (§4.5 "text size").
     private var headerTopPadding: CGFloat {
-        if isDetailPage && surface == .window {
-            // Title block ≈ 32pt tall, centered on the traffic lights.
-            return SurfaceMetrics.windowTrafficLightCenter - 16
+        if surface == .window {
+            return scale.windowPaneHeaderTop(isDetailPage: isDetailPage)
         }
-        return isDetailPage ? 9 : 11
+        return isDetailPage ? scale.paneHeaderTopDetail : scale.paneHeaderTopColumn
     }
 
     // MARK: Find bar (§4.6 "hit navigation")
@@ -131,9 +134,9 @@ struct ConversationPaneView: View {
                 Spacer(minLength: 0)
             }
         }
-        .font(.system(size: 11))
+        .font(.system(size: scale.findBarFont))
         .padding(.horizontal, 16)
-        .padding(.vertical, 5)
+        .padding(.vertical, scale.findBarVertical)
     }
 
     // MARK: Message surface
@@ -161,7 +164,7 @@ struct ConversationPaneView: View {
 
     private func centeredLine(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.system(size: scale.centeredLineFont))
             .foregroundStyle(SurfaceColors.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -174,11 +177,12 @@ struct ConversationPaneView: View {
 /// panel (the list page and the detail page — §4.5 "fixed footer").
 struct PanelStatusLinesView: View {
     @ObservedObject var model: MainSurfaceModel
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         StatusLinesView(model: model)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, model.warnings.isEmpty && model.messageText == nil ? 0 : 7)
+            .padding(.bottom, model.warnings.isEmpty && model.messageText == nil ? 0 : scale.panelStatusBottom)
     }
 }
 
@@ -187,10 +191,13 @@ struct PanelStatusLinesView: View {
 /// list page, the detail page and the two-column right column, so the
 /// buttons sit at the same position and size everywhere (§4.6). Without a
 /// selection the buttons are replaced by invisible placeholders of the same
-/// size: the panel height and the hints' width do not change.
+/// size: the panel height and the hints' width do not change. When the width
+/// runs short the buttons keep their size and the hints take what is left
+/// (§4.5 "text size").
 struct BottomPanelView: View {
     @ObservedObject var model: MainSurfaceModel
     let panel: BottomPanelModel
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -202,25 +209,29 @@ struct BottomPanelView: View {
                     KeyHintsView(hints: panel.hints)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let buttons = panel.buttons {
-                    PanelBranchButton(button: buttons.branch, showsShortcut: panel.showsShortcuts) {
-                        model.buttonClicked(buttons.branch)
+                Group {
+                    if let buttons = panel.buttons {
+                        PanelBranchButton(button: buttons.branch, showsShortcut: panel.showsShortcuts) {
+                            model.buttonClicked(buttons.branch)
+                        }
+                        PanelPrimaryButton(button: buttons.primary, showsShortcut: panel.showsShortcuts) {
+                            model.buttonClicked(buttons.primary)
+                        }
+                    } else {
+                        Group {
+                            PanelBranchButton(button: Self.placeholderBranch) {}
+                            PanelPrimaryButton(button: Self.placeholderPrimary) {}
+                        }
+                        .hidden()
+                        .accessibilityHidden(true)
                     }
-                    PanelPrimaryButton(button: buttons.primary, showsShortcut: panel.showsShortcuts) {
-                        model.buttonClicked(buttons.primary)
-                    }
-                } else {
-                    Group {
-                        PanelBranchButton(button: Self.placeholderBranch) {}
-                        PanelPrimaryButton(button: Self.placeholderPrimary) {}
-                    }
-                    .hidden()
-                    .accessibilityHidden(true)
                 }
+                .fixedSize()
+                .layoutPriority(1)
             }
             .padding(.horizontal, 12)
-            .padding(.top, 9)
-            .padding(.bottom, 10)
+            .padding(.top, scale.panelTop)
+            .padding(.bottom, scale.panelBottom)
         }
     }
 
@@ -235,11 +246,12 @@ private struct ConversationStepper: View {
     let canGoNext: Bool
     let onPrevious: () -> Void
     let onNext: () -> Void
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         HStack(spacing: 0) {
             segment(.chevronUp, enabled: canGoPrevious, tooltip: ConversationPaneModel.previousTooltip, action: onPrevious)
-            Rectangle().fill(SurfaceColors.line).frame(width: 1, height: 22)
+            Rectangle().fill(SurfaceColors.line).frame(width: 1, height: scale.stepperSegmentHeight)
             segment(.chevronDown, enabled: canGoNext, tooltip: ConversationPaneModel.nextTooltip, action: onNext)
         }
         .background(SurfaceColors.chip)
@@ -249,8 +261,8 @@ private struct ConversationStepper: View {
 
     private func segment(_ icon: SurfaceIcon, enabled: Bool, tooltip: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            SurfaceIconView(icon: icon, size: 13, lineWidth: 1.5)
-                .frame(width: 26, height: 22)
+            SurfaceIconView(icon: icon, size: scale.stepperIcon, lineWidth: scale.stepperIconLine)
+                .frame(width: scale.stepperSegmentWidth, height: scale.stepperSegmentHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(HoverChipButtonStyle(cornerRadius: 0, isEnabled: enabled))
@@ -326,6 +338,7 @@ private struct PanelPrimaryButton: View {
     var showsShortcut = true
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         Button(action: action) {
@@ -334,10 +347,10 @@ private struct PanelPrimaryButton: View {
                 PanelButtonLabel(kind: .resume).hidden()
                 PanelButtonLabel(kind: button.kind, showsShortcut: showsShortcut)
             }
-            .font(.system(size: 13, weight: .semibold))
-            .frame(minWidth: 84 - 28)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
+            .font(.system(size: scale.panelButtonFont, weight: .semibold))
+            .frame(minWidth: scale.primaryButtonMinWidth - 2 * Self.horizontalPadding)
+            .padding(.horizontal, Self.horizontalPadding)
+            .padding(.vertical, scale.primaryButtonVertical)
             .foregroundStyle(button.isEnabled ? Color.white : Color.gray.opacity(0.75))
             .background(
                 RoundedRectangle(cornerRadius: 6)
@@ -349,6 +362,9 @@ private struct PanelPrimaryButton: View {
         .disabled(!button.isEnabled)
         .help(button.tooltip)
     }
+
+    /// `.btn` horizontal padding (fixed; the minimum width includes it).
+    private static let horizontalPadding: CGFloat = 14
 }
 
 /// Branch (`.btn.sec`: outline only, content-sized, regular weight).
@@ -357,13 +373,14 @@ private struct PanelBranchButton: View {
     var showsShortcut = true
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         Button(action: action) {
             PanelButtonLabel(kind: button.kind, showsShortcut: showsShortcut)
-                .font(.system(size: 13))
+                .font(.system(size: scale.panelButtonFont))
                 .padding(.horizontal, 14)
-                .padding(.vertical, 4)
+                .padding(.vertical, scale.branchButtonVertical)
                 .foregroundStyle(button.isEnabled ? Color.primary : Color.gray.opacity(0.75))
                 .background(RoundedRectangle(cornerRadius: 6).fill(hovering && button.isEnabled ? Color.gray.opacity(0.12) : Color.clear))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(SurfaceColors.line, lineWidth: 1))

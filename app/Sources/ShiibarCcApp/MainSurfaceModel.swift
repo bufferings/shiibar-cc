@@ -204,7 +204,12 @@ final class MainSurfaceModel: ObservableObject {
     /// after its press (§4.5 "row double-click"). Injected for tests.
     private let doubleClickInterval: () -> TimeInterval
     private let uptime: () -> TimeInterval
-    private let textSize: ConversationsTextSizeStore
+    /// The text size of both surfaces (DESIGN.md §4.5 "text size"); the
+    /// roots observe it for the scale and the widths.
+    let textSize: TextSizeStore
+    /// The window's last reported content width: a text size change moves
+    /// the two-column threshold, so the column mode is decided again.
+    private var windowContentWidth: Double?
 
     // MARK: - Private pipeline state
 
@@ -229,7 +234,7 @@ final class MainSurfaceModel: ObservableObject {
     init(
         home: String?,
         defaults: UserDefaults,
-        textSize: ConversationsTextSizeStore,
+        textSize: TextSizeStore,
         launchers: ConversationsLaunchers = .live,
         runCommand: @escaping (_ arguments: [String], _ completion: @escaping @MainActor (Int32) -> Void) -> Void,
         resumeTerminal: @escaping () -> String = { ResumeTerminal.iterm2 },
@@ -256,9 +261,17 @@ final class MainSurfaceModel: ObservableObject {
             ?? WindowKeepOnTop.defaultEnabled
         textSize.$size
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] size in
-                guard let self, self.webPaneCreated else { return }
-                self.webPane.setTextSize(size)
+                guard let self else { return }
+                // A changed threshold follows the same rules as a changed
+                // width (§4.5 "text size" / "switching by width").
+                if let width = self.windowContentWidth {
+                    self.windowColumnsChanged(ColumnMode.forWindowWidth(width, textSize: size))
+                }
+                if self.webPaneCreated {
+                    self.webPane.setTextSize(Double(size.points))
+                }
             }
             .store(in: &subscriptions)
     }
@@ -277,7 +290,7 @@ final class MainSurfaceModel: ObservableObject {
             guard let self, let sessionID = self.list.selection?.sessionID, !sessionID.isEmpty else { return }
             self.scrollMemory[sessionID] = seq
         }
-        pane.setTextSize(textSize.size)
+        pane.setTextSize(Double(textSize.size.points))
         return pane
     }
 
@@ -338,6 +351,13 @@ final class MainSurfaceModel: ObservableObject {
         send(.surfaceHidden)
         clockTimer?.invalidate()
         clockTimer = nil
+    }
+
+    /// The window's content width changed (§4.5 "switching by width"): the
+    /// column mode for it at the current text size.
+    func windowWidthChanged(_ width: Double) {
+        windowContentWidth = width
+        windowColumnsChanged(ColumnMode.forWindowWidth(width, textSize: textSize.size))
     }
 
     /// The window's width class changed (§4.5 "switching by width").

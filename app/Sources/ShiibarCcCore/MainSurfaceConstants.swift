@@ -53,14 +53,11 @@ public enum ColumnMode: Equatable, Sendable {
     /// List column on the left, conversation pane on the right.
     case two
 
-    /// §9: the window shows two columns at or above this width.
-    public static let twoColumnMinimumWidth: Double = 880
-
     /// The column mode for a window content width (§4.5/§9: two columns at
-    /// 880pt or wider, one column below). The popover never calls this — it
-    /// is always `.one`.
-    public static func forWindowWidth(_ width: Double) -> ColumnMode {
-        width >= twoColumnMinimumWidth ? .two : .one
+    /// the list column width + 460pt or wider — 880pt at text size 13 — one
+    /// column below). The popover never calls this — it is always `.one`.
+    public static func forWindowWidth(_ width: Double, textSize: TextSize) -> ColumnMode {
+        width >= textSize.twoColumnMinimumWidth ? .two : .one
     }
 }
 
@@ -72,16 +69,13 @@ public enum MainWindowMetrics {
     /// §9: minimum window size.
     public static let minimumWidth: Double = 360
     public static let minimumHeight: Double = 300
-    /// §9: the list column's fixed width in two-column mode.
-    public static let listColumnWidth: Double = 420
     /// §9: page slide duration (ease-in-out) in one-column mode.
     public static let pageSlideSeconds: Double = 0.22
 }
 
-/// Popover size rules (§4.5 "popover", §9).
+/// Popover height rules (§4.5 "popover", §9). The width follows the text
+/// size (`TextSize.popoverWidth`); the heights below do not.
 public enum PopoverHeight {
-    /// §9: fixed popover width.
-    public static let width: Double = 420
     /// §9: first-open height, also the snap target while dragging.
     public static let initial: Double = 640
     /// §9: minimum height.

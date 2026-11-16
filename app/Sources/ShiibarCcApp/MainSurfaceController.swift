@@ -183,8 +183,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
 
     private func setUpPopover() {
         let initialHeight = PopoverHeight.heightToOpen(stored: storedPopoverHeight(), maximum: maximumPopoverHeight())
-        let size = NSSize(width: PopoverHeight.width, height: initialHeight)
-        let hosting = NSHostingView(rootView: MainSurfaceView(model: model, surface: .popover)
+        let size = NSSize(width: popoverWidth(model.textSize.size), height: initialHeight)
+        let hosting = NSHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .popover)
             .background(SceneOpenerView { [weak self] open in self?.openSceneWindow = open }))
         hosting.sizingOptions = []
         // Same layout contract as the window: no safe area reaches the views.
@@ -213,6 +213,21 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // The size must follow the drag without an animation.
         popover.animates = false
         popover.delegate = self
+        // §4.5 "text size": the width follows a change made while the
+        // popover is shown (keys or Settings); the height stays.
+        model.textSize.$size
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] size in
+                guard let self, self.popover.isShown else { return }
+                self.popover.contentSize = NSSize(width: self.popoverWidth(size), height: self.popover.contentSize.height)
+            }
+            .store(in: &subscriptions)
+    }
+
+    /// §4.5 / §9: the popover width for a text size (420pt at 13).
+    private func popoverWidth(_ size: TextSize) -> CGFloat {
+        CGFloat(size.popoverWidth)
     }
 
     private func updateHeightDrag(delta: Double) {
@@ -222,7 +237,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         if entered {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }
-        popover.contentSize = NSSize(width: PopoverHeight.width, height: drag.height)
+        popover.contentSize = NSSize(width: popover.contentSize.width, height: drag.height)
     }
 
     /// §4.5: the height is remembered when the drag ends — only when the
@@ -240,7 +255,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // A remembered height above the maximum opens at the maximum; the
         // stored value itself stays (§9).
         let height = PopoverHeight.heightToOpen(stored: storedPopoverHeight(), maximum: maximumPopoverHeight())
-        popover.contentSize = NSSize(width: PopoverHeight.width, height: height)
+        popover.contentSize = NSSize(width: popoverWidth(model.textSize.size), height: height)
         model.surfaceDidShow(.popover)
         NSApp.activate(ignoringOtherApps: true)
         // The popover follows the app's appearance (Settings > Appearance;
@@ -348,7 +363,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         window.collectionBehavior = [.moveToActiveSpace]
         window.contentMinSize = NSSize(width: MainWindowMetrics.minimumWidth, height: MainWindowMetrics.minimumHeight)
         window.delegate = self
-        let hosting = FirstMouseHostingView(rootView: MainSurfaceView(model: model, surface: .window))
+        let hosting = FirstMouseHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .window))
         hosting.sizingOptions = []
         // The layout places the header row under the hidden title bar itself
         // (`SurfaceMetrics.windowTrafficLightCenter`). Without this, the

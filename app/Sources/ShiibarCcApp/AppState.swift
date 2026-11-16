@@ -50,10 +50,10 @@ final class AppState: ObservableObject {
     private static let appearanceKey = "cc.shiibar.appearance"
 
     let notificationManager: NotificationManager
-    /// The conversation pane's body text size (§4.6/§4.5): a single shared
-    /// store so the ⌘ shortcuts and the Settings window's popup read/write
-    /// the same live value.
-    let conversationsTextSize: ConversationsTextSizeStore
+    /// The text size of the popover and the window (§4.5 "text size"): a
+    /// single shared store so the ⌘ keys and the Settings window's Text size
+    /// field read and write the same live value.
+    let textSize: TextSizeStore
     /// The one state shared by the popover and the window (§4.5).
     let surface: MainSurfaceModel
     /// The global hotkey (§4.5 "global hotkey"): registered in `start()`;
@@ -92,8 +92,8 @@ final class AppState: ObservableObject {
         let storedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey)
             .flatMap(AppearanceSetting.init(rawValue:))
         self.appearanceSetting = storedAppearance ?? AppearanceSetting.defaultSetting
-        let textSize = ConversationsTextSizeStore()
-        self.conversationsTextSize = textSize
+        let textSize = TextSizeStore()
+        self.textSize = textSize
         self.hotKey = GlobalHotKeyModel(registrar: CarbonHotKeyRegistrar(), defaults: .standard)
         let home = ProcessInfo.processInfo.environment["HOME"]
         self.surface = MainSurfaceModel(

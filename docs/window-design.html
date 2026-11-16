@@ -677,9 +677,9 @@ git push origin main --<span class="hl">tag</span>s</pre>
     </figure>
   </div>
 
-  <h2>2 列(ウィンドウの幅が 880pt 以上)</h2>
+  <h2>2 列(文字の大きさ 13 のとき、ウィンドウの幅が 880pt 以上)</h2>
   <ul>
-    <li>左の列は一覧のページと同じ構成要素(見出し行・一覧・固定フッター)で、幅は固定である。
+    <li>左の列は一覧のページと同じ構成要素(見出し行・一覧・固定フッター)で、幅は、ウィンドウの幅を変更しても変化しない。
       ただし、行に <code>&gt;</code> ボタンを表示せず(選択中の会話は右の列に表示している)、
       固定フッターにはキーの案内だけを表示する(実行のボタンは右の列の下部パネルにある)。
       右の列は会話ペインで、ウィンドウの幅を変更すると右の列だけが伸縮する
@@ -818,7 +818,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
       (ヒット計算・畳み境界・選択とコピーの対象外 — DESIGN.md §4.6)</li>
     <li><strong>自分の発言 = 全幅の帯</strong>: 左端から右端までマージンなしで、ラベルと発言に帯の地を付ける。
       発言は<strong>本文と同じウェイト</strong>で表示する。
-      太字にしない(帯が見出しの役割を持つので、文字を強調しない)。文字サイズは本文 +0.5pt。
+      太字にしない(帯が見出しの役割を持つので、文字を強調しない)。発言の文字は 13.5pt(文字の大きさ 13 のとき)。
       帯の直前は広めの余白(節の切れ目)。スクロールすると、帯の並びから依頼の一覧を把握できる</li>
     <li><strong>Claude の発言 = Markdown を描画</strong>(描画範囲は DESIGN.md §4.6「会話ペインの表示」):
       コードブロックはモノスペース + 淡い背景 + 横スクロール。インラインコード・強調・見出し・
@@ -838,7 +838,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
       選択に含まれない。右クリックメニューは Copy(⌘C)/ Copy as Markdown(⇧⌘C)の 2 項目だけ</li>
     <li><strong>本文の幅の上限</strong>: 本文の行長は約 60em を上限とする。ウィンドウを広げても行が
       長くなりすぎない(コードブロックと、折り返しても収まらない表は、この上限の内側で横スクロール)</li>
-    <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt。
+    <li>本文の既定は 13pt・行間 1.7。コードブロックは 11.5pt(文字の大きさ 13 のとき)。
       <strong>行間・段落間・ブロック間隔・帯の余白は本ページの CSS 値が実装の正</strong>(DESIGN.md §8.39)</li>
     <li><strong>ミニマップ = スクロールバー</strong>(右端・常時・幅 20pt): 会話全体の略図
       (帯 = 濃い縞・本文 = 淡い塊・コード = 中間。文字は描かない)+ 半透明グレーのつまみ。
@@ -929,6 +929,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <tr><td>文字の入力 / <kbd>delete</kbd></td><td>検索欄に入力する</td><td>何もしない</td></tr>
     <tr><td><kbd>⌘G</kbd> <kbd>⇧⌘G</kbd></td><td>会話内の次のヒット / 前のヒット(会話ペインを表示している間だけ)</td><td>同じ</td></tr>
     <tr><td><kbd>⌘F</kbd></td><td>何もしない</td><td>検索欄にフォーカスを移す。1 列の詳細ページでは、一覧のページに戻ってから移す</td></tr>
+    <tr><td><kbd>⌘=</kbd> / <kbd>⌘+</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd></td><td>文字の大きさを変更する(下記「文字の大きさ」)。どのページでも同じ</td><td>同じ</td></tr>
     <tr><td><kbd>esc</kbd></td><td>ポップオーバーを閉じる。ウィンドウでは何もしない</td><td>同じ</td></tr>
   </table>
   <ul>
@@ -939,22 +940,25 @@ git push origin main --<span class="hl">tag</span>s</pre>
       日本語入力の変換が未確定の間は、すべてのキーを日本語入力に渡す</li>
   </ul>
 
-  <h2>文字サイズ</h2>
+  <h2>文字の大きさ</h2>
   <div class="mock">
     <figure>
       <div class="app strip" style="width:320px">
-        <span class="lab">Conversations</span>
-        <div class="rowc"><span>Text size</span>
-          <span class="popup">13 pt<span class="chev">▲▼</span></span></div>
+        <span class="lab">General</span>
+        <div class="rowc"><span>Text size<br><span style="font-size:11px;color:var(--text2)">Text in the popover and the window</span></span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span class="popup" style="min-width:56px;justify-content:flex-end">13</span><span class="popup" style="padding:0 3px">▲▼</span></span></div>
       </div>
-      <figcaption>Settings ウィンドウの Conversations 節(General / Sounds と同列)</figcaption>
+      <figcaption>Settings ウィンドウの General の Text size(数値の入力欄とステッパー)</figcaption>
     </figure>
   </div>
   <ul>
-    <li>通常の調整は <kbd>⌘+</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd>(リセット)、設定として表示する場所は
-      Settings の Conversations 節の<strong>ポップアップ</strong>(音種の選択と同じコントロール)。
-      範囲・既定・コードブロックの連動などの値は DESIGN.md §9、挙動は §4.5 / §4.6「文字サイズ」。
-      対象は会話ペインの本文だけで、一覧・フッターの文字サイズは固定</li>
+    <li>通常の調整は <kbd>⌘=</kbd>(<kbd>⌘+</kbd> も同じ)/ <kbd>⌘−</kbd> / <kbd>⌘0</kbd>(13 に戻す)、
+      設定として表示する場所は Settings の General の <strong>Text size</strong>(数値の入力欄とステッパー)。
+      範囲と既定は DESIGN.md §9、挙動は同 §4.5「文字の大きさ」/ §4.6「会話ペインの文字の大きさ」</li>
+    <li><strong>対象はポップオーバーとウィンドウの全体</strong>(一覧、見出し行、下部パネル、会話ペイン)。
+      本ページの寸法は、文字の大きさが 13 のときの値である。文字の大きさ、行の高さ、上下の余白、アイコン、
+      ポップオーバーの幅と 2 列のときの一覧の列の幅は、13 に対する比率で連動する。左右の余白、角の半径、
+      枠線の太さ、見出し行のボタンと会話ペインのヘッダの戻るボタン、ミニマップの幅は固定である</li>
     <li>フォントの切り替えは持たない — Markdown の描画により、コードは常にモノスペースで表示されるため</li>
   </ul>
 

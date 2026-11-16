@@ -31,12 +31,17 @@ let pageTemplate = #"""
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'nonce-__NONCE__'; style-src 'nonce-__NONCE__'">
 <style nonce="__NONCE__">
-  /* Values below are window-design.html's message-surface CSS (§8.39: the
-     CSS values are normative for typography and spacing; colors follow the
-     system). The design's fixed 13px / 13.5px body sizes are expressed
-     relative to --docsize so ⌘+/⌘− keep scaling the body (§4.6). */
+  /* Values below are window-design.html's message-surface CSS at text size
+     13 (§8.39: the CSS values are normative for typography and spacing;
+     colors follow the system). The text size (§4.5 / §4.6 "text size of the
+     conversation pane") arrives as --docsize (the body size) and --k (the
+     unitless ratio to 13): every other font size, the copy icon, and every
+     vertical margin and padding is its value at 13 times --k. Horizontal
+     paddings (the list indent included), radii, borders, the minimap width
+     and the top shadow height stay fixed. */
   :root {
     --docsize: 13px;
+    --k: 1;
     --text:#1d1d1f; --text2:#6e6e73; --label2:#7c7c82; --line:#d9d9de;
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
     --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75); --sel:#3478f6;
@@ -61,7 +66,7 @@ let pageTemplate = #"""
   html, body { margin:0; height:100%; background:transparent; }
   body { color:var(--text); font-size:var(--docsize); line-height:1.7;
     font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; }
-  #doc { height:100%; overflow-y:auto; padding:12px 0 16px; position:relative; }
+  #doc { height:100%; overflow-y:auto; padding:calc(12px * var(--k)) 0 calc(16px * var(--k)); position:relative; }
   /* Focusable (tabindex -1) only so the keyboard scrolls it; no ring. */
   #doc:focus { outline:none; }
 
@@ -75,54 +80,54 @@ let pageTemplate = #"""
      has no background. The container keeps 18px on the right so code and
      table BACKGROUNDS keep their extent; text elements add 10-14px so text
      wraps 8px short of the 20px minimap (§4.6/§9). */
-  .msg { padding:0 18px 0 16px; margin-top:16px; }
+  .msg { padding:0 18px 0 16px; margin-top:calc(16px * var(--k)); }
   .msg:first-child { margin-top:0; }
   .msg.ans { font-size:var(--docsize); line-height:1.7; max-width:60em; }
-  .msg.band { background:var(--card); padding:7px 18px 8px 16px; margin-top:20px; }
+  .msg.band { background:var(--card); padding:calc(7px * var(--k)) 18px calc(8px * var(--k)) 16px;
+    margin-top:calc(20px * var(--k)); }
   .msg.band:first-child { margin-top:0; }
-  .msg.band + .msg { margin-top:10px; }
+  .msg.band + .msg { margin-top:calc(10px * var(--k)); }
 
   /* Label row (§4.6/§8.49). The label is generated content (::before from
      data-label), so it is never a DOM text node: it cannot enter hits, fold
-     boundaries, textContent, selection ranges, or WebKit's copy. The label
-     size is the design's fixed 11px (assumption: labels are chrome and do
-     not follow the body text size, like the fold controls). */
-  .who { display:flex; align-items:center; font-size:11px; font-weight:650; line-height:1.6;
-    margin-bottom:2px; }
+     boundaries, textContent, selection ranges, or WebKit's copy. */
+  .who { display:flex; align-items:center; font-size:calc(11px * var(--k)); font-weight:650; line-height:1.6;
+    margin-bottom:calc(2px * var(--k)); }
   .who::before { content:attr(data-label); }
   .who.you { color:var(--you); }
   .who.ai { color:var(--label2); }
 
   /* Per-message copy button (§4.6 "per-message copy"): right end of the
-     label row, 14px icon, secondary color; the check mark keeps the same
+     label row, 14px icon at 13, secondary color; the check mark keeps the same
      position, size, and color. margin-right 10px keeps it inside the
      8px-before-the-minimap line like the text. */
-  .cp { flex:none; margin-left:auto; margin-right:10px; padding:2px 3px; border-radius:5px;
+  .cp { flex:none; margin-left:auto; margin-right:10px; padding:calc(2px * var(--k)) 3px; border-radius:5px;
     color:var(--label2); display:flex; border:0; background:transparent; cursor:default;
     font:inherit; line-height:0; }
   .cp:hover { background:var(--card); }
-  .cp svg { width:14px; height:14px; display:block; fill:none; stroke:currentColor;
+  .cp svg { width:calc(14px * var(--k)); height:calc(14px * var(--k)); display:block; fill:none; stroke:currentColor;
     stroke-width:1.3; stroke-linecap:round; stroke-linejoin:round; }
 
-  /* User message: shown as typed (no Markdown), regular weight, body +0.5pt. */
-  .mt { font-size:calc(var(--docsize) + .5px); line-height:1.6; padding-right:14px; }
+  /* User message: shown as typed (no Markdown), regular weight, 13.5px at 13. */
+  .mt { font-size:calc(13.5px * var(--k)); line-height:1.6; padding-right:14px; }
 
   /* Claude message body. */
   .body p, .body h1, .body h2, .body h3, .body h4, .body .li { padding-right:10px; }
-  .body p { margin:0 0 8px; }
-  .body h1, .body h2, .body h3, .body h4 { margin:10px 0 8px; line-height:1.35; }
-  .body h1 { font-size:calc(var(--docsize) + 6px); }
-  .body h2 { font-size:calc(var(--docsize) + 4px); }
-  .body h3 { font-size:calc(var(--docsize) + 2px); }
-  .body h4 { font-size:calc(var(--docsize) + 1px); }
-  .body .li { margin:0 0 3px; }
-  pre { margin:0 0 8px; background:var(--codebg); border-radius:8px; padding:9px 12px;
+  .body p { margin:0 0 calc(8px * var(--k)); }
+  .body h1, .body h2, .body h3, .body h4 { margin:calc(10px * var(--k)) 0 calc(8px * var(--k)); line-height:1.35; }
+  .body h1 { font-size:calc(19px * var(--k)); }
+  .body h2 { font-size:calc(17px * var(--k)); }
+  .body h3 { font-size:calc(15px * var(--k)); }
+  .body h4 { font-size:calc(14px * var(--k)); }
+  .body .li { margin:0 0 calc(3px * var(--k)); }
+  pre { margin:0 0 calc(8px * var(--k)); background:var(--codebg); border-radius:8px;
+    padding:calc(9px * var(--k)) 12px;
     overflow-x:auto; font-family:"SF Mono", ui-monospace, Menlo, monospace;
-    font-size:calc(var(--docsize) - 1.5px); line-height:1.55; }
+    font-size:calc(11.5px * var(--k)); line-height:1.55; }
   /* Inline code with padding + radius (§4.6 — one of the reasons this pane
      is HTML). */
   code { font-family:"SF Mono", ui-monospace, Menlo, monospace; font-size:.88em;
-    background:var(--codebg); padding:2px 5px; border-radius:4px; }
+    background:var(--codebg); padding:calc(2px * var(--k)) 5px; border-radius:4px; }
   pre code { background:none; padding:0; font-size:inherit; }
   .b { font-weight:600; } .i { font-style:italic; } .st { text-decoration:line-through; }
   a { color:var(--sel); }
@@ -130,17 +135,18 @@ let pageTemplate = #"""
   /* Pipe table: cells wrap at ~28em; only a still-overflowing table scrolls
      inside itself (§4.6). */
   .tbl { border:1px solid var(--line); border-radius:8px; overflow-x:auto;
-    margin:0 0 8px; max-width:100%; width:fit-content; }
+    margin:0 0 calc(8px * var(--k)); max-width:100%; width:fit-content; }
   .tbl table { border-collapse:collapse; font-size:var(--docsize); line-height:1.5; }
-  .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line);
+  .tbl th, .tbl td { padding:calc(5px * var(--k)) 12px; text-align:left; border-top:1px solid var(--line);
     vertical-align:top; max-width:28em; overflow-wrap:break-word; white-space:normal; }
   .tbl th { border-top:0; font-weight:600; background:var(--card); }
 
-  .expand { border:0; background:transparent; color:var(--sel); font-size:11px;
-    cursor:pointer; padding:0; font-family:inherit; display:block; margin:2px 0 8px; }
-  .band .expand { margin:2px 0 0; }
+  .expand { border:0; background:transparent; color:var(--sel); font-size:calc(11px * var(--k));
+    cursor:pointer; padding:0; font-family:inherit; display:block;
+    margin:calc(2px * var(--k)) 0 calc(8px * var(--k)); }
+  .band .expand { margin:calc(2px * var(--k)) 0 0; }
   .expand .cnt { color:var(--text); background:var(--hl); border-radius:4px;
-    padding:0 5px; font-size:10px; font-weight:600; }
+    padding:0 5px; font-size:calc(10px * var(--k)); font-weight:600; }
 
   /* Chrome is not content: excluded from selection AND copy (§4.6) — the
      label row (label + copy button) and the fold controls. */
@@ -166,8 +172,8 @@ let pageTemplate = #"""
 
   /* Bottom cues (§4.6/§8.39): the end marker after the last message, and a
      top scroll shadow while content extends above. Both are chrome. */
-  .endcap { display:flex; align-items:center; gap:10px; color:var(--label2); font-size:11px;
-    margin:14px 16px 4px; -webkit-user-select:none; user-select:none; }
+  .endcap { display:flex; align-items:center; gap:10px; color:var(--label2); font-size:calc(11px * var(--k));
+    margin:calc(14px * var(--k)) 16px calc(4px * var(--k)); -webkit-user-select:none; user-select:none; }
   .endcap::before, .endcap::after { content:""; flex:1; height:1px; background:var(--line); }
   #topshadow { position:fixed; top:0; left:0; right:20px; height:8px; opacity:0;
     pointer-events:none; background:linear-gradient(to bottom, rgba(0,0,0,.12), transparent);
@@ -691,8 +697,11 @@ window.shiibarAPI = {
       updateViewportCues();
     }
   },
-  setSize(px) {
+  // The body size in px and its unitless ratio to 13 travel together, so
+  // the page never divides a length by a length.
+  setSize(px, k) {
     document.documentElement.style.setProperty('--docsize', px + 'px');
+    document.documentElement.style.setProperty('--k', String(k));
     rebuildMinimap();
   },
   setTheme(dark) {

@@ -6,6 +6,7 @@
 // flag comes from `MainSurfaceModel.list` (Core).
 
 import AppKit
+import Combine
 import ShiibarCcCore
 import SwiftUI
 
@@ -38,6 +39,7 @@ struct HeaderRowView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
     @State private var menuAnchor: NSView?
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         HStack(spacing: 8) {
@@ -48,11 +50,13 @@ struct HeaderRowView: View {
             ConversationsSearchField(
                 text: $model.query,
                 isEnabled: !model.list.isFullBuild,
-                focusToken: model.searchFocusRequests[surface] ?? 0
+                focusToken: model.searchFocusRequests[surface] ?? 0,
+                scale: scale
             )
-            // window-design.html `.search`: 24pt tall, level with the 24pt
-            // header buttons.
-            .frame(height: SurfaceMetrics.searchFieldHeight)
+            // window-design.html `.search`: 24pt tall at 13, level with the
+            // 24pt header buttons; it follows the text size, the buttons do
+            // not, and the row centers both (§4.5 "text size").
+            .frame(height: scale.searchFieldHeight)
             // window-design.html `.search.dis`: faded while a full index
             // build disables the field (§4.6).
             .opacity(model.list.isFullBuild ? 0.5 : 1)
@@ -88,10 +92,9 @@ struct HeaderRowView: View {
             .background(MenuAnchorView { menuAnchor = $0 })
         }
         .padding(.horizontal, SurfaceMetrics.headerSide)
-        .padding(.top, surface == .window
-                 ? SurfaceMetrics.windowTrafficLightCenter - SurfaceMetrics.searchFieldHeight / 2
-                 : SurfaceMetrics.headerTop)
-        .padding(.bottom, SurfaceMetrics.headerBottom)
+        .frame(height: scale.headerRowHeight)
+        .padding(.top, surface == .window ? scale.windowHeaderTop : scale.headerTop)
+        .padding(.bottom, scale.headerBottom)
         .background(surface == .window ? WindowDragArea() : nil)
     }
 }
@@ -136,6 +139,7 @@ struct ListBodyView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
     @StateObject private var scroller = ListScroller()
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         let list = model.list
@@ -146,10 +150,10 @@ struct ListBodyView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let empty = list.emptyStateText {
                     Text(empty)
-                        .font(.system(size: 12))
+                        .font(.system(size: scale.listNoteFont))
                         .foregroundStyle(SurfaceColors.secondary)
                         .padding(.horizontal, 4)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, scale.emptyStateVertical)
                 }
                 ForEach(list.sections) { section in
                     SectionHeaderView(section: section)
@@ -162,7 +166,7 @@ struct ListBodyView: View {
                             spinning: model.isSpinnerActive,
                             model: model
                         )
-                        .padding(.bottom, 6)
+                        .padding(.bottom, scale.rowGap)
                         .background(ListRowFrameReporter(key: row.id))
                     }
                 }
@@ -171,15 +175,15 @@ struct ListBodyView: View {
                     // History cap hides — one centered line, not a card,
                     // not selectable.
                     Text(hidden)
-                        .font(.system(size: 12))
+                        .font(.system(size: scale.listNoteFont))
                         .foregroundStyle(SurfaceColors.secondary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, scale.hiddenRowsVertical)
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.bottom, 8)
+            .padding(.bottom, scale.listBottom)
             .background(ListScrollProbe(scroller: scroller))
             .coordinateSpace(name: ListScroller.contentSpace)
             .onPreferenceChange(ListRowFramesKey.self) { rows in
@@ -241,10 +245,37 @@ final class ListScroller: ObservableObject {
     /// shared position).
     private var pendingRestore = false
     private var pendingReveal = false
+    /// Armed by a text size change until the rows report their new frames
+    /// (or its fallback fires): a restore from the old frames would land on
+    /// the wrong row.
+    private var relayoutWait = ListRelayoutWait()
+    private var textSizeSubscription: AnyCancellable?
 
     func attach(model: MainSurfaceModel, surface: MainSurface) {
         self.model = model
         self.surface = surface
+        // §4.5 "text size": the row at the top of the visible range stays
+        // at the top. The store publishes before the views update, so the
+        // anchor is frozen (no recording while a restore is pending) before
+        // any row moves, and restored once the rows are laid out again.
+        textSizeSubscription = model.textSize.$size
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.textSizeWillChange() }
+            }
+    }
+
+    private func textSizeWillChange() {
+        guard let model, let surface, model.visibleSurface == surface,
+              let generation = relayoutWait.arm(hasRows: !rows.isEmpty) else { return }
+        pendingRestore = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + ListRelayoutWait.fallbackSeconds) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.relayoutWait.fallbackFired(generation: generation) else { return }
+                self.flushSoon()
+            }
+        }
     }
 
     func scrollViewChanged(_ scrollView: NSScrollView?) {
@@ -264,6 +295,7 @@ final class ListScroller: ObservableObject {
 
     func rowsChanged(_ rows: [ListRowExtent]) {
         self.rows = rows
+        relayoutWait.rowsChanged()
         flushSoon()
     }
 
@@ -288,7 +320,8 @@ final class ListScroller: ObservableObject {
     }
 
     private func flush() {
-        guard let scrollView, let model, !rows.isEmpty || model.list.sections.isEmpty else { return }
+        guard !relayoutWait.isWaiting, let scrollView, let model,
+              !rows.isEmpty || model.list.sections.isEmpty else { return }
         if pendingRestore {
             pendingRestore = false
             if let anchor = model.listScrollAnchor,
@@ -370,18 +403,19 @@ private struct ListScrollProbe: NSViewRepresentable {
 /// Bold section name + row count (§4.5).
 struct SectionHeaderView: View {
     let section: UnifiedListSectionModel
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(section.title)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: scale.sectionTitleFont, weight: .bold))
             Text("\(section.count)")
-                .font(.system(size: 11))
+                .font(.system(size: scale.sectionCountFont))
                 .foregroundStyle(SurfaceColors.secondary)
         }
         .padding(.horizontal, 4)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.top, scale.sectionHeaderTop)
+        .padding(.bottom, scale.sectionHeaderBottom)
     }
 }
 
@@ -399,6 +433,7 @@ struct RowCardView: View {
     let spinning: Bool
     let model: MainSurfaceModel
     @State private var hovering = false
+    @Environment(\.surfaceScale) private var scale
 
     private var selectionGround: Color {
         guard isSelected else { return .clear }
@@ -416,16 +451,16 @@ struct RowCardView: View {
     var body: some View {
         HStack(alignment: .center, spacing: 9) {
             leadingSlot
-                .frame(width: 20, height: 20)
-                .padding(.top, 1)
+                .frame(width: scale.rowLeadingSlot, height: scale.rowLeadingSlot)
+                .padding(.top, scale.rowLeadingSlotTop)
                 .frame(maxHeight: .infinity, alignment: .top)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: scale.rowLineSpacing) {
                 Text(row.line1)
-                    .font(.system(size: 13, weight: row.isLine1Bold ? .semibold : .regular))
+                    .font(.system(size: scale.rowLine1Font, weight: row.isLine1Bold ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(row.line2)
-                    .font(.system(size: 11))
+                    .font(.system(size: scale.rowLine2Font))
                     .foregroundStyle(SurfaceColors.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -439,8 +474,8 @@ struct RowCardView: View {
         .fixedSize(horizontal: false, vertical: true)
         .padding(.leading, 11)
         .padding(.trailing, 8)
-        .padding(.top, 8)
-        .padding(.bottom, 9)
+        .padding(.top, scale.rowCardTop)
+        .padding(.bottom, scale.rowCardBottom)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(SurfaceColors.card)
@@ -459,7 +494,7 @@ struct RowCardView: View {
         HStack(spacing: 5) {
             if let prompt = row.lastPrompt {
                 Text(UnifiedListRow.promptMarker)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: scale.rowPromptFont, design: .monospaced))
                     .opacity(0.8)
                 Text(prompt)
                     .lineLimit(1)
@@ -469,7 +504,7 @@ struct RowCardView: View {
                 Text(" ")
             }
         }
-        .font(.system(size: 11))
+        .font(.system(size: scale.rowPromptFont))
         .foregroundStyle(SurfaceColors.secondary)
     }
 
@@ -477,13 +512,14 @@ struct RowCardView: View {
     private var leadingSlot: some View {
         switch row.leading {
         case .status(let kind, let unreviewed):
-            RowSymbolView(kind: kind, unreviewed: unreviewed, spinning: spinning && kind == .working)
+            RowSymbolView(kind: kind, unreviewed: unreviewed, spinning: spinning && kind == .working,
+                          size: scale.rowLeadingSlot)
         case .star(let isStarred):
             // §4.6: the slot click toggles the star and never selects.
             Button { model.starClicked(sessionID: row.sessionID) } label: {
                 StarView(isStarred: isStarred)
                     .opacity(isStarred || hovering ? 1 : 0)
-                    .frame(width: 20, height: 20)
+                    .frame(width: scale.rowLeadingSlot, height: scale.rowLeadingSlot)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -492,34 +528,36 @@ struct RowCardView: View {
     }
 }
 
-/// The History star (window-design.html: 16px; outline in the secondary
-/// color on hover, yellow fill when starred).
+/// The History star (window-design.html: 16px at text size 13; outline in
+/// the secondary color on hover, yellow fill when starred).
 struct StarView: View {
     let isStarred: Bool
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         ZStack {
             if isStarred {
                 IconShape(icon: .star).fill(SurfaceColors.starFill)
-                IconShape(icon: .star).stroke(SurfaceColors.starLine, style: StrokeStyle(lineWidth: 0.7, lineJoin: .round))
+                IconShape(icon: .star).stroke(SurfaceColors.starLine, style: StrokeStyle(lineWidth: scale.starFilledLine, lineJoin: .round))
             } else {
-                IconShape(icon: .star).stroke(SurfaceColors.secondary, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                IconShape(icon: .star).stroke(SurfaceColors.secondary, style: StrokeStyle(lineWidth: scale.starOutlineLine, lineJoin: .round))
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: scale.star, height: scale.star)
     }
 }
 
 /// The row's `>` button (§4.5; window-design.html `.ib`: 28×26, radius 6,
-/// a 15pt chevron in the secondary color; gray ground on hover / press).
-/// Selects the row and opens the detail page.
+/// a 15pt chevron in the secondary color at text size 13; gray ground on
+/// hover / press). Selects the row and opens the detail page.
 struct RowOpenButton: View {
     let action: () -> Void
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         Button(action: action) {
-            SurfaceIconView(icon: .chevronRight)
-                .frame(width: SurfaceMetrics.rowOpenButtonWidth, height: SurfaceMetrics.rowOpenButtonHeight)
+            SurfaceIconView(icon: .chevronRight, size: scale.rowOpenIcon, lineWidth: scale.rowOpenIconLine)
+                .frame(width: scale.rowOpenButtonWidth, height: scale.rowOpenButtonHeight)
         }
         .buttonStyle(HoverChipButtonStyle(cornerRadius: 6))
         .foregroundStyle(SurfaceColors.secondary)
@@ -534,6 +572,7 @@ struct RowOpenButton: View {
 struct FixedFooterView: View {
     @ObservedObject var model: MainSurfaceModel
     let hints: [KeyHint]
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -542,8 +581,8 @@ struct FixedFooterView: View {
             if !hints.isEmpty {
                 KeyHintsView(hints: hints)
                     .padding(.horizontal, 12)
-                    .padding(.top, 7)
-                    .padding(.bottom, 9)
+                    .padding(.top, scale.footerHintsTop)
+                    .padding(.bottom, scale.footerHintsBottom)
             }
         }
     }
@@ -553,6 +592,7 @@ struct FixedFooterView: View {
 /// the one-column pages' bottom panels — §4.5).
 struct StatusLinesView: View {
     @ObservedObject var model: MainSurfaceModel
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         ForEach(model.warnings, id: \.self) { warning in
@@ -560,43 +600,77 @@ struct StatusLinesView: View {
                 Text("\u{26A0}")
                 Text(warning.text).lineLimit(1)
             }
-            .font(.system(size: 12))
+            .font(.system(size: scale.statusLineFont))
             .foregroundStyle(SurfaceColors.secondary)
             .padding(.horizontal, 12)
-            .padding(.top, 7)
+            .padding(.top, scale.statusLineTop)
         }
         if let message = model.messageText {
             Text(message)
-                .font(.system(size: 11))
+                .font(.system(size: scale.messageLineFont))
                 .foregroundStyle(SurfaceColors.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 12)
-                .padding(.top, 7)
+                .padding(.top, scale.statusLineTop)
         }
     }
 }
 
-/// Key chips followed by action names (window-design.html `.hints`).
+/// Key chips followed by action names (window-design.html `.hints`). When
+/// the width runs short, only the hints that fit whole are shown, in order
+/// (§4.5 "text size": the bottom panel's buttons come first).
 struct KeyHintsView: View {
     let hints: [KeyHint]
+    @Environment(\.surfaceScale) private var scale
 
     var body: some View {
-        HStack(spacing: 14) {
+        WholeItemsRow(spacing: 14) {
             ForEach(Array(hints.enumerated()), id: \.offset) { _, hint in
                 HStack(spacing: 5) {
                     Text(hint.key)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.system(size: scale.keyChipFont, design: .monospaced))
                         .foregroundStyle(SurfaceColors.secondary)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, scale.keyChipVertical)
                         .background(RoundedRectangle(cornerRadius: 4).fill(SurfaceColors.chip))
                     Text(hint.label)
-                        .font(.system(size: 11))
+                        .font(.system(size: scale.keyLabelFont))
                         .foregroundStyle(SurfaceColors.secondary)
                 }
                 .fixedSize()
             }
         }
         .lineLimit(1)
+        .clipped()
+    }
+}
+
+/// A left-aligned row that shows its items at their ideal widths and leaves
+/// out every item from the first one that does not fit whole. Its minimum
+/// width is zero, so a sibling with a higher layout priority keeps its
+/// width.
+struct WholeItemsRow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let height = sizes.map(\.height).max() ?? 0
+        let fullWidth = sizes.map(\.width).reduce(0, +) + spacing * CGFloat(max(0, sizes.count - 1))
+        let width = proposal.width.map { min($0, fullWidth) } ?? fullWidth
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var fits = true
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            fits = fits && x + size.width <= bounds.maxX + 0.5
+            // An item that does not fit is placed outside the clipped
+            // bounds rather than cut in the middle.
+            let origin = fits ? x : bounds.maxX + 10_000
+            subview.place(at: CGPoint(x: origin, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(size))
+            if fits { x += size.width + spacing }
+        }
     }
 }

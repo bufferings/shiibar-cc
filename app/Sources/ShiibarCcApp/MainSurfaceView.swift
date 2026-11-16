@@ -2,10 +2,12 @@
 // §4.5 "switching by width", §8.49; docs/window-design.html). One column:
 // the list page and the detail page, one at a time — the detail page slides
 // in from the trailing edge and slides back out (§9 duration). Two columns
-// (window only, from §9's width): the list column at a fixed width on the
-// left and the conversation pane on the right. The column mode and the
-// page come from the shared `UnifiedListState`; the window reports its
-// width class to the model.
+// (window only, from §9's width): the list column on the left at a width
+// that follows the text size, and the conversation pane on the right. The
+// column mode and the page come from the shared `UnifiedListState`; the
+// window reports its width class to the model. Both roots hand the text
+// size's ratio to every view below through `\.surfaceScale` (DESIGN.md
+// §4.5 "text size").
 
 import AppKit
 import ShiibarCcCore
@@ -13,6 +15,7 @@ import SwiftUI
 
 struct MainSurfaceView: View {
     @ObservedObject var model: MainSurfaceModel
+    @ObservedObject var textSize: TextSizeStore
     let surface: MainSurface
 
     var body: some View {
@@ -23,11 +26,14 @@ struct MainSurfaceView: View {
                 .onChange(of: geometry.size.width) { _, width in reportWidth(width) }
         }
         .ignoresSafeArea()
+        .environment(\.surfaceScale, scale)
     }
 
     private func reportWidth(_ width: CGFloat) {
         guard surface == .window else { return }
-        model.windowColumnsChanged(ColumnMode.forWindowWidth(Double(width)))
+        // The model decides the column mode; it decides again when the text
+        // size moves the threshold (§9).
+        model.windowWidthChanged(Double(width))
     }
 
     /// The popover always shows one column; the window follows the shared
@@ -40,12 +46,15 @@ struct MainSurfaceView: View {
 
     private var paneBackground: Color { SurfaceColors.paneBackground }
 
+    /// This view sets the environment value, so it computes its own copy.
+    private var scale: SurfaceScale { SurfaceScale(ratio: CGFloat(textSize.size.ratio)) }
+
     @ViewBuilder
     private var content: some View {
         if columns == .two {
             HStack(spacing: 0) {
                 ListPageView(model: model, surface: surface)
-                    .frame(width: CGFloat(MainWindowMetrics.listColumnWidth))
+                    .frame(width: CGFloat(textSize.size.listColumnWidth))
                     .background(listBackground)
                 Rectangle().fill(SurfaceColors.line).frame(width: 1)
                 rightColumn
@@ -65,7 +74,7 @@ struct MainSurfaceView: View {
         case .noSelection, .hidden:
             // §4.5: two columns without a selection — only the centered line.
             Text(ConversationPaneContent.noSelectionText)
-                .font(.system(size: 12))
+                .font(.system(size: scale.centeredLineFont))
                 .foregroundStyle(SurfaceColors.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

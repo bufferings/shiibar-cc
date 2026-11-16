@@ -113,3 +113,43 @@ public enum ListReveal {
         return clamped == viewport.top ? nil : clamped
     }
 }
+
+/// The list's wait for new row frames after a text size change (§4.5 "text
+/// size": the row at the top of the visible range stays at the top). While
+/// waiting, the old row frames must not drive a restore. The wait ends when
+/// the rows report frames, or by a fallback for the case where the frames
+/// come out unchanged (for example the size changed and changed back within
+/// one update), so it never blocks the list's scroll handling for good.
+/// Without rows there is nothing to keep, so nothing is armed.
+public struct ListRelayoutWait: Equatable, Sendable {
+    /// How long after the change the fallback ends the wait (seconds).
+    public static let fallbackSeconds: Double = 0.25
+
+    public private(set) var isWaiting = false
+    private var generation = 0
+
+    public init() {}
+
+    /// A text size change. Returns the generation to hand to the fallback,
+    /// or nil when nothing is armed (no rows: no restore is needed).
+    public mutating func arm(hasRows: Bool) -> Int? {
+        guard hasRows else { return nil }
+        generation += 1
+        isWaiting = true
+        return generation
+    }
+
+    /// The rows reported frames: the wait ends.
+    public mutating func rowsChanged() {
+        isWaiting = false
+    }
+
+    /// The fallback for `generation` fired. Returns whether it ended the
+    /// wait (false when the rows already ended it, or a newer change re-armed
+    /// it with its own fallback).
+    public mutating func fallbackFired(generation: Int) -> Bool {
+        guard isWaiting, generation == self.generation else { return false }
+        isWaiting = false
+        return true
+    }
+}

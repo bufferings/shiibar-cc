@@ -8,7 +8,6 @@ final class MainSurfaceTests: XCTestCase {
     // MARK: - §9 constants
 
     func testConstantsMatchSection9() {
-        XCTAssertEqual(PopoverHeight.width, 420)
         XCTAssertEqual(PopoverHeight.initial, 640)
         XCTAssertEqual(PopoverHeight.minimum, 300)
         XCTAssertEqual(PopoverHeight.dragHandleHeight, 8)
@@ -17,9 +16,7 @@ final class MainSurfaceTests: XCTestCase {
         XCTAssertEqual(MainWindowMetrics.initialHeight, 640)
         XCTAssertEqual(MainWindowMetrics.minimumWidth, 360)
         XCTAssertEqual(MainWindowMetrics.minimumHeight, 300)
-        XCTAssertEqual(MainWindowMetrics.listColumnWidth, 420)
         XCTAssertEqual(MainWindowMetrics.pageSlideSeconds, 0.22)
-        XCTAssertEqual(ColumnMode.twoColumnMinimumWidth, 880)
         XCTAssertEqual(MainSurfaceRefresh.elapsedIntervalSeconds, 60)
         XCTAssertEqual(MainSurfaceRefresh.endedRowSecondRefetchSeconds, 2, "§9 second refetch after a Running row ends")
         XCTAssertEqual(MessageTransient.displaySeconds, 2)
@@ -34,7 +31,7 @@ final class MainSurfaceTests: XCTestCase {
     func testColumnModeThreshold() {
         let cases: [(Double, ColumnMode)] = [(360, .one), (879.5, .one), (880, .two), (1400, .two)]
         for (width, mode) in cases {
-            XCTAssertEqual(ColumnMode.forWindowWidth(width), mode, "\(width)")
+            XCTAssertEqual(ColumnMode.forWindowWidth(width, textSize: .default), mode, "\(width)")
         }
     }
 

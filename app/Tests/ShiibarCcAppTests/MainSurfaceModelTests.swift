@@ -1,4 +1,5 @@
 import ShiibarCcCore
+import Combine
 import XCTest
 @testable import ShiibarCcApp
 
@@ -61,7 +62,7 @@ final class MainSurfaceModelTests: XCTestCase {
         let model = MainSurfaceModel(
             home: "/Users/example",
             defaults: defaults,
-            textSize: ConversationsTextSizeStore(defaults: defaults),
+            textSize: TextSizeStore(defaults: defaults),
             launchers: launchers,
             runCommand: { arguments, completion in
                 spy.commands.append((arguments: arguments, completion: completion))
@@ -951,7 +952,7 @@ final class MainSurfaceModelTests: XCTestCase {
             spy = Spy()
             let spy = self.spy
             let model = MainSurfaceModel(
-                home: "/Users/example", defaults: defaults, textSize: ConversationsTextSizeStore(defaults: defaults),
+                home: "/Users/example", defaults: defaults, textSize: TextSizeStore(defaults: defaults),
                 launchers: ConversationsLaunchers(
                     search: { arguments, _, completion in
                         spy.searches.append(Dispatched(arguments: arguments, completion: completion))
@@ -1079,5 +1080,86 @@ final class MainSurfaceModelTests: XCTestCase {
             "Disconnected from daemon \u{2014} reconnecting\u{2026}",
             "Automation permission needed (run \"shiibar-cc doctor\")",
         ])
+    }
+
+    // MARK: - Text size (§4.5 "text size")
+
+    private func storedTextSize() -> Any? {
+        defaults.object(forKey: TextSizeStore.defaultsKey)
+    }
+
+    func testTextSizeKeysSaveTheValueAndSendItToThePane() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a"])
+        XCTAssertEqual(model.webPane.textSizePoints, 13, "the pane starts at the stored value")
+        let cmd: ListKeyModifiers = [.command]
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "="), cmd), .consumed)
+        XCTAssertEqual(model.textSize.size.points, 14)
+        XCTAssertEqual(storedTextSize() as? Int, 14, "saved as a whole number")
+        XCTAssertEqual(model.webPane.textSizePoints, 14)
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "+"), [.command, .shift]), .consumed)
+        XCTAssertEqual(model.textSize.size.points, 15)
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "-"), cmd, surface: .popover, searchFieldFocused: true), .consumed,
+                       "the keys work while the search field has focus")
+        XCTAssertEqual(model.textSize.size.points, 14)
+        XCTAssertEqual(model.webPane.textSizePoints, 14)
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "0"), cmd), .consumed)
+        XCTAssertEqual(model.textSize.size.points, 13)
+        XCTAssertEqual(storedTextSize() as? Int, 13)
+        XCTAssertEqual(model.webPane.textSizePoints, 13)
+    }
+
+    func testTextSizeKeysAtTheEndsChangeNothingButAreConsumed() {
+        let cmd: ListKeyModifiers = [.command]
+        let cases: [(String, Double, String, Int)] = [
+            ("⌘= at 18 (stored 20 reads as 18)", 20, "=", 18),
+            ("⌘− at 9", 9, "-", 9),
+            ("⌘0 at 13", 13, "0", 13),
+        ]
+        for (name, stored, character, points) in cases {
+            defaults = InMemoryDefaults()
+            defaults.set(stored, forKey: TextSizeStore.defaultsKey)
+            let model = makeModel()
+            openPopover(model, delivering: ["a"])
+            XCTAssertEqual(model.webPane.textSizePoints, Double(points), name)
+            var emissions = 0
+            let subscription = model.textSize.$size.dropFirst().sink { _ in emissions += 1 }
+            XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: character), cmd), .consumed, name)
+            subscription.cancel()
+            XCTAssertEqual(model.textSize.size.points, points, name)
+            XCTAssertEqual(emissions, 0, "\(name): nothing is published, so nothing reaches the pane")
+            XCTAssertEqual(model.webPane.textSizePoints, Double(points), name)
+            XCTAssertEqual(storedTextSize() as? Double, stored, "\(name): the stored entry is not rewritten")
+        }
+    }
+
+    func testTextSizeChangeThatFlipsTheColumnsFollowsTheWidthRules() {
+        let model = makeModel()
+        model.windowWidthChanged(900)
+        model.windowDidBecomeKey()
+        XCTAssertEqual(model.list.columns, .two, "900 >= 880 at 13")
+        spy.indexCompletions.last?(0)
+        spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
+        model.rowClicked(.history(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+
+        // 14: the list column is 452pt, two columns from 912pt.
+        model.textSize.increase()
+        XCTAssertEqual(model.list.columns, .one)
+        XCTAssertEqual(model.list.page, .list, "two -> one column shows the list page")
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"), "the selection is kept")
+
+        model.textSize.decrease()
+        XCTAssertEqual(model.list.columns, .two)
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+
+        // From the detail page, widening into two columns keeps the same
+        // conversation selected.
+        model.textSize.increase()
+        model.rowOpenClicked(.history(sessionID: "a"))
+        XCTAssertEqual(model.list.page, .detail)
+        model.textSize.decrease()
+        XCTAssertEqual(model.list.columns, .two)
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
     }
 }

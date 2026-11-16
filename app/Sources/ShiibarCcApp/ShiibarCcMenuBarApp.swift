@@ -45,7 +45,7 @@ struct ShiibarCcMenuBarApp: App {
                 toggleLoginItem: { appDelegate.state.toggleLoginItem() },
                 appearanceSetting: appDelegate.state.appearanceSetting,
                 setAppearance: { appDelegate.state.setAppearanceSetting($0) },
-                conversationsTextSize: appDelegate.state.conversationsTextSize,
+                textSize: appDelegate.state.textSize,
                 hotKey: appDelegate.state.hotKey
             )
         }

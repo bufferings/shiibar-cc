@@ -72,7 +72,8 @@ final class GlobalShortcutFieldClickTests: XCTestCase {
             appearanceSetting: .system,
             setAppearance: { _ in },
             availableSoundNames: ["Glass"])
-        let root = Form { SettingsGeneralSection(viewModel: settings, hotKey: model) }
+        let textSizeField = TextSizeFieldModel(store: TextSizeStore(defaults: defaults))
+        let root = Form { SettingsGeneralSection(viewModel: settings, textSizeField: textSizeField, hotKey: model) }
             .formStyle(.grouped)
             .frame(width: SettingsView.width)
             .fixedSize(horizontal: false, vertical: true)

@@ -61,25 +61,177 @@ enum SurfaceColors {
     static let starLine = Color(red: 0xD3 / 255, green: 0x97 / 255, blue: 0x00 / 255)
 }
 
+/// Dimensions that do not follow the text size (DESIGN.md §4.5 "text size":
+/// horizontal paddings and gaps, corner radii, border widths, the header
+/// row's buttons and their icons, and parts the OS draws).
 enum SurfaceMetrics {
-    /// `.hrow` padding (10 10 8) and gap 8.
-    static let headerTop: CGFloat = 10
-    static let headerBottom: CGFloat = 8
+    /// `.hrow` horizontal padding 10.
     static let headerSide: CGFloat = 10
     /// In the window the header row shares its vertical center with the
     /// traffic lights (§4.5 "header row"). The window uses the unified
-    /// title bar (52pt), whose buttons are centered 26pt from the top.
+    /// title bar (52pt), whose buttons are centered 26pt from the top; the
+    /// OS draws them at one size whatever the text size.
     static let windowTrafficLightCenter: CGFloat = 26
     /// Space the traffic lights take at the leading edge of a header.
     static let trafficLightsWidth: CGFloat = 78
     /// `.hb`: 24×24, radius 7.
     static let headerButton: CGFloat = 24
-    /// `.search`: 24pt tall, the same height as the header buttons, so the
-    /// header row's items share one vertical center (`SearchFieldView`).
-    static let searchFieldHeight: CGFloat = SearchFieldView.height
-    /// `.ib` (the row's `>` button): 28×26, radius 6.
-    static let rowOpenButtonWidth: CGFloat = 28
-    static let rowOpenButtonHeight: CGFloat = 26
+}
+
+/// Dimensions that follow the text size (DESIGN.md §4.5 "text size"): each
+/// property is its window-design.html value at text size 13 times `ratio`.
+/// Font sizes, row heights, vertical paddings and gaps, icons and symbols,
+/// the search field height and the primary button's minimum width. Views
+/// read it from the environment (`\.surfaceScale`), which the two roots set
+/// from the text size.
+struct SurfaceScale: Equatable {
+    /// `TextSize.ratio`: 1 at text size 13.
+    let ratio: CGFloat
+
+    static let base = SurfaceScale(ratio: 1)
+
+    private func scaled(_ valueAtBase: CGFloat) -> CGFloat { valueAtBase * ratio }
+
+    // MARK: Header row (`.hrow`, `.search`)
+
+    /// `.hrow` top padding (10) in the popover.
+    var headerTop: CGFloat { scaled(10) }
+    /// `.hrow` bottom padding (8).
+    var headerBottom: CGFloat { scaled(8) }
+    /// `.search`: 24pt tall at 13, level with the 24pt header buttons.
+    var searchFieldHeight: CGFloat { scaled(24) }
+    /// `.search` text.
+    var searchFieldFont: CGFloat { scaled(12) }
+    /// `.search` magnifier and its stroke.
+    var searchIcon: CGFloat { scaled(13) }
+    var searchIconLine: CGFloat { scaled(1.4) }
+    /// `.search .clr`: the clear button's circle.
+    var searchClearButton: CGFloat { scaled(12) }
+
+    /// The header row's height: the taller of the search field and the
+    /// fixed header buttons.
+    var headerRowHeight: CGFloat { max(searchFieldHeight, SurfaceMetrics.headerButton) }
+
+    /// The header row's top padding in the window: its vertical center on
+    /// the traffic lights' center.
+    var windowHeaderTop: CGFloat {
+        SurfaceMetrics.windowTrafficLightCenter - headerRowHeight / 2
+    }
+
+    // MARK: List
+
+    /// Empty-state and hidden-rows lines.
+    var listNoteFont: CGFloat { scaled(12) }
+    var emptyStateVertical: CGFloat { scaled(8) }
+    var hiddenRowsVertical: CGFloat { scaled(6) }
+    /// Below the last row.
+    var listBottom: CGFloat { scaled(8) }
+    /// Between cards.
+    var rowGap: CGFloat { scaled(6) }
+    /// Section header: bold name and count, top 10 / bottom 6.
+    var sectionTitleFont: CGFloat { scaled(12) }
+    var sectionCountFont: CGFloat { scaled(11) }
+    var sectionHeaderTop: CGFloat { scaled(10) }
+    var sectionHeaderBottom: CGFloat { scaled(6) }
+
+    // MARK: Row card
+
+    /// The leading slot (status symbol or star), 20×20.
+    var rowLeadingSlot: CGFloat { scaled(20) }
+    /// The slot sits 1pt below the card's text top.
+    var rowLeadingSlotTop: CGFloat { scaled(1) }
+    /// The History star and its strokes.
+    var star: CGFloat { scaled(16) }
+    var starFilledLine: CGFloat { scaled(0.7) }
+    var starOutlineLine: CGFloat { scaled(1.1) }
+    var rowLine1Font: CGFloat { scaled(13) }
+    var rowLine2Font: CGFloat { scaled(11) }
+    var rowPromptFont: CGFloat { scaled(11) }
+    var rowLineSpacing: CGFloat { scaled(1) }
+    var rowCardTop: CGFloat { scaled(8) }
+    var rowCardBottom: CGFloat { scaled(9) }
+    /// `.ib` (the row's `>` button): 28×26 with a 15pt chevron.
+    var rowOpenButtonWidth: CGFloat { scaled(28) }
+    var rowOpenButtonHeight: CGFloat { scaled(26) }
+    var rowOpenIcon: CGFloat { scaled(15) }
+    var rowOpenIconLine: CGFloat { scaled(1.4) }
+
+    // MARK: Footer, status lines, key hints
+
+    var statusLineFont: CGFloat { scaled(12) }
+    var messageLineFont: CGFloat { scaled(11) }
+    var statusLineTop: CGFloat { scaled(7) }
+    /// Below the status lines above a one-column bottom panel.
+    var panelStatusBottom: CGFloat { scaled(7) }
+    var footerHintsTop: CGFloat { scaled(7) }
+    var footerHintsBottom: CGFloat { scaled(9) }
+    /// `.hints` key chip (10.5 monospaced, 1pt vertical padding) and label.
+    var keyChipFont: CGFloat { scaled(10.5) }
+    var keyChipVertical: CGFloat { scaled(1) }
+    var keyLabelFont: CGFloat { scaled(11) }
+
+    // MARK: Bottom panel (`.actions`, `.btn`)
+
+    var panelTop: CGFloat { scaled(9) }
+    var panelBottom: CGFloat { scaled(10) }
+    var panelButtonFont: CGFloat { scaled(13) }
+    /// `.btn`: minimum width 84 including its 14pt horizontal paddings.
+    var primaryButtonMinWidth: CGFloat { scaled(84) }
+    var primaryButtonVertical: CGFloat { scaled(5) }
+    var branchButtonVertical: CGFloat { scaled(4) }
+
+    // MARK: Conversation pane header (`.hdr`), find bar, centered lines
+
+    /// `.hdr .ht`: 13.5 on the detail page, 15 in two columns.
+    var paneTitleDetailFont: CGFloat { scaled(13.5) }
+    var paneTitleColumnFont: CGFloat { scaled(15) }
+    var paneSubtitleFont: CGFloat { scaled(11) }
+    var panePositionFont: CGFloat { scaled(11) }
+    var paneTitleSpacing: CGFloat { scaled(1) }
+    /// `.hdr` top padding 9 (`.hdr.pad` 11 in two columns), bottom 8.
+    var paneHeaderTopDetail: CGFloat { scaled(9) }
+    var paneHeaderTopColumn: CGFloat { scaled(11) }
+    var paneHeaderBottom: CGFloat { scaled(8) }
+    /// The title block (title + subtitle) is about 32pt tall at 13.
+    var paneTitleBlockHeight: CGFloat { scaled(32) }
+    /// The previous / next conversation control: 26×22 segments with 13pt
+    /// chevrons.
+    var stepperSegmentWidth: CGFloat { scaled(26) }
+    var stepperSegmentHeight: CGFloat { scaled(22) }
+    var stepperIcon: CGFloat { scaled(13) }
+    var stepperIconLine: CGFloat { scaled(1.5) }
+    var findBarFont: CGFloat { scaled(11) }
+    var findBarVertical: CGFloat { scaled(5) }
+    /// A centered line in place of the messages (no selection, no messages,
+    /// a load error).
+    var centeredLineFont: CGFloat { scaled(12) }
+
+    /// The pane header's top padding in the window. The one-column detail
+    /// page centers its row on the traffic lights; in two columns the right
+    /// column's header keeps the center it has at 13 (`.hdr.pad` 11 over a
+    /// 32pt title block), so it stays level with the list column's header
+    /// row at any text size.
+    func windowPaneHeaderTop(isDetailPage: Bool) -> CGFloat {
+        if isDetailPage {
+            let rowHeight = max(paneTitleBlockHeight, SurfaceMetrics.headerButton, stepperSegmentHeight)
+            return SurfaceMetrics.windowTrafficLightCenter - rowHeight / 2
+        }
+        let base = SurfaceScale.base
+        let centerAtBase = base.paneHeaderTopColumn + base.paneTitleBlockHeight / 2
+        return centerAtBase - paneTitleBlockHeight / 2
+    }
+}
+
+private struct SurfaceScaleKey: EnvironmentKey {
+    static let defaultValue = SurfaceScale.base
+}
+
+extension EnvironmentValues {
+    /// The popover's and the window's scale (DESIGN.md §4.5 "text size").
+    var surfaceScale: SurfaceScale {
+        get { self[SurfaceScaleKey.self] }
+        set { self[SurfaceScaleKey.self] = newValue }
+    }
 }
 
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)

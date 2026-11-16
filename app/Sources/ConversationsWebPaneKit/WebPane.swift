@@ -125,6 +125,8 @@ public final class WebPaneController: NSObject, ObservableObject {
     private var lastLoadScript: String?
     private var lastHitsScript: String?
     private var lastSizeScript: String?
+    /// The body size last handed to the page (points), nil before the first.
+    public private(set) var textSizePoints: Double?
     private var lastThemeScript: String?
 
     override public init() {
@@ -191,10 +193,13 @@ public final class WebPaneController: NSObject, ObservableObject {
         run("shiibarAPI.jump(\(index))")
     }
 
-    /// ⌘± / Settings text size (§4.6): the value flows into the page's CSS
-    /// variable; code blocks derive their -1.5pt in CSS (§9).
+    /// The text size (§4.5 / §4.6 "text size of the conversation pane"):
+    /// the body size in points and its ratio to 13 go into the page's CSS
+    /// variables in one call, so the held-state flush and the process-
+    /// termination replay always carry both.
     public func setTextSize(_ points: Double) {
-        let script = "shiibarAPI.setSize(\(points))"
+        textSizePoints = points
+        let script = "shiibarAPI.setSize(\(points), \(TextSize.ratio(forPoints: points)))"
         lastSizeScript = script
         if isDisplayable { run(script) } else { heldForLayout = true }
     }

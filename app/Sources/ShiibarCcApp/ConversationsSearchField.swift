@@ -22,6 +22,9 @@ struct ConversationsSearchField: NSViewRepresentable {
     /// Changes when a focus request fires; the field takes first responder
     /// on change if its window is on screen.
     let focusToken: Int
+    /// The text size's scale (§4.5 "text size"): the field's height, text,
+    /// magnifier and clear button follow it.
+    var scale: SurfaceScale = .base
 
     static let placeholder = "Search (2+ characters)"
 
@@ -31,6 +34,7 @@ struct ConversationsSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SearchFieldView {
         let view = SearchFieldView()
+        view.scale = scale
         view.textField.delegate = context.coordinator
         context.coordinator.view = view
         // The clear button feeds the emptied text through the same handler
@@ -48,6 +52,7 @@ struct ConversationsSearchField: NSViewRepresentable {
     func updateNSView(_ view: SearchFieldView, context: Context) {
         let field = view.textField
         context.coordinator.textBinding = $text
+        view.scale = scale
         field.isEnabled = isEnabled
         // Never clobber an active composition from the binding side.
         if field.stringValue != text, !context.coordinator.isComposing(field) {
@@ -110,24 +115,28 @@ struct ConversationsSearchField: NSViewRepresentable {
 /// focus" (it, or its field editor, is the first responder — §4.5).
 final class SearchTextField: NSTextField {}
 
-/// The drawn search field (window-design.html `.search`): 24pt tall, radius
-/// 6, the card color with a 1pt border, 8pt horizontal padding, the 13pt
-/// magnifier, 6pt to the 12pt text, and the 12pt clear button at the right
-/// padding while the field holds text. A click anywhere on the ground
-/// focuses the text field.
+/// The drawn search field (window-design.html `.search`): at text size 13,
+/// 24pt tall, the 13pt magnifier, the 12pt text and the 12pt clear button;
+/// those follow the text size (`scale`, §4.5 "text size"). Radius 6, the
+/// card color with a 1pt border, 8pt horizontal padding, 6pt from the
+/// magnifier to the text and from the text to the clear button stay fixed.
+/// The clear button sits at the right padding while the field holds text.
+/// A click anywhere on the ground focuses the text field.
 final class SearchFieldView: NSView {
-    static let height: CGFloat = 24
     static let cornerRadius: CGFloat = 6
     static let horizontalPadding: CGFloat = 8
-    static let iconSize: CGFloat = 13
     static let iconTextSpacing: CGFloat = 6
-    static let fontSize: CGFloat = 12
-    /// `SurfaceIconView`'s stroke for the 15pt icons, scaled to 13pt.
-    static let iconLineWidth: CGFloat = 1.4
-    /// `.search .clr`: the clear button's circle, and the gap (the `.search`
-    /// flex gap) between the text and the button.
-    static let clearButtonSize: CGFloat = 12
+    /// `.search` flex gap between the text and the clear button.
     static let clearButtonSpacing: CGFloat = 6
+
+    /// The text size's scale. Setting it updates the font, the height, the
+    /// icon, the clear button and the constraints that depend on them.
+    var scale: SurfaceScale = .base {
+        didSet {
+            guard scale != oldValue else { return }
+            applyScale()
+        }
+    }
 
     let textField = SearchTextField()
     let clearButton = SearchClearButton()
@@ -142,11 +151,14 @@ final class SearchFieldView: NSView {
     /// button while it is shown, so typed text never runs under it.
     private var textTrailingToPadding: NSLayoutConstraint!
     private var textTrailingToClearButton: NSLayoutConstraint!
+    private var textLeading: NSLayoutConstraint!
+    private var clearButtonWidth: NSLayoutConstraint!
+    private var clearButtonHeight: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         textField.placeholderString = ConversationsSearchField.placeholder
-        textField.font = .systemFont(ofSize: Self.fontSize)
+        textField.font = .systemFont(ofSize: scale.searchFieldFont)
         textField.isBordered = false
         textField.isBezeled = false
         textField.drawsBackground = false
@@ -164,20 +176,38 @@ final class SearchFieldView: NSView {
         clearButton.isHidden = true
         addSubview(clearButton)
 
-        let leading = Self.horizontalPadding + Self.iconSize + Self.iconTextSpacing
+        textLeading = textField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: textLeadingInset)
         textTrailingToPadding = textField.trailingAnchor.constraint(
             equalTo: trailingAnchor, constant: -Self.horizontalPadding)
         textTrailingToClearButton = textField.trailingAnchor.constraint(
             equalTo: clearButton.leadingAnchor, constant: -Self.clearButtonSpacing)
+        clearButtonWidth = clearButton.widthAnchor.constraint(equalToConstant: scale.searchClearButton)
+        clearButtonHeight = clearButton.heightAnchor.constraint(equalToConstant: scale.searchClearButton)
         NSLayoutConstraint.activate([
-            textField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
+            textLeading,
             textTrailingToPadding,
             textField.centerYAnchor.constraint(equalTo: centerYAnchor),
             clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.horizontalPadding),
             clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            clearButton.widthAnchor.constraint(equalToConstant: Self.clearButtonSize),
-            clearButton.heightAnchor.constraint(equalToConstant: Self.clearButtonSize),
+            clearButtonWidth,
+            clearButtonHeight,
         ])
+    }
+
+    /// The text starts after the padding, the magnifier and the gap.
+    private var textLeadingInset: CGFloat {
+        Self.horizontalPadding + scale.searchIcon + Self.iconTextSpacing
+    }
+
+    private func applyScale() {
+        textField.font = .systemFont(ofSize: scale.searchFieldFont)
+        textLeading.constant = textLeadingInset
+        clearButtonWidth.constant = scale.searchClearButton
+        clearButtonHeight.constant = scale.searchClearButton
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+        needsDisplay = true
+        clearButton.needsDisplay = true
     }
 
     /// Shows or hides the clear button for the field's current text (marked
@@ -220,7 +250,7 @@ final class SearchFieldView: NSView {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Self.height)
+        NSSize(width: NSView.noIntrinsicMetric, height: scale.searchFieldHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -236,12 +266,12 @@ final class SearchFieldView: NSView {
 
             let iconRect = CGRect(
                 x: Self.horizontalPadding,
-                y: (bounds.height - Self.iconSize) / 2,
-                width: Self.iconSize, height: Self.iconSize)
+                y: (bounds.height - scale.searchIcon) / 2,
+                width: scale.searchIcon, height: scale.searchIcon)
             guard let context = NSGraphicsContext.current?.cgContext else { return }
             context.addPath(SurfaceIcon.search.path(in: iconRect).cgPath)
             context.setStrokeColor(NSColor.secondaryLabelColor.cgColor)
-            context.setLineWidth(Self.iconLineWidth)
+            context.setLineWidth(scale.searchIconLine)
             context.setLineCap(.round)
             context.setLineJoin(.round)
             context.strokePath()
@@ -269,7 +299,7 @@ final class SearchFieldView: NSView {
 }
 
 /// The search field's clear button (window-design.html `.search .clr`): a
-/// filled 12pt circle in the secondary label color with a × in the opaque
+/// filled circle (12pt at text size 13) in the secondary label color with a × in the opaque
 /// control background color (the card color is translucent on dark and
 /// would not show on the circle). Mouse only — it never takes keyboard
 /// focus, so the caret stays in the text field while the button is clicked.

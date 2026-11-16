@@ -1,10 +1,11 @@
-// The conversation pane's key-command grammar (DESIGN.md §4.6): text
-// size (⌘+ / ⌘− / ⌘0), find navigation (⌘G = next match / ⇧⌘G =
-// previous match, §8.38(7)) and ⌘F. `UnifiedListKeys.decide` folds this in
-// for the popover and the window (§4.5 "key operations"); this mapping
-// decides — kept in Core so "what consumes
-// which key" is pinned by tests, including the pass-throughs (⌘C must
-// never be captured here; it belongs to the message pane).
+// The command-key grammar of the popover and the window: the text size of
+// the popover and the window (⌘= / ⌘+ / ⌘− / ⌘0, decided by the typed
+// character — DESIGN.md §4.5 "text size"), the conversation pane's find
+// navigation (⌘G = next match / ⇧⌘G = previous match, §4.6 / §8.38(7)) and
+// ⌘F. `UnifiedListKeys.decide` folds this in for the popover and the window
+// (§4.5 "key operations"); this mapping decides — kept in Core so "what
+// consumes which key" is pinned by tests, including the pass-throughs (⌘C
+// must never be captured here; it belongs to the message pane).
 
 import Foundation
 
