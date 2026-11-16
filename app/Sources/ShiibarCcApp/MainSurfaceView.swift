@@ -2,8 +2,9 @@
 // §4.5 "switching by width", §8.49; docs/window-design.html). One column:
 // the list page and the detail page, one at a time — the detail page slides
 // in from the trailing edge and slides back out (§9 duration). Two columns
-// (window only, from §9's width): the list column on the left at a width
-// that follows the text size, and the conversation pane on the right. The
+// (window only, from §9's width): the list column on the left — at the
+// width remembered from a boundary drag, else at a width that follows the
+// text size — and the conversation pane on the right. The
 // column mode and the page come from the shared `UnifiedListState`; the
 // window reports its width class to the model. Both roots hand the text
 // size's ratio to every view below through `\.surfaceScale` (DESIGN.md
@@ -20,7 +21,7 @@ struct MainSurfaceView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            content
+            content(width: geometry.size.width)
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .onAppear { reportWidth(geometry.size.width) }
                 .onChange(of: geometry.size.width) { _, width in reportWidth(width) }
@@ -50,17 +51,22 @@ struct MainSurfaceView: View {
     private var scale: SurfaceScale { SurfaceScale(ratio: CGFloat(textSize.size.ratio)) }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(width: CGFloat) -> some View {
         if columns == .two {
-            HStack(spacing: 0) {
-                ListPageView(model: model, surface: surface)
-                    .frame(width: CGFloat(textSize.size.listColumnWidth))
-                    .background(listBackground)
-                Rectangle().fill(SurfaceColors.line).frame(width: 1)
-                rightColumn
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(paneBackground)
-            }
+            TwoColumnLayout(
+                columnWidth: model.listColumnWidth,
+                textSize: textSize.size,
+                windowWidth: width,
+                listColumn: {
+                    ListPageView(model: model, surface: surface)
+                        .background(listBackground)
+                },
+                rightColumn: {
+                    rightColumn
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(paneBackground)
+                }
+            )
         } else {
             oneColumn
         }
@@ -102,5 +108,136 @@ struct MainSurfaceView: View {
         }
         .clipped()
         .animation(.easeInOut(duration: MainWindowMetrics.pageSlideSeconds), value: detailPane != nil)
+    }
+}
+
+/// Two columns (§4.5): the list column, the 1pt boundary line, and the
+/// pane; the boundary's drag area lies over both columns. Only this view
+/// observes the column width, so a drag re-lays out the two columns
+/// without touching the popover or the one-column layout.
+private struct TwoColumnLayout<ListColumn: View, RightColumn: View>: View {
+    @ObservedObject var columnWidth: ListColumnWidthStore
+    let textSize: TextSize
+    let windowWidth: CGFloat
+    @ViewBuilder let listColumn: ListColumn
+    @ViewBuilder let rightColumn: RightColumn
+
+    var body: some View {
+        let width = CGFloat(columnWidth.shownWidth(windowWidth: Double(windowWidth), textSize: textSize))
+        HStack(spacing: 0) {
+            // The list column keeps its identity while its width changes,
+            // so its scroll position and selection stay.
+            listColumn
+                .frame(width: width)
+            Rectangle().fill(SurfaceColors.line).frame(width: 1)
+            rightColumn
+        }
+        // §4.5 / §9: the drag area is centered on the boundary line (4pt on
+        // each side of its center) and sits above both columns, so it takes
+        // the mouse before the list, the pane, or the header row's window
+        // drag. Outside its 8pt nothing is covered: the leading padding has
+        // no content and is not hit-tested.
+        .overlay(alignment: .topLeading) {
+            ColumnBoundaryDragArea(
+                onBegin: { columnWidth.beginDrag(windowWidth: Double(windowWidth), textSize: textSize) },
+                onDrag: { delta in columnWidth.updateDrag(delta: delta, windowWidth: Double(windowWidth)) },
+                onEnd: { columnWidth.endDrag() },
+                onCancel: { columnWidth.cancelDrag() },
+                onDoubleClick: { columnWidth.resetToDefault() }
+            )
+            .frame(width: CGFloat(ListColumnWidth.dragAreaWidth))
+            .frame(maxHeight: .infinity)
+            .padding(.leading, width + 0.5 - CGFloat(ListColumnWidth.dragAreaWidth) / 2)
+        }
+    }
+}
+
+/// Hosts the AppKit view that tracks the boundary drag (cursor, screen-
+/// coordinate travel, double click). The callbacks are refreshed on every
+/// update, so they read the current window width and text size.
+private struct ColumnBoundaryDragArea: NSViewRepresentable {
+    let onBegin: () -> Void
+    let onDrag: (Double) -> Void
+    let onEnd: () -> Void
+    let onCancel: () -> Void
+    let onDoubleClick: () -> Void
+
+    func makeNSView(context: Context) -> ColumnBoundaryDragView {
+        let view = ColumnBoundaryDragView()
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: ColumnBoundaryDragView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: ColumnBoundaryDragView) {
+        view.onBegin = onBegin
+        view.onDrag = onDrag
+        view.onEnd = onEnd
+        view.onCancel = onCancel
+        view.onDoubleClick = onDoubleClick
+    }
+}
+
+/// The column boundary's drag area (§4.5 "column boundary drag", §9):
+/// nothing drawn, a left-right resize cursor. A single press starts a drag
+/// whose travel is read in screen coordinates (the view itself moves with
+/// the boundary, so its own coordinates would drift); a double click resets
+/// the width instead. It never lets a press move the window.
+final class ColumnBoundaryDragView: NSView {
+    var onBegin: () -> Void = {}
+    var onDrag: (Double) -> Void = { _ in }
+    var onEnd: () -> Void = {}
+    var onCancel: () -> Void = {}
+    var onDoubleClick: () -> Void = {}
+    /// The screen location of the pointer; injected for tests.
+    var pointerLocation: () -> NSPoint = { NSEvent.mouseLocation }
+    private var startX: CGFloat = 0
+    private(set) var isDragging = false
+
+    /// A transparent view moves the window by default in a window with a
+    /// hidden title bar; the boundary press must start the resize instead.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            isDragging = false
+            onDoubleClick()
+            return
+        }
+        isDragging = true
+        startX = pointerLocation().x
+        onBegin()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
+        // The pointer can leave the 8pt area while the width is held at an
+        // end of the range; the cursor stays the resize one until mouse-up.
+        NSCursor.resizeLeftRight.set()
+        onDrag(Double(pointerLocation().x - startX))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        isDragging = false
+        onEnd()
+    }
+
+    /// Leaving the window while the mouse is held (the window closes) means
+    /// no mouse-up arrives here: the drag ends without remembering the width.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window == nil, isDragging else { return }
+        isDragging = false
+        onCancel()
     }
 }

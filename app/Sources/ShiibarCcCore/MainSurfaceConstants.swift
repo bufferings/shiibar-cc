@@ -10,6 +10,9 @@ import Foundation
 public enum MainSurfaceDefaultsKeys {
     /// Remembered popover height (points, Double).
     public static let popoverHeight = "cc.shiibar.popoverHeight"
+    /// Remembered two-column list column width (points, Double). Absent
+    /// while the width follows the text size (§4.5 "column boundary drag").
+    public static let listColumnWidth = "cc.shiibar.listColumnWidth"
     /// Window pin ("Keep on top"), Bool.
     public static let windowKeepOnTop = "cc.shiibar.windowKeepOnTop"
     /// Starred conversation session IDs, [String].
@@ -54,8 +57,8 @@ public enum ColumnMode: Equatable, Sendable {
     case two
 
     /// The column mode for a window content width (§4.5/§9: two columns at
-    /// the list column width + 460pt or wider — 880pt at text size 13 — one
-    /// column below). The popover never calls this — it is always `.one`.
+    /// the default list column width + 460pt or wider — 880pt at text size
+    /// 13 — one column below; a remembered width does not move it). The popover never calls this — it is always `.one`.
     public static func forWindowWidth(_ width: Double, textSize: TextSize) -> ColumnMode {
         width >= textSize.twoColumnMinimumWidth ? .two : .one
     }
@@ -156,5 +159,95 @@ public struct PopoverHeightDrag: Equatable, Sendable {
     /// stored height with the display-clamped one — §9).
     public var heightToPersist: Double? {
         height != startHeight ? height : nil
+    }
+}
+
+/// The two-column list column width (§4.5 "switching by width" / "column
+/// boundary drag", §8.53, §9). Without a remembered width the column takes
+/// the default width, which follows the text size; a remembered width wins
+/// over the text size. The two-column threshold stays on the default width
+/// (`ColumnMode.forWindowWidth`) whatever is remembered. Everything here is
+/// used in two columns only.
+public enum ListColumnWidth {
+    /// §9: the narrowest list column.
+    public static let minimum: Double = 280
+    /// §9: the right column keeps at least this width, the 1pt boundary
+    /// line included, so the widest list column is the window width minus
+    /// this.
+    public static let paneMinimum: Double = TextSize.twoColumnPaneAllowance
+    /// §9: the drag area's width, centered on the 1pt boundary line (4pt
+    /// on each side).
+    public static let dragAreaWidth: Double = 8
+
+    /// The default width: the text size's list column width (420pt at 13).
+    public static func defaultWidth(textSize: TextSize) -> Double {
+        textSize.listColumnWidth
+    }
+
+    /// The widest list column for a window content width (the right column
+    /// keeps `paneMinimum`).
+    public static func maximum(windowWidth: Double) -> Double {
+        windowWidth - paneMinimum
+    }
+
+    /// Clamp a width into [minimum, window width − paneMinimum]. When the
+    /// maximum is below the minimum, the minimum wins (§4.5).
+    public static func clamp(_ width: Double, windowWidth: Double) -> Double {
+        max(min(width, maximum(windowWidth: windowWidth)), minimum)
+    }
+
+    /// The remembered width a stored UserDefaults entry stands for: nil
+    /// (no remembered width) for a missing entry, a non-number (a Boolean
+    /// included), a non-finite number, or a number at or below 0. The
+    /// caller does not write the result back.
+    public static func fromStored(_ stored: Any?) -> Double? {
+        guard let number = stored as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value > 0 else { return nil }
+        return value
+    }
+
+    /// The width to show (§4.5): the remembered width clamped into the
+    /// range for the window width, or the default width when nothing is
+    /// remembered. No side effects: the clamped value is never persisted,
+    /// so widening the window brings the remembered width back.
+    public static func shown(remembered: Double?, windowWidth: Double, textSize: TextSize) -> Double {
+        guard let remembered else { return defaultWidth(textSize: textSize) }
+        return clamp(remembered, windowWidth: windowWidth)
+    }
+}
+
+/// One drag of the column boundary (§4.5 "column boundary drag"): the width
+/// follows the cursor from the width shown at mouse-down, clamped into the
+/// range for the window width of that moment (after overshooting an end and
+/// coming back, the boundary follows the pointer again). The app creates
+/// one at mouse-down, feeds every drag event, shows `width`, and persists
+/// `widthToPersist` at mouse-up.
+public struct ListColumnWidthDrag: Equatable, Sendable {
+    /// The shown width at mouse-down.
+    public let startWidth: Double
+    /// The width to show now.
+    public private(set) var width: Double
+
+    public init(startWidth: Double) {
+        self.startWidth = startWidth
+        self.width = startWidth
+    }
+
+    /// Feed the cursor's horizontal travel since mouse-down in screen
+    /// coordinates (positive = rightward = wider).
+    public mutating func update(dragDelta: Double, windowWidth: Double) {
+        width = ListColumnWidth.clamp(startWidth + dragDelta, windowWidth: windowWidth)
+    }
+
+    /// The width to remember when the drag ends, rounded to a whole point,
+    /// or nil when the rounded end width equals the rounded shown width at
+    /// the start (a click without movement, a drag back to where it began,
+    /// or a drag of under half a point). Such a drag therefore neither
+    /// stores a clamped value nor stops the width following the text size.
+    public var widthToPersist: Double? {
+        let end = width.rounded(.toNearestOrAwayFromZero)
+        return end != startWidth.rounded(.toNearestOrAwayFromZero) ? end : nil
     }
 }

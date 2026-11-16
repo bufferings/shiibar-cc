@@ -111,8 +111,8 @@ public struct TextSize: Equatable, Hashable, Sendable {
         (Self.surfaceWidthAtBase * ratio).rounded(.toNearestOrAwayFromZero)
     }
 
-    /// §4.5 / §9: the list column width in two columns, the same value as
-    /// the popover width.
+    /// §4.5 / §9: the default list column width in two columns, the same
+    /// value as the popover width.
     public var listColumnWidth: Double { popoverWidth }
 
     /// §4.5 / §9: the window shows two columns at or above this width.

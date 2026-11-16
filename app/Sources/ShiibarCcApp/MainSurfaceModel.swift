@@ -207,6 +207,9 @@ final class MainSurfaceModel: ObservableObject {
     /// The text size of both surfaces (DESIGN.md §4.5 "text size"); the
     /// roots observe it for the scale and the widths.
     let textSize: TextSizeStore
+    /// The window's two-column list column width (DESIGN.md §4.5 "column
+    /// boundary drag"), persisted in the same defaults as the rest.
+    let listColumnWidth: ListColumnWidthStore
     /// The window's last reported content width: a text size change moves
     /// the two-column threshold, so the column mode is decided again.
     private var windowContentWidth: Double?
@@ -246,6 +249,7 @@ final class MainSurfaceModel: ObservableObject {
     ) {
         self.defaults = defaults
         self.textSize = textSize
+        self.listColumnWidth = ListColumnWidthStore(defaults: defaults)
         self.launchers = launchers
         self.runCommand = runCommand
         self.resumeTerminal = resumeTerminal
@@ -346,6 +350,11 @@ final class MainSurfaceModel: ObservableObject {
     }
 
     func surfaceDidHide(_ surface: MainSurface) {
+        // A boundary drag cannot outlive the window: closing it while the
+        // mouse is held ends the drag without remembering the width.
+        if surface == .window {
+            listColumnWidth.cancelDrag()
+        }
         guard visibleSurface == surface else { return }
         visibleSurface = nil
         send(.surfaceHidden)
@@ -363,6 +372,11 @@ final class MainSurfaceModel: ObservableObject {
     /// The window's width class changed (§4.5 "switching by width").
     func windowColumnsChanged(_ columns: ColumnMode) {
         windowColumns = columns
+        // §4.5: a boundary drag ends without being remembered when the
+        // window leaves two columns.
+        if columns == .one {
+            listColumnWidth.cancelDrag()
+        }
         if visibleSurface == .window {
             send(.columnsChanged(columns))
         }
