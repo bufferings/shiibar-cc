@@ -148,6 +148,12 @@ struct SurfaceScale: Equatable {
     var rowLine2Font: CGFloat { scaled(11) }
     var rowPromptFont: CGFloat { scaled(11) }
     var rowLineSpacing: CGFloat { scaled(1) }
+    /// Line boxes of the card lines: line 1 inherits `.app` (13px,
+    /// line-height 1.35); lines 2 and 3 are `.sub` / `.t3` (11px,
+    /// line-height 1.45). Text is vertically centered in its box.
+    var rowLine1Height: CGFloat { scaled(17.55) }
+    var rowLine2Height: CGFloat { scaled(15.95) }
+    var rowPromptHeight: CGFloat { scaled(15.95) }
     var rowCardTop: CGFloat { scaled(8) }
     var rowCardBottom: CGFloat { scaled(9) }
     /// `.ib` (the row's `>` button): 28×26 with a 15pt chevron.

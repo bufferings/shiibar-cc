@@ -459,11 +459,13 @@ struct RowCardView: View {
                     .font(.system(size: scale.rowLine1Font, weight: row.isLine1Bold ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(height: scale.rowLine1Height)
                 Text(row.line2)
                     .font(.system(size: scale.rowLine2Font))
                     .foregroundStyle(SurfaceColors.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(height: scale.rowLine2Height)
                 promptLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -506,6 +508,7 @@ struct RowCardView: View {
         }
         .font(.system(size: scale.rowPromptFont))
         .foregroundStyle(SurfaceColors.secondary)
+        .frame(height: scale.rowPromptHeight)
     }
 
     @ViewBuilder
