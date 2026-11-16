@@ -5,7 +5,8 @@
 // title bar's red button / ⌘W is the only way to close, because every
 // control here applies immediately (no "OK to confirm"). Two groups:
 // General (Start at Login, reusing AppState's existing SMAppService
-// read/write; Appearance = System / Light / Dark, §8.30/M27 T5) and Sounds
+// read/write; Appearance = System / Light / Dark, §8.30/M27 T5; Global
+// shortcut, the global hotkey's combination — §4.5/§8.50) and Sounds
 // (Mute sound / Waiting sound / Done sound, Waiting above Done per the
 // product's own waiting > working > idle priority), and Conversations
 // (Text size popup — §4.5/§4.6, the same live value the Conversations
@@ -100,10 +101,13 @@ final class SettingsViewModel: ObservableObject {
 
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
-    /// The shared Conversations body-size store (§4.5/§4.6): observed
+    /// The shared conversation-pane body-size store (§4.5/§4.6): observed
     /// directly (not snapshotted into the view model) so a cmd-shortcut
-    /// change from the Conversations window moves this stepper live.
+    /// change from the popover or the window moves this popup live.
     @ObservedObject private var conversationsTextSize: ConversationsTextSizeStore
+    /// The global hotkey's registration (§4.5 "global hotkey"), shared with
+    /// the surface controller that receives the presses.
+    @ObservedObject private var hotKey: GlobalHotKeyModel
 
     init(
         notificationManager: NotificationManager,
@@ -111,8 +115,10 @@ struct SettingsView: View {
         toggleLoginItem: @escaping () -> Void,
         appearanceSetting: AppearanceSetting,
         setAppearance: @escaping (AppearanceSetting) -> Void,
-        conversationsTextSize: ConversationsTextSizeStore
+        conversationsTextSize: ConversationsTextSizeStore,
+        hotKey: GlobalHotKeyModel
     ) {
+        self.hotKey = hotKey
         _viewModel = StateObject(wrappedValue: SettingsViewModel(
             notificationManager: notificationManager,
             loginItemEnabledProvider: loginItemEnabledProvider,
@@ -142,25 +148,7 @@ struct SettingsView: View {
         // as a settings pane, so no in-content "Settings" heading is drawn
         // (a grouped Form with a redundant title looks doubled-up).
         Form {
-            Section("General") {
-                Toggle("Start at Login", isOn: Binding(
-                    get: { viewModel.loginItemEnabled },
-                    set: { _ in viewModel.toggleLoginItem() }
-                ))
-
-                // Appearance (§4.5/§8.30, M27 T5): System / Light / Dark,
-                // default System — the OS can stay light while this app
-                // (the always-visible Agents window in particular) goes
-                // dark. Applies on pick, like every control here.
-                Picker("Appearance", selection: Binding(
-                    get: { viewModel.appearance },
-                    set: { viewModel.setAppearance($0) }
-                )) {
-                    ForEach(AppearanceSetting.allCases, id: \.self) { setting in
-                        Text(setting.displayName).tag(setting)
-                    }
-                }
-            }
+            SettingsGeneralSection(viewModel: viewModel, hotKey: hotKey)
 
             Section("Sounds") {
                 VStack(alignment: .leading, spacing: 2) {
@@ -197,8 +185,9 @@ struct SettingsView: View {
             }
 
             // Conversations below Sounds (§4.5): the Text size popup sets
-            // the Conversations window's body size 10-20pt (§9), the same
-            // value cmd-plus / cmd-minus / cmd-0 adjust on the window itself.
+            // the conversation pane's body size 10-20pt (§9), the same value
+            // cmd-plus / cmd-minus / cmd-0 adjust in the popover and the
+            // window.
             // A popup (same control family as the sound pickers above) lets
             // the owner jump straight to a size while watching the preview
             // (§8.44).
@@ -214,13 +203,46 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380)
+        .frame(width: Self.width)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             // `NSApp.activate` is required in an LSUIElement (accessory)
             // app, same as Setup Check (§4.5).
             NSApp.activate(ignoringOtherApps: true)
             viewModel.refreshLoginItemStatus()
+        }
+    }
+
+    static let width: CGFloat = 380
+}
+
+/// Settings > General (§4.5): Start at Login, Appearance, Global shortcut.
+struct SettingsGeneralSection: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    @ObservedObject var hotKey: GlobalHotKeyModel
+
+    var body: some View {
+        Section("General") {
+            Toggle("Start at Login", isOn: Binding(
+                get: { viewModel.loginItemEnabled },
+                set: { _ in viewModel.toggleLoginItem() }
+            ))
+
+            // Appearance (§4.5/§8.30, M27 T5): System / Light / Dark,
+            // default System — the OS can stay light while this app
+            // (the popover and the window in particular) goes dark. Applies on pick, like every control here.
+            Picker("Appearance", selection: Binding(
+                get: { viewModel.appearance },
+                set: { viewModel.setAppearance($0) }
+            )) {
+                ForEach(AppearanceSetting.allCases, id: \.self) { setting in
+                    Text(setting.displayName).tag(setting)
+                }
+            }
+
+            // Global shortcut (§4.5 / §8.50): records the global hotkey's
+            // combination; registers it the moment it is recorded.
+            GlobalShortcutRow(hotKey: hotKey)
         }
     }
 }

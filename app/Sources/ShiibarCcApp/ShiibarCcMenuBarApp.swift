@@ -1,9 +1,9 @@
-// App entry point (DESIGN.md §4.5): MenuBarExtra in the "window" style
-// (custom dropdown, not a standard NSMenu), an accessory-policy app (no
-// Dock icon, no regular app menu — DESIGN.md §8.4 keeps the menu bar's verb
-// set to focus/back/rescan/mute/quit only). Daemon lifecycle, reconcile,
-// and the first-launch-only Login Item auto-registration are kicked off
-// from `applicationDidFinishLaunching`.
+// App entry point (DESIGN.md §4.5): an accessory-policy app whose tray icon
+// is an own `NSStatusItem` opening an `NSPopover`, plus the single window
+// opened from it (`MainSurfaceController`, AppKit). SwiftUI scenes host only
+// the Settings and Setup Check windows and the app menu commands. Daemon
+// lifecycle, reconcile, and the first-launch-only Login Item
+// auto-registration are kicked off from `applicationDidFinishLaunching`.
 
 import AppKit
 import os
@@ -16,27 +16,18 @@ struct ShiibarCcMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            DropdownView(state: appDelegate.state)
-        } label: {
-            // The label must receive the observable AppState itself, not a
-            // precomputed TrayIconState value: SwiftUI only re-evaluates
-            // this closure when something it observes changes, and a plain
-            // value snapshot observes nothing — that froze the tray at its
-            // launch-time rendering (seen on-device). TrayIconView holds it
-            // as @ObservedObject and derives the icon state per render.
-            TrayIconView(state: appDelegate.state)
+        // Placeholder first scene that is never inserted into the menu bar:
+        // SwiftUI opens the FIRST scene at launch when it is a `Window`
+        // (measured on macOS with a throwaway harness), and this app must
+        // launch with no window. The real tray icon is the controller's own
+        // `NSStatusItem`.
+        MenuBarExtra("Shiibar CC", isInserted: .constant(false)) {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
 
-        // Setup Check window (§4.5, M5 T5), opened via `openWindow(id:)`
-        // from the ⌄ menu (DropdownView.VMenuHandler.openSetupCheck). A
-        // plain `Window` scene (macOS 13+) works cleanly alongside
-        // MenuBarExtra — unlike the dropdown, this is a regular titled
-        // window, not a custom panel, so it needs none of the dropdown's
-        // hand-rolled open/close machinery (it does, however, need the same
-        // NSWindow-notification trick for re-running its checks on reopen —
-        // see `SetupCheckViewModel.observeWindowLifecycle`, M16).
+        // Setup Check window (§4.5), opened via `openWindow(id:)` from the ⌄
+        // menu and the app menu. It re-runs its checks on every (re)open via
+        // NSWindow notifications — see `SetupCheckViewModel.observeWindowLifecycle`.
         Window(SetupCheckWindow.title, id: SetupCheckWindow.id) {
             SetupCheckView(
                 helpersDirectory: appDelegate.state.helpersDirectory,
@@ -46,126 +37,47 @@ struct ShiibarCcMenuBarApp: App {
         }
         .windowResizability(.contentSize)
 
-        // Settings window (§4.5/§8.26, M14 T2), opened the same way as
-        // Setup Check above (DropdownView.VMenuHandler.openSettings). It
-        // replaced the ⌄ menu's old Settings submenu (Start at Login / Mute
-        // Banners / Mute Sound) with this one action item.
-        Window("Settings", id: SettingsWindow.id) {
+        // Settings window (§4.5/§8.26), opened the same way as Setup Check.
+        Window(SettingsWindow.title, id: SettingsWindow.id) {
             SettingsView(
                 notificationManager: appDelegate.state.notificationManager,
                 loginItemEnabledProvider: { appDelegate.state.loginItemEnabled },
                 toggleLoginItem: { appDelegate.state.toggleLoginItem() },
                 appearanceSetting: appDelegate.state.appearanceSetting,
                 setAppearance: { appDelegate.state.setAppearanceSetting($0) },
-                conversationsTextSize: appDelegate.state.conversationsTextSize
+                conversationsTextSize: appDelegate.state.conversationsTextSize,
+                hotKey: appDelegate.state.hotKey
             )
         }
         .windowResizability(.contentSize)
-
-        // Agents window (§4.5 "the agent list window", M26): the ⌄
-        // menu's "Agents…" (AgentListView's VMenuHandler.openAgentsWindow,
-        // renamed from Open as Window — §8.40) opens this —
-        // same shared list content as the dropdown (`AgentListView`), an
-        // ordinary window that stays open until closed instead of closing
-        // on outside click. `windowResizability(.contentSize)` derives the
-        // window's min/max from the content bounds `AgentsWindowView`
-        // declares — width pinned at 340, height user-resizable from ~3
-        // rows up (§4.5/§8.32, M29 T2; see the measurement comment there).
-        // Unlike Setup Check / Settings above (fixed-size content, so the
-        // same modifier yields a non-resizable window), this scene's
-        // content is deliberately height-flexible.
-        //
-        // `.hiddenTitleBar` (§4.5, M26 T4): hides the title-bar CHROME
-        // only. The traffic-light buttons stay, in the slim former-title-
-        // bar band at the top, and the shared list lays out below that
-        // band with the exact same layout the dropdown has (SwiftUI
-        // reserves the band as a top safe-area inset, so no per-container
-        // layout difference is needed). Measured on-device (standalone
-        // harness, macOS 14): the style keeps `.titled` in the styleMask,
-        // keeps all three standard buttons, and still sets `NSWindow.title`
-        // to the scene title below (only `titleVisibility` goes hidden) —
-        // so the title-based window lookup (`VMenuHandler.openAgentsWindow`),
-        // the lifecycle filter (`AgentsWindowViewModel`), and Mission
-        // Control's listing keep working unchanged; the band also remains
-        // the window's standard title-bar drag area.
-        Window(AgentsWindow.title, id: AgentsWindow.id) {
-            AgentsWindowView(state: appDelegate.state)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        // App menu (§4.5/§8.30, M27 T2), visible while the Agents window
-        // has the app in regular mode (AgentsWindowViewModel, M27 T1).
-        // Commands are app-wide; they're declared on this scene because the
-        // menu exists exactly as long as this window does. `.commands` can
-        // only EMPTY the standard menus — `MainMenuPruner` (started in
-        // `AppDelegate`, see AppMenu.swift) hides the leftover husks.
+        // App menu and Edit menu (§4.5/§8.30/§8.41). Commands are app-wide;
+        // `.commands` can only EMPTY the standard menus — `MainMenuPruner`
+        // (started in `AppDelegate`, see AppMenu.swift) hides the husks.
         .commands {
             AppMenuCommands(state: appDelegate.state, menuModel: appDelegate.appMenuModel)
             RemoveStandardMenusCommands()
             RemoveStandardMenusCommands.Extra()
         }
-
-        // Conversations window (§4.6, M35): browse / search / read / resume
-        // the conversation history across folders. Opened via the ⌄ menu and
-        // the app menu's "Conversations…" (disabled while it exists, §4.5).
-        // Hidden-title-bar chrome (`title` = "Conversations") drawn as a
-        // full-height sidebar: the traffic lights sit over the sidebar
-        // material, which `ConversationsContentView` extends to the window
-        // top (§4.6/§8.35). Unlike the Agents window it remembers BOTH size
-        // and position (§9), via the window's own `setFrameAutosaveName` set
-        // in `ConversationsWindowViewModel`.
-        // Read-only over the `shiibar-cc conversations` CLI — no transcript
-        // parsing / SQLite in Swift (§4.6).
-        Window(ConversationsWindow.title, id: ConversationsWindow.id) {
-            ConversationsWindowView(state: appDelegate.state)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        .defaultSize(width: ConversationsWindow.defaultWidth, height: ConversationsWindow.defaultHeight)
     }
 }
 
 /// The Setup Check `Window` scene's stable id, shared between the scene
-/// declaration above and `openWindow(id:)` call site in DropdownView.
+/// declaration above and the `openWindow(id:)` call sites (⌄ menu, app menu).
 enum SetupCheckWindow {
     static let id = "setup-check"
     /// Must match the title passed to `Window(_:id:)` above — used by
-    /// `SetupCheckViewModel.observeWindowLifecycle` (M16) to filter the
-    /// global `NSWindow` open/close notifications down to just this window,
-    /// the same title-filter idea as `AppState.observeDropdownOpen`'s
-    /// class-name filter for the dropdown panel.
+    /// `SetupCheckViewModel.observeWindowLifecycle` to filter the global
+    /// `NSWindow` open/close notifications down to just this window.
     static let title = "Setup Check"
 }
 
-/// The Settings `Window` scene's stable id (M14 T2), shared between the
-/// scene declaration above and `openWindow(id:)` call site in DropdownView.
+/// The Settings `Window` scene's stable id, shared between the scene
+/// declaration above and the `openWindow(id:)` call sites.
 enum SettingsWindow {
     static let id = "settings"
-}
-
-/// The Agents `Window` scene's stable id/title (§4.5 "the agent list window", M26),
-/// shared between the scene declaration above, the `openWindow(id:)` +
-/// title-filter resolution in `AgentListView`'s `VMenuHandler.openAgentsWindow`,
-/// and `AgentsWindowViewModel`'s window-lifecycle title filter — the same
-/// title-filter idea `SetupCheckWindow.title` uses for
-/// `SetupCheckViewModel.observeWindowLifecycle` (M16).
-enum AgentsWindow {
-    static let id = "agents"
-    static let title = "Agents"
-}
-
-/// The Conversations `Window` scene's stable id/title (§4.6, M35), shared
-/// between the scene declaration above, the `openWindow(id:)` call sites (⌄
-/// menu / app menu), and the window-lifecycle title filter in
-/// `ConversationsWindowViewModel`. Initial size 1050×700pt (§9/§8.45);
-/// resizable both axes, size and position remembered. The sidebar width
-/// lives in `ConversationsConstants` (§9: initial 250pt, draggable
-/// 200-400pt, remembered — §8.38(7)).
-enum ConversationsWindow {
-    static let id = "conversations"
-    static let title = "Conversations"
-    static let defaultWidth: CGFloat = 1050
-    static let defaultHeight: CGFloat = 700
+    /// Must match the title passed to `Window(_:id:)` above (the ⌄ menu
+    /// finds the opened window by it to make it key).
+    static let title = "Settings"
 }
 
 @MainActor
@@ -175,9 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// see `AppMenuModel` in AppMenu.swift): agent churn must not
     /// invalidate an open menu.
     let appMenuModel: AppMenuModel
-    /// Keeps the menu bar down to the app menu alone while the app is
-    /// regular (§4.5/§8.30, M27 T2) — see AppMenu.swift.
+    /// Keeps the menu bar down to the app menu and Edit while the app is
+    /// regular (§4.5/§8.30) — see AppMenu.swift.
     private let mainMenuPruner = MainMenuPruner()
+    /// The status item, the popover, the window, and the key monitor.
+    /// Created after launch (it touches NSStatusBar / NSApp).
+    private var surfaceController: MainSurfaceController?
 
     override init() {
         let bundleURL = Bundle.main.bundleURL
@@ -221,31 +136,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Menu-bar-only at launch: no Dock icon, no app menu (§4.5/§8.4).
-        // The app becomes regular only while the Agents window exists
-        // (AgentsWindowViewModel.switchToRegularApp, §8.30/M27 T1).
+        // The app becomes regular only while the window is open (§8.30).
         NSApp.setActivationPolicy(.accessory)
         mainMenuPruner.start()
         performFirstLaunchLoginItemAutoRegistrationIfNeeded()
+        let controller = MainSurfaceController(state: state)
+        surfaceController = controller
+        controller.start()
         state.start()
     }
 
     /// Dock-icon click (and any other reopen event) while the app is
-    /// regular brings a regular-mode window forward (§4.5/§8.30, M27 T1).
-    /// Reopen can only happen while the app is regular, and the app is
-    /// regular exactly while the Agents OR Conversations window exists
-    /// (§4.5, M35 T3) — raise whichever ones are present. ⌘Tab needs no code
-    /// here: activating the app raises its visible windows on its own.
+    /// regular brings the window forward (§4.5/§8.30). Reopen can only
+    /// happen while the app is regular, which is exactly while the window is
+    /// open. ⌘Tab needs no code here: activating the app raises its visible
+    /// windows on its own.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        let regularTitles = [AgentsWindow.title, ConversationsWindow.title]
-        for window in NSApp.windows where regularTitles.contains(window.title) {
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        }
+        state.raiseMainWindow()
         return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // The documented Quit path is the dropdown's ⌄ menu (`state.quit()`,
+        // The documented Quit path is the ⌄ menu / app menu (`state.quit()`,
         // which waits for the daemon's shutdown ack before calling
         // `terminate(nil)`, §8.8). This covers any other termination route
         // (e.g. system logout) with a best-effort, non-blocking shutdown
@@ -264,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// therefore the daemon, §8.8) starts automatically at login — but only
     /// as a **first-launch-only** auto-registration: it records that the
     /// check ran (regardless of outcome) and never repeats it, so a user who later
-    /// turns "Start at Login" off via the ⌄ menu keeps that choice across
+    /// turns "Start at Login" off in Settings keeps that choice across
     /// restarts. Only meaningful once bundled as a `.app` (`dev-install.sh`'s
     /// job, §4.5); in a `swift run` dev build this is a no-op and the flag
     /// is never recorded, so the check re-runs on the next bundled launch.

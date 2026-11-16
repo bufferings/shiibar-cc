@@ -8,7 +8,7 @@
 // Why an NSImage and not composed SwiftUI views: the MenuBarExtra label is
 // not a normal rendering context. On-device it dropped Shape strokes and
 // flattened the custom text layout to a bare menu-bar-styled glyph (while
-// the identical view rendered fine inside the dropdown window). DESIGN.md
+// the identical view rendered fine inside a normal window). DESIGN.md
 // §4.5 prescribes exactly this approach for the tray ("render by NSImage
 // compositing, redrawn per state change"); a plain `Image` is the reliably
 // supported label content.
@@ -28,7 +28,7 @@
 // presentation with trailing U+FE0E so it never renders as a colored emoji
 // glyph — it must not be reshaped toward the Anthropic sunburst logo
 // either); working swaps in the same `GlyphCycleSpinner` cycle
-// (ShiibarCcCore) the dropdown row symbol animates (§9); waiting swaps in a
+// (ShiibarCcCore) the Running row symbol animates (§9); waiting swaps in a
 // bold "!" at ~1.1x the emblem size. The old bottom-right lit-dot working
 // indicator and bottom-right "!" are gone — the emblem slot IS the rollup
 // now. All geometry lives in `TrayIconMetrics` below — single place to
@@ -124,7 +124,7 @@ enum TrayIconRenderer {
 
         // 2. Emblem slot — the ENTIRE rollup lives here now (M24 T1):
         // waiting swaps in a bold "!", working cycles the same glyph-cycle
-        // spinner as the dropdown row symbol (`GlyphCycleSpinner`,
+        // spinner as the Running row symbol (`GlyphCycleSpinner`,
         // ShiibarCcCore), idle/none show the static ✻. Core's Rollup
         // priority (waiting > working > idle) is untouched — this switch
         // only picks which glyph represents the priority `state.glyph`

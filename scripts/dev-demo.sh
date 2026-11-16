@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Stages demo sessions for the README screenshots (or any visual check):
 # replays fake hook JSON into the REAL daemon (the fake-replay technique in
-# DEVELOPMENT.md's hooks section) so the dropdown shows a waiting / working /
-# idle mix without arranging real sessions.
+# DEVELOPMENT.md's hooks section) so the popover's Running section shows a
+# waiting / working / idle mix without arranging real sessions.
 #
 # NOTE: the app's periodic reconcile prunes these fake sessions within ~60s
 # (they don't exist in `claude agents`). Stage, then shoot immediately.
@@ -39,7 +39,7 @@ stage)
   start_and_prompt w0t3p0 "$U_WAIT" "/Users/example/projects/shiibar-cc" \
     "Run the release checklist"
   report w0t3p0 "$U_WAIT" Notification "{\"session_id\":\"$U_WAIT\",\"cwd\":\"/Users/example/projects/shiibar-cc\",\"hook_event_name\":\"Notification\",\"notification_type\":\"permission_prompt\",\"message\":\"Claude needs your permission to use Bash\"}"
-  echo "Staged. Shoot the dropdown NOW (reconcile prunes these in ~60s)."
+  echo "Staged. Shoot the popover NOW (reconcile prunes these in ~60s)."
   echo "A waiting banner (with sound) pops in ~3s — dismiss it or use it."
   ;;
 banner)

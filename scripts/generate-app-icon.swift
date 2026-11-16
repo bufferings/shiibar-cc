@@ -78,7 +78,7 @@ let simplifiedThreshold = 32
 // U+273B TEARDROP-SPOKED ASTERISK with VS15 (U+FE0E) to force the text
 // presentation (M24 T2: "bare U+273B (text presentation)") instead of a
 // possible color-emoji glyph — same character as the tray emblem
-// (TrayIconMetrics.emblemText) and the dropdown row symbol's idle glyph.
+// (TrayIconMetrics.emblemText) and the Running row symbol's idle glyph.
 let asterisk = "\u{273B}\u{FE0E}"
 
 // MARK: - Text helpers (CoreText, drawn directly into the CGContext)

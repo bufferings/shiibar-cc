@@ -1,20 +1,11 @@
-// Dropdown row leading status symbol (menubar-design.html's dropdown
-// section, DESIGN.md §3.1/§4.5, M22): dim static ✻ = idle / glyph-cycle
-// spinner at full opacity = working (the Claude Code TUI's own
-// · ✢ ✳ ✶ ✻ ✽ cycle — the "blinking Claude" counterpart of the still,
-// dim idle ✻) / outlined speech bubble + bold "!" = waiting. Unreviewed
-// rows get a red badge (with a light halo, same two-layer idea as the
-// tray's unreviewed dot) on the symbol's top-right shoulder, REPLACING the
-// old row-right red dot entirely.
-//
-// M22 replaced the original M5 geometry (empty circle / circle+"!" /
-// rotating open-arc spinner) with the ✻ / bubble-! vocabulary — see
-// menubar-design.html's dropdown mock SVGs, the source of the glyph and
-// path coordinates below.
-//
-// Unlike the tray (`TrayIconRenderer`, which needs NSImage compositing
-// because the MenuBarExtra label drops SwiftUI shapes), SwiftUI shapes
-// render correctly inside the dropdown's own window.
+// Running row leading status symbol (window-design.html "row parts",
+// DESIGN.md §3.1/§4.5): dim static ✻ = idle / glyph-cycle spinner at full
+// opacity = working (the Claude Code TUI's own · ✢ ✳ ✶ ✻ ✽ cycle — the
+// "blinking Claude" counterpart of the still, dim idle ✻) / outlined speech
+// bubble + bold "!" = waiting. Unreviewed rows get a red badge (with a
+// light halo, same two-layer idea as the tray's unreviewed dot) on the
+// symbol's top-right shoulder. The glyph and path coordinates below come
+// from window-design.html's 20-unit-box SVG symbols.
 //
 // `AgentStatus -> RowSymbolKind` selection is the pure, tested part
 // (`RowSymbol` in ShiibarCcCore); this view is purely the drawing.
@@ -25,9 +16,9 @@ import SwiftUI
 struct RowSymbolView: View {
     let kind: RowSymbolKind
     let unreviewed: Bool
-    /// Only `true` while both the dropdown is open AND this row is
-    /// `.working` (menubar-design.html: "the spinner cycles only while the
-    /// dropdown is open" — callers gate this, this view just obeys it).
+    /// Only `true` while the popover or the window is visible AND this row
+    /// is `.working` (§4.5 "updates while visible" — callers gate this, this
+    /// view just obeys it).
     var spinning: Bool = false
     var size: CGFloat = 20
 
@@ -64,7 +55,7 @@ struct RowSymbolView: View {
             // idle ✻. Clock-driven frames (TimelineView) instead of a
             // repeat-forever animation or a Timer: SwiftUI cancels
             // in-flight implicit animations when the row's frame changes
-            // (e.g. a sort-mode switch reorders the list), which froze the
+            // (e.g. a list update moves the row), which froze the
             // old arc spinner. Deriving the frame from wall-clock time has
             // no animation state to cancel — and all rows stay in phase
             // with each other AND with the tray emblem (`TrayIconRenderer`,
@@ -89,16 +80,16 @@ struct RowSymbolView: View {
             .font(.system(size: size * Self.glyphSizeRatio))
     }
 
-    /// menubar-design.html row mock: ✻ font-size 15.5 on a 20-unit box
+    /// window-design.html row symbol: ✻ font-size 15.5 on a 20-unit box
     /// (the brief's 15-16px-at-20px range). Starting value only; the three
     /// symbols' optical weight wants a final on-device pass, same idea as
     /// `TrayIconMetrics`. If the smaller-faced spinner frames (✳ ✶)
     /// visibly shrink mid-cycle on device, a per-frame scale table is the
     /// sanctioned fix (M22 brief) — left uniform until the owner judges.
     private static let glyphSizeRatio: CGFloat = 15.5 / 20
-    /// menubar-design.html waiting mock: stroke-width 1.7 on a 20-unit box.
+    /// window-design.html waiting symbol: stroke-width 1.7 on a 20-unit box.
     private static let waitingLineWidthRatio: CGFloat = 1.7 / 20
-    /// menubar-design.html waiting mock: "!" font-size 10.5 on a 20-unit box.
+    /// window-design.html waiting symbol: "!" font-size 10.5 on a 20-unit box.
     private static let waitingBangSizeRatio: CGFloat = 10.5 / 20
 
     private var badge: some View {
@@ -111,7 +102,7 @@ struct RowSymbolView: View {
 }
 
 /// Outlined speech-bubble tail-down-left path, traced from
-/// menubar-design.html's waiting mock SVG path (a 20-unit-box rounded rect,
+/// window-design.html's waiting symbol SVG path (a 20-unit-box rounded rect,
 /// corner radius 2.6, with the bottom-left corner replaced by a tail down
 /// to (5.1, 18.4)). The mock's own tiny tail-tip rounding (r 0.62) is
 /// approximated here by the stroke's round line join rather than a fifth

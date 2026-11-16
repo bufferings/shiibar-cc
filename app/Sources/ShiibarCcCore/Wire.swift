@@ -68,8 +68,8 @@ public struct Agent: Equatable, Decodable, Sendable {
     /// completion has happened yet.
     public let lastAssistantMessage: String?
     /// Epoch seconds this entry was first registered (§3.6). Immutable
-    /// after creation — the sort key for the dropdown's "Newest session"
-    /// mode (§4.5). Forward-compatible addition (M5 T9): missing on the
+    /// after creation — the sort key of the Running section (§4.5:
+    /// `created_at` descending). Forward-compatible addition (M5 T9): missing on the
     /// wire (older daemon) decodes to 0, same as the daemon's own
     /// `#[serde(default)]`.
     public let createdAt: Int64

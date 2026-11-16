@@ -8,7 +8,8 @@ the right one.
 
 **Supported terminals only, by design.** Sessions running in a terminal
 Shiibar CC can't drive (VS Code's integrated terminal, SSH) are not tracked
-at all — they never appear in the list, and there is nothing to jump to. If
+at all — they never show up as Running sessions (no status, no
+notifications), and there is nothing to jump to. If
 your Claude Code sessions don't live in a supported terminal, this tool does
 nothing for you.
 
@@ -27,7 +28,9 @@ terminals:
 "Verified with" is the combination the behavior was checked against, not a
 minimum requirement — lower bounds aren't tested. A session in any other
 terminal (VS Code's integrated terminal, SSH) isn't tracked: it never
-appears in the list, and there is nothing to jump to.
+appears under Running, and there is nothing to jump to. Its conversation
+shows in History marked `running`, where you can read or branch it but not
+jump to it.
 
 ## What it does
 
@@ -41,13 +44,22 @@ a glance:
 - **unreviewed** — a badge that stays lit until you've actually looked at a
   session that finished or started waiting
 
-Click a session in the dropdown (or a notification) and it jumps to that
-session's terminal tab.
+Click the tray icon and a popover opens under it with one list: the
+sessions running right now (**Running**, newest first, each with its status
+symbol) and your past Claude Code conversations (**History**). Type to
+filter both at once. Click a row to select it (click it again to clear the
+selection); the buttons at the bottom act on the selected row, and
+double-clicking a row runs its main button directly. On a running
+session the main button is **Jump** (it brings up that session's terminal
+tab; clicking a notification does the same), and on a past conversation it is **Resume** (it reopens the
+conversation in a new terminal window). **Branch**, next to it, starts a
+new conversation from a copy of either kind.
 
 <img src="docs/assets/menubar-dropdown.png" width="500"
-     alt="The Shiibar CC dropdown, grouped by status: one session waiting
-          on a permission prompt (unreviewed, with a red badge), one
-          working, one idle">
+     alt="The Shiibar CC popover under the tray icon: a search field, the
+          Running section with each session's status symbol, the History
+          section of past conversations, and the Branch ⌘↩ and Jump ↩
+          buttons at the bottom for the selected row">
 
 Notifications carry the outcome, not just an alert — which session
 finished, and what its agent last said:
@@ -56,31 +68,57 @@ finished, and what its agent last said:
      alt="A macOS notification: 'Done — projects/shiibar-cc', with the
           agent's final message about the finished screenshot update">
 
-The dropdown can also be pinned as a small ordinary window (`⌄` →
-Agents…): it stays put while you click through waiting sessions one after
-another, grows as tall as you like, and while it's open the app shows up in
-the Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you
-can also switch the appearance between System, Light and Dark).
+The keyboard works too. The search field only edits your query; Return
+there moves you into the list (selecting the first row if none is
+selected), so typing a query and pressing Return twice jumps to or resumes the top
+match. Once the list has focus, ↑ / ↓ select a row, Return jumps or
+resumes, ⌘Return branches, and → opens the conversation and ← goes back
+to the list (in the popover or a narrow window). ⌘F (or a click) takes you
+back to the search field, and Esc closes the popover. The hint at the
+bottom left shows the keys that work right now, and while the list has
+focus the buttons show their keys (↩ and ⌘↩). The popover is as tall as
+you drag its bottom edge, and stays that way.
+
+**Open in window** (the window button in the popover's header) moves the
+same list, with the same search and selection, into an ordinary window that
+stays put while you work through it. Widen the window and the selected
+conversation shows next to the list; pin it (the pin button) to keep it in
+front of other windows. While the window is open the app shows up in the
+Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you can
+also switch the appearance between System, Light and Dark).
+
+You can also open the list from the keyboard while another app is in
+front. No shortcut is set until you record one: in Settings… → General →
+**Global shortcut**, click the field and press the combination you want
+(for example ⌃⌥Space). The combination is taken from every app, so pick
+one you don't use elsewhere. It needs ⌃, ⌥ or ⌘ unless the key is a
+function key (F1–F20). Esc cancels recording, and × removes the shortcut.
+Pressing the shortcut opens the popover with the list focused (or the
+conversation, if one is open), so ↑ / ↓ and Return work right away;
+pressing it again closes the popover. While the window is open, the
+shortcut brings the window to the front instead, with the same focus.
 
 ### Conversations
 
 Alongside the live status view, Shiibar CC keeps a searchable index of your
-Claude Code conversation history across every folder. Open it from the `⌄`
-menu (or the app menu) → Conversations…: a two-pane window where you can
-**browse** recent conversations, **search** their full text across folders,
-**read** any one from the bottom (latest) up, **jump** to one that's still
-running in its terminal tab, and **resume** a past one in a new terminal
-window. Search is incremental; each word of two or more
-characters matches as a case-insensitive substring ("auth" finds
-"authentication"), and multiple words are AND-ed.
+Claude Code conversation history across every folder; that index is what
+fills the History section. Press the **>** button at the right end of a row
+(or select the row and press →) to **read** the conversation from the
+bottom (latest) up: in the popover, and in a narrow window, it slides in as
+a page of its own; in a wide window there is no **>** button, and the
+selected row's conversation shows next to the list. Search is incremental; each word of
+two or more characters matches as a case-insensitive substring ("auth" finds
+"authentication"), multiple words are AND-ed, and the matches are
+highlighted in the conversation (⌘G / ⇧⌘G step through them). Star a
+conversation in History to keep it at the top of the section.
 
 <img src="docs/assets/conversations-window.png" width="700"
-     alt="The Conversations window: a sidebar listing four conversations
-          across different project folders, and the selected conversation
-          rendered as Markdown — prompt bands, a table of broken links, an
-          inline code suggestion, and a Resume button in the corner">
+     alt="The Shiibar CC window, wide enough for two columns: the Running
+          and History list with the search field on the left, and the
+          selected conversation rendered as Markdown on the right, with
+          the Branch ⌘↩ and Resume ↩ buttons at the bottom">
 
-The same search is available from scripts, so you don't need the window to
+The same search is available from scripts, so you don't need the app to
 find a conversation:
 
 ```sh
@@ -89,8 +127,8 @@ shiibar-cc conversations search "auth middleware"   # add --json for a stable
 ```
 
 Conversations reads Claude Code's transcripts, an undocumented internal
-format; a Claude Code update may break the list or preview until Shiibar CC
-catches up.
+format; a Claude Code update may break the History section or the
+conversation view until Shiibar CC catches up.
 
 ## Permissions
 
@@ -152,8 +190,8 @@ claude plugin install shiibar-cc@shiibar-cc
 
 Then open Shiibar CC once (from Spotlight or `/Applications`) to grant the
 notification and terminal Automation permissions — this also registers it as
-a Login Item. Verify everything end to end from the ⌄ menu's Setup Check,
-or from a terminal:
+a Login Item. Verify everything end to end from the popover's ⌄ menu →
+Setup Check, or from a terminal:
 
 ```sh
 shiibar-cc doctor
@@ -237,17 +275,17 @@ flowchart LR
   connected subscriber.
 - The `shiibar-cc` CLI is mostly internal glue: hooks call
   `shiibar-cc report`, and the app shells out to it for jumping (`focus`),
-  self-repair (`reconcile`), the Setup Check (`doctor`), and the
-  Conversations index. The exceptions you may want to run yourself are
-  `doctor` (troubleshooting) and `conversations search` (scripted search,
-  above).
+  resuming and branching (`resume`), self-repair (`reconcile`), the Setup
+  Check (`doctor`), and the Conversations index. The exceptions you may
+  want to run yourself are `doctor` (troubleshooting) and
+  `conversations search` (scripted search, above).
 - Jumping to a session ("focus") drives the session's terminal (iTerm2 or
   Terminal.app) with AppleScript. Those two are the only terminals Shiibar CC
   knows how to control, by design.
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on
-  demand via Rescan (in the `⌄` menu, or ⌘R while the window is open).
+  demand via Rescan (in the `⌄` menu, or ⌘R).
 - All local state — the daemon's socket, its persisted session state, its
   log, and the Conversations search index (the full text of your
   conversations, kept only on your machine) — lives under

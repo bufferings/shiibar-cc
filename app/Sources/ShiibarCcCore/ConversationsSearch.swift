@@ -1,13 +1,14 @@
-// Client-side search logic for the Conversations window (DESIGN.md §4.6):
+// Client-side search logic for the History section and the conversation
+// pane (DESIGN.md §4.6):
 // deciding when a typed query becomes a real `conversations search` (vs
 // staying on the browse list), and computing in-body hit locations for the
-// preview's hit navigation. The subprocess call and the SwiftUI rendering
+// conversation pane's hit navigation. The subprocess call and the SwiftUI rendering
 // live in ShiibarCcApp; the decisions and the offset math live here so they
 // can be unit-tested table-style.
 
 import Foundation
 
-/// Tunable numbers for the Conversations window, pinned to DESIGN.md §9 by a
+/// Tunable numbers for the conversation search and pane, pinned to DESIGN.md §9 by a
 /// test. The `NSBackgroundActivityScheduler`/subprocess wiring lives in
 /// ShiibarCcApp (AppKit, not unit-testable in this target).
 public enum ConversationsConstants {
@@ -17,16 +18,6 @@ public enum ConversationsConstants {
     /// §9: a message longer than this many characters is folded behind
     /// `Show full message` (the DB still holds the full text).
     public static let messageFoldCharacterLimit: Int = 500
-
-    /// §9: the sidebar starts at 250pt and drags between 200 and 400pt
-    /// (§8.38(7); the width is remembered in UserDefaults).
-    public static let sidebarInitialWidth: Double = 250
-    public static let sidebarMinimumWidth: Double = 200
-    public static let sidebarMaximumWidth: Double = 400
-
-    public static func clampSidebarWidth(_ width: Double) -> Double {
-        min(max(width, sidebarMinimumWidth), sidebarMaximumWidth)
-    }
 }
 
 /// The query-term rules the app shares with the CLI search (§4.6): trim
@@ -50,7 +41,7 @@ public enum ConversationsQuery {
     }
 }
 
-/// One occurrence of a search term in the preview body. Offsets are in the
+/// One occurrence of a search term in the conversation body. Offsets are in the
 /// message's RENDERED text — the characters visible after Markdown
 /// consumption (§4.6): the CLI filters conversations on raw text; positioning
 /// within the document uses the displayed text.
@@ -183,7 +174,7 @@ public enum ConversationsHitNavigation {
     }
 }
 
-/// Hit tick-mark math (§4.6): while the find bar is visible, the right pane
+/// Hit tick-mark math (§4.6): while the find bar is visible, the conversation pane
 /// overlays one tick per hit near its right edge, showing the hit
 /// distribution over the whole conversation. Positions are a message-level
 /// approximation — the containing message's vertical position ratio,

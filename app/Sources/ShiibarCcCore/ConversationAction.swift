@@ -45,3 +45,77 @@ public enum ConversationAction: Equatable {
         return .jumpDisabled
     }
 }
+
+// MARK: - Running rows and Branch (M44, DESIGN.md §4.5 "action buttons", §4.6
+// "bottom panel", §8.49)
+
+extension ConversationAction {
+    /// The bottom panel's primary button for a selected Running row
+    /// (§4.6): always Jump to the row's target — the daemon
+    /// tracks it, so there is no disabled case and no pre-check (§4.6
+    /// "Jump").
+    public static func derive(forRunningAgent agent: Agent) -> ConversationAction {
+        .jump(target: agent.target)
+    }
+
+    /// The view-facing button for this verb. `sessionID` / `cwd` feed the
+    /// Resume invocation. The disabled Resume keeps the `Resume` tooltip
+    /// (§4.6); the disabled Jump carries the untracked-terminal tooltip.
+    public func button(sessionID: String, cwd: String?) -> RowButton {
+        switch self {
+        case .resume:
+            // `.resume` is only derived with a non-empty cwd; stay defensive.
+            guard let cwd, !cwd.isEmpty else {
+                return RowButton(kind: .resume, invocation: nil, tooltip: RowButtonKind.resume.title)
+            }
+            return RowButton(
+                kind: .resume,
+                invocation: .resume(sessionID: sessionID, cwd: cwd),
+                tooltip: RowButtonKind.resume.title
+            )
+        case .resumeDisabled:
+            return RowButton(kind: .resume, invocation: nil, tooltip: RowButtonKind.resume.title)
+        case .jump(let target):
+            return RowButton(kind: .jump, invocation: .jump(target: target), tooltip: RowButtonKind.jump.title)
+        case .jumpDisabled:
+            return RowButton(kind: .jump, invocation: nil, tooltip: RowButton.untrackedRunningTooltip)
+        }
+    }
+
+    /// The Branch button (§4.5/§4.6): enabled when both the session_id and
+    /// the cwd are known (Running rows: either empty disables it; History
+    /// rows: no cwd disables it). Branch works on running conversations too
+    /// (§7-6). The tooltip stays `Branch` while disabled (§4.6).
+    public static func branchButton(sessionID: String, cwd: String?) -> RowButton {
+        guard !sessionID.isEmpty, let cwd, !cwd.isEmpty else {
+            return RowButton(kind: .branch, invocation: nil, tooltip: RowButtonKind.branch.title)
+        }
+        return RowButton(
+            kind: .branch,
+            invocation: .branch(sessionID: sessionID, cwd: cwd),
+            tooltip: RowButtonKind.branch.title
+        )
+    }
+}
+
+// MARK: - CLI arguments of a row verb (DESIGN.md §4.5 "Jump", §4.6 "Resume
+// and Branch")
+
+extension RowInvocation {
+    /// The `shiibar-cc` arguments for this verb. `terminal` is the
+    /// `--terminal` value decided by `ResumeTerminal.decide` (§4.6); Jump
+    /// ignores it.
+    ///   - Jump:   `focus <target>`
+    ///   - Resume: `resume --cwd <cwd> --terminal <t> <session_id>`
+    ///   - Branch: `resume --cwd <cwd> --terminal <t> --fork <session_id>`
+    public func cliArguments(terminal: String) -> [String] {
+        switch self {
+        case .jump(let target):
+            return ["focus", target]
+        case .resume(let sessionID, let cwd):
+            return ["resume", "--cwd", cwd, "--terminal", terminal, sessionID]
+        case .branch(let sessionID, let cwd):
+            return ["resume", "--cwd", cwd, "--terminal", terminal, "--fork", sessionID]
+        }
+    }
+}

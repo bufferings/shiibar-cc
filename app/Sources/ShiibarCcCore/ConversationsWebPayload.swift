@@ -267,3 +267,22 @@ public enum ConversationsWebPayload {
         return result.isEmpty ? nil : result
     }
 }
+
+// MARK: - Per-message copy (§4.6 "per-message copy")
+
+/// What the per-message copy button copies, and how long its check mark
+/// shows. The page only reports which message's button was pressed (its
+/// seq); the text is assembled here, never in the page.
+public enum MessageCopy {
+    /// §9: the icon shows a check mark for 2 seconds after a copy (the same
+    /// value as the Rescan transient display).
+    public static let feedbackSeconds: Double = 2
+
+    /// The full text of the message with `seq`, exactly as `conversations
+    /// show` returned it (§4.6): a user message's words as typed, a Claude
+    /// message's Markdown source — the whole message even when the page
+    /// shows it folded. nil when no loaded message has that seq.
+    public static func text(forSeq seq: Int64, in messages: [ConversationMessage]) -> String? {
+        messages.first(where: { $0.seq == seq })?.text
+    }
+}

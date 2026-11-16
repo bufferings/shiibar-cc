@@ -1,11 +1,13 @@
-// App menu (DESIGN.md §4.5 "one app menu only" / §8.30, M27 T2): while the
-// Agents window exists the app is a regular app (AgentsWindowViewModel,
-// M27 T1) and shows EXACTLY one menu — the app menu — at the top of the
-// screen: About Shiibar CC / - / Settings… (⌘,) / Setup Check… / - /
-// Rescan (⌘R) / Clear badges (disabled when nothing is unreviewed) /
-// Sort by (submenu) / - / Keep on Top (checkmark toggle) / Close Window
-// (⌘W) / Quit Shiibar CC (⌘Q).
-// Every item behaves exactly like its ⌄-menu namesake.
+// App menu (DESIGN.md §4.5 "the menu bar shows the app menu and Edit" /
+// §8.30): while the window is open the app is a regular app and shows the
+// app menu and the Edit menu at the top of the screen. App menu: About
+// Shiibar CC / - / Settings… (⌘,) / Setup Check… / - / Rescan (⌘R) /
+// Clear badges (disabled when nothing is unreviewed) / - / Close Window
+// (⌘W; closes the popover while it is key) / - / Quit Shiibar CC (⌘Q).
+// Every item except Close Window behaves exactly like its ⌄-menu namesake.
+// The same menu object also exists while only the popover shows (the app
+// stays accessory, so the menu bar is not drawn), which keeps the Edit and
+// app-menu shortcuts working there (§4.5 "popover").
 //
 // Two mechanisms cooperate (both measured on-device, macOS 14 harness, M27):
 //  - `.commands` (below) REPLACES the standard command groups, which
@@ -18,7 +20,7 @@
 //    (and the surplus separators). Hiding, not removing, is load-bearing:
 //    removed items were re-added synchronously by every commands
 //    invalidation — including one landing while the user had the menu open,
-//    which closed it (the M27 Sort-by-hover bug) — while hidden items keep
+//    which closed it (a submenu-hover bug) — while hidden items keep
 //    SwiftUI's structure intact so invalidations reconfigure in place with
 //    zero churn. See `prune()` for the measurements.
 
@@ -32,30 +34,16 @@ import SwiftUI
 /// on-device): with the Commands observing `AppState` directly, EVERY
 /// `@Published` change — notably the `agents` array churning on each hook
 /// report — invalidated the commands content, and a commands invalidation
-/// landing while the Sort by submenu was open closed that submenu on the
-/// spot (the top-level menu survives thanks to `MainMenuPruner`'s
-/// hide-not-remove approach, but the Picker's submenu does not; harness:
-/// the first churn killed an open submenu within ~0.2s, while this deduped
-/// facade held one open through five churn bursts). The menu renders
-/// exactly two values — Clear badges' enabled state and the Sort by
-/// selection — so only genuine changes to those may invalidate it (a menu
-/// refresh on a real Clear-badges flip is acceptable).
+/// landing while a submenu was open closed it on the spot. The menu renders
+/// exactly two values — Clear badges' enabled state and Close Window's —
+/// so only genuine changes to those may invalidate it.
 @MainActor
 final class AppMenuModel: ObservableObject {
     @Published private(set) var hasUnreviewed: Bool
-    @Published private(set) var sortMode: SortMode
-    /// Keep on Top checkmark state (§4.5/§8.33, M30) — routed through this
-    /// facade like the other two, so agent churn can never invalidate the
-    /// menu through it.
-    @Published private(set) var keepOnTop: Bool
-    /// Whether the Agents (list) window exists (§4.5, M35 T3) — gates "Keep
-    /// on Top", which is Agents-window-only and meaningless when that window
-    /// is absent. Reachable now that the Conversations window can also raise
-    /// the app menu with no Agents window present.
-    @Published private(set) var agentsWindowOpen: Bool
     /// Whether ⌘W currently has something to close (§4.5/§8.40: Close
     /// Window is disabled when there is no closable window — e.g. every
-    /// window minimized while the app stays regular). Tracked off the
+    /// window minimized while the app stays regular). The popover's window
+    /// counts while it is key (Close Window then closes the popover). Tracked off the
     /// NSWindow key notifications, sampled a tick later so the resign case
     /// reads the NEXT key window, and deduped like everything else here.
     ///
@@ -83,9 +71,6 @@ final class AppMenuModel: ObservableObject {
         }
     ) {
         hasUnreviewed = state.hasUnreviewed
-        sortMode = state.sortMode
-        keepOnTop = state.keepAgentsWindowOnTop
-        agentsWindowOpen = state.isAgentsWindowOpen
         hasClosableWindow = false
         // `$agents` emits the NEW array (willSet timing), so deriving from
         // the emitted value — not from `state.hasUnreviewed`, which still
@@ -94,19 +79,6 @@ final class AppMenuModel: ObservableObject {
             .map { agents in agents.contains { $0.unreviewed } }
             .removeDuplicates()
             .sink { [weak self] in self?.hasUnreviewed = $0 }
-            .store(in: &subscriptions)
-        state.$sortMode
-            .removeDuplicates()
-            .sink { [weak self] in self?.sortMode = $0 }
-            .store(in: &subscriptions)
-        state.$keepAgentsWindowOnTop
-            .removeDuplicates()
-            .sink { [weak self] in self?.keepOnTop = $0 }
-            .store(in: &subscriptions)
-        state.$openRegularWindowTitles
-            .map { $0.contains(AgentsWindow.title) }
-            .removeDuplicates()
-            .sink { [weak self] in self?.agentsWindowOpen = $0 }
             .store(in: &subscriptions)
         let center = NotificationCenter.default
         Publishers.MergeMany(
@@ -124,13 +96,13 @@ final class AppMenuModel: ObservableObject {
     }
 }
 
-/// The app menu's own items (§4.5, M27 T2). Lives on the Agents `Window`
-/// scene in `ShiibarCcMenuBarApp` — commands are app-wide regardless of
-/// which scene declares them.
+/// The app menu's own items (§4.5). Declared on the Settings `Window` scene
+/// in `ShiibarCcMenuBarApp` — commands are app-wide regardless of which
+/// scene declares them.
 struct AppMenuCommands: Commands {
     /// Deliberately a plain `let`, NOT `@ObservedObject` — used for actions
-    /// only. Observing `AppState` here is what closed an open Sort by
-    /// submenu on every agent hook report (see `AppMenuModel` above);
+    /// only. Observing `AppState` here is what closed an open submenu on
+    /// every agent hook report (see `AppMenuModel` above);
     /// everything the menu RENDERS comes from `menuModel`.
     let state: AppState
     @ObservedObject var menuModel: AppMenuModel
@@ -141,79 +113,47 @@ struct AppMenuCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
-            // Same standard About panel as the ⌄ item. No `NSApp.activate`
-            // needed here: the app menu is only reachable while the app is
-            // regular AND frontmost (the accessory-state caveat is the ⌄
-            // path's, §4.5).
-            Button("About Shiibar CC") { NSApp.orderFrontStandardAboutPanel(nil) }
+            // Same as the ⌄ item: the popover closes (§4.5), the app comes
+            // forward (accessory apps need the explicit activate).
+            Button("About Shiibar CC") {
+                state.willOpenAuxiliaryWindow()
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.orderFrontStandardAboutPanel(nil)
+            }
         }
         // §4.5: the app menu holds ONLY the listed items — no Services,
         // no Hide/Hide Others/Show All.
         CommandGroup(replacing: .systemServices) {}
         CommandGroup(replacing: .appVisibility) {}
         CommandGroup(replacing: .appSettings) {
-            // Same handlers as the ⌄ items (§4.5: identical behavior), sans
-            // the dropdown-dismissal half — no dropdown is open when the
-            // click comes from the app menu, and the Agents window must not
-            // close on hand-off anyway (§4.5, M27 T2).
-            Button("Settings…") { openWindow(id: SettingsWindow.id) }
-                .keyboardShortcut(",")
-            Button("Setup Check…") { openWindow(id: SetupCheckWindow.id) }
+            // Same behavior as the ⌄ items (§4.5): the popover closes, the
+            // window stays.
+            Button("Settings…") {
+                state.willOpenAuxiliaryWindow()
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: SettingsWindow.id)
+            }
+            .keyboardShortcut(",")
+            Button("Setup Check…") {
+                state.willOpenAuxiliaryWindow()
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: SetupCheckWindow.id)
+            }
         }
         CommandGroup(after: .appSettings) {
             Divider()
-            // §4.5/§8.40: the Agents-only items sit under a section header
-            // "Agents" (the macOS small gray header — SwiftUI `Section`
-            // renders it as the header-styled menu item) so their
-            // belonging reads without renaming each item.
-            Section("Agents") {
-                Button("Rescan") { state.runReconcile(showFeedback: true) }
-                    .keyboardShortcut("r")
-                Button("Clear badges") { state.clearBadges() }
-                    .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
-                Picker("Sort by", selection: Binding(
-                    get: { menuModel.sortMode },
-                    set: { state.setSortMode($0) }
-                )) {
-                    ForEach(SortMode.allCases, id: \.self) { mode in
-                        Text(mode.menuTitle).tag(mode)
-                    }
-                }
-                // Keep on Top (§4.5/§8.33, M30): a `Toggle` renders as a
-                // checkmarked menu item showing the current value. No
-                // shortcut (§4.5). ON keeps the Agents window at the
-                // floating level — level only, no Space following (§8.33);
-                // default OFF, remembered (`setKeepAgentsWindowOnTop`).
-                // Agents-window-only — disabled when the list window is
-                // absent (the app menu can also be raised by the
-                // Conversations window, which has no level to pin).
-                Toggle("Keep on Top", isOn: Binding(
-                    get: { menuModel.keepOnTop },
-                    set: { state.setKeepAgentsWindowOnTop($0) }
-                ))
-                .disabled(!menuModel.agentsWindowOpen)
-            }
+            Button("Rescan") { state.runReconcile(showFeedback: true) }
+                .keyboardShortcut("r")
+            Button("Clear badges") { state.clearBadges() }
+                .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
             Divider()
-            // The window-verb island (§4.5/§8.40): Agents… (renamed Open as
-            // Window, now in the app menu too) / Conversations… / Close
-            // Window — object-name grammar, separated from Quit. Always
-            // enabled (§8.43): raise the existing window, else open fresh.
-            Button("Agents\u{2026}") {
-                if !state.raiseWindow(titled: AgentsWindow.title) {
-                    openWindow(id: AgentsWindow.id)
-                }
-            }
-            Button("Conversations\u{2026}") {
-                if !state.raiseWindow(titled: ConversationsWindow.title) {
-                    openWindow(id: ConversationsWindow.id)
-                }
-            }
-            // §4.5: standard close-the-key-window behavior (no File menu to
-            // host ⌘W); disabled when nothing is closable (§8.40 — honest
-            // over a silent no-op).
-            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+            // §4.5: closes the key window (standard behavior; no File menu
+            // to host ⌘W) — or the popover while it is key; disabled when
+            // nothing is closable (§8.40 — honest over a silent no-op).
+            Button("Close Window") { state.closeKeySurface() }
                 .keyboardShortcut("w")
                 .disabled(!menuModel.hasClosableWindow)
+            Divider()
         }
         CommandGroup(replacing: .appTermination) {
             // §4.5/§8.8: same Quit path as the ⌄ item — waits for the
@@ -279,7 +219,7 @@ final class MainMenuPruner {
         // reconfigures its existing items in place and leaves `isHidden`
         // alone. Removed items, by contrast, were re-added SYNCHRONOUSLY
         // mid-invalidation — even while a menu-tracking session was open —
-        // which is what closed an open menu the moment Sort by's submenu
+        // which is what closed an open menu the moment a submenu
         // (or any AppState churn, e.g. an agent hook report) invalidated
         // the commands. This observer stays as the backstop for a macOS
         // that rebuilds differently.
@@ -352,7 +292,7 @@ final class MainMenuPruner {
     /// removing the husk menus made every SwiftUI commands invalidation
     /// re-add them synchronously — a structural main-menu mutation that
     /// could land mid-tracking and close whatever menu the user had open
-    /// (deterministically so on hovering Sort by, whose submenu opening
+    /// (deterministically so on hovering a submenu item, whose opening
     /// triggers an invalidation). Hidden items don't render in the menu
     /// bar, but they keep SwiftUI's menu structure intact, so an
     /// invalidation reconfigures items in place: zero `didAddItem` churn,

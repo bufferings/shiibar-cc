@@ -101,7 +101,7 @@ public struct NotificationContent: Equatable, Sendable {
 ///  - done (any non-waiting edge status, i.e. `idle`): title
 ///    "Done — <label>", body = `lastAssistantMessage` if present, else
 ///    `task`. No subtitle.
-/// `label` is the same cwd label the dropdown's second line uses (§3.6),
+/// `label` is the same cwd label a list row's second line uses (§3.6),
 /// passed in rather than computed here since that formatting rule
 /// (`CwdLabel`) needs `$HOME` the caller already has.
 public enum NotificationContentBuilder {

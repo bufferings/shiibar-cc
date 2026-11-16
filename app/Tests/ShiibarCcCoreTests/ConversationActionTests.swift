@@ -135,4 +135,19 @@ final class ConversationActionTests: XCTestCase {
             .resume
         )
     }
+
+    // MARK: - CLI arguments (M44: Jump / Resume / Branch)
+
+    func testCliArgumentsForEachVerb() {
+        let cases: [(RowInvocation, String, [String])] = [
+            (.jump(target: "iterm2:TAB"), "apple-terminal", ["focus", "iterm2:TAB"]),
+            (.resume(sessionID: "S1", cwd: "/Users/example/demo"), "iterm2",
+             ["resume", "--cwd", "/Users/example/demo", "--terminal", "iterm2", "S1"]),
+            (.branch(sessionID: "S2", cwd: "/Users/example/demo"), "apple-terminal",
+             ["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "S2"]),
+        ]
+        for (invocation, terminal, expected) in cases {
+            XCTAssertEqual(invocation.cliArguments(terminal: terminal), expected, "\(invocation)")
+        }
+    }
 }

@@ -5,7 +5,7 @@
 #
 # The build/test job needs macOS: the app build (swift build) and swift
 # test require it, and GitHub's macOS images ship the full Xcode that
-# swift test needs. The pinned Rust toolchain comes from
+# building and running the tests need. The pinned Rust toolchain comes from
 # rust-toolchain.toml — rustup installs it automatically on the first
 # cargo invocation. cargo-deny runs as a separate Linux job because the
 # official action is a Docker action (Linux-only) and the check is
@@ -33,12 +33,14 @@ jobs:
       - name: Clippy (warning-free)
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      - name: App build
-        run: swift build
+      # Warnings fail the build, for the app and the test targets alike.
+      # The test step passes the same flag so it reuses these build products.
+      - name: App build (warning-free)
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
         working-directory: app
 
       - name: App tests
-        run: swift test
+        run: swift test -Xswiftc -warnings-as-errors
         working-directory: app
 
       - name: Cask template check (brew style --cask)

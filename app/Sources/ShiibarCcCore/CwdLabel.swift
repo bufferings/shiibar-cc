@@ -7,7 +7,7 @@
 // spec (§4.5) requires the CLI and the app to agree on the exact same
 // rule, and since the app can't share that Rust crate (§8.5), the rule is
 // duplicated here deliberately (not delegated to a subprocess call, since
-// this needs to run per-row on every dropdown redraw).
+// this needs to run per-row on every list redraw).
 
 import Foundation
 

@@ -56,8 +56,8 @@ final class WireDecodingTests: XCTestCase {
     }
 
     func testAgentDecodesCreatedAtAndLastReportAtWhenPresent() throws {
-        // §4.2/§3.6: `created_at` / `last_report_at` are the sort keys for
-        // the dropdown's "Newest session" / "Recent activity" modes (M5 T9).
+        // §4.2/§3.6: `created_at` is the Running section's sort key (§4.5);
+        // `last_report_at` decodes alongside it.
         let json = """
         {"event":"status_changed","agent":{"target":"t","status":"idle","unreviewed":true,\
         "session_id":"s","cwd":"/c","created_at":100,"last_report_at":200,"since":1,"last_seen":2}}

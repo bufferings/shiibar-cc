@@ -196,11 +196,12 @@ final class WebPaneSecurityTests: XCTestCase {
         ) as? String
         XCTAssertEqual(badge, "2 matches", "the badge must show Core's hidden-hit count")
 
-        // Chrome is excluded from selection/copy (§4.6): the reply marker
-        // and the fold control carry user-select: none.
+        // Chrome is excluded from selection/copy (§4.6): the label row, its
+        // copy button, and the fold control carry user-select: none.
         let chromeExcluded = evaluate(
             """
-            getComputedStyle(document.querySelector('.dot')).webkitUserSelect === 'none' &&
+            getComputedStyle(document.querySelector('.who')).webkitUserSelect === 'none' &&
+            getComputedStyle(document.querySelector('.cp')).webkitUserSelect === 'none' &&
             getComputedStyle(document.querySelector('.expand')).webkitUserSelect === 'none'
             """,
             in: controller

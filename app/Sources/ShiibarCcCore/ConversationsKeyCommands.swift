@@ -1,7 +1,8 @@
-// The Conversations window's key-command grammar (DESIGN.md §4.6): text
-// size (⌘+ / ⌘− / ⌘0) and find navigation (⌘G = next match / ⇧⌘G =
-// previous match, §8.38(7)). The window-scoped event monitor (app side)
-// feeds key facts in; this mapping decides — kept in Core so "what consumes
+// The conversation pane's key-command grammar (DESIGN.md §4.6): text
+// size (⌘+ / ⌘− / ⌘0), find navigation (⌘G = next match / ⇧⌘G =
+// previous match, §8.38(7)) and ⌘F. `UnifiedListKeys.decide` folds this in
+// for the popover and the window (§4.5 "key operations"); this mapping
+// decides — kept in Core so "what consumes
 // which key" is pinned by tests, including the pass-throughs (⌘C must
 // never be captured here; it belongs to the message pane).
 

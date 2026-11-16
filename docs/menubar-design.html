@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>shiibar-cc メニューバー確定デザイン</title>
+<title>shiibar-cc トレイアイコン確定デザイン</title>
 <style>
-  :root { --bg:#f2f2f4; --surface:#fff; --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de; --accent:#b45309; --red:#e5484d;
-    --mbar-bg:rgba(250,250,252,.92); --menu-bg:rgba(252,252,254,.97); --menu-text2:#7c7c82; }
+  :root { --bg:#f2f2f4; --surface:#fff; --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de; --accent:#b45309;
+    --mbar-bg:rgba(250,250,252,.92); }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#171719; --surface:#232326; --text:#ededf0; --text2:#9b9ba3; --line:#38383d; --accent:#e8a10e;
-      --mbar-bg:rgba(38,38,42,.94); --menu-bg:rgba(44,44,48,.97); --menu-text2:#a5a5ad; }
+      --mbar-bg:rgba(38,38,42,.94); }
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font-size:15px; line-height:1.65;
@@ -39,31 +39,14 @@
   .tsvg { position:relative; display:inline-block; width:21px; height:21px; vertical-align:middle; color:var(--text); }
   .tsvg svg { width:100%; height:100%; display:block; overflow:visible; }
 
-  .menu { width:380px; max-width:100%; background:var(--menu-bg); color:var(--text); border-radius:11px; padding:8px 6px;
-    box-shadow:0 10px 34px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.12); font-size:13px; }
-  .topbar { display:flex; align-items:center; gap:7px; padding:5px 6px 3px; }
-  .vbtn { font-size:12px; color:var(--menu-text2); padding:4px 10px; border-radius:7px; background:rgba(127,127,127,.14); }
-  .search { display:flex; align-items:center; gap:6px; flex:1; padding:5px 9px;
-    background:rgba(127,127,127,.14); border-radius:7px; color:var(--menu-text2); font-size:12px; }
-  .ghdr { font-size:14px; font-weight:700; color:var(--text); padding:14px 10px 6px; letter-spacing:.02em;
-    display:flex; align-items:center; gap:8px; line-height:1; }
-  .gcard { background:rgba(127,127,127,.09); border-radius:9px; margin:0 4px; padding:3px; }
-  .mi { display:flex; align-items:center; gap:9px; padding:8px 11px; border-radius:7px; }
-  .mi.hover { background:#3478f6; color:#fff; }
-  .mi .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .mi.strong .grow { font-weight:650; }
-  .mi .sub { display:block; font-size:11px; color:var(--menu-text2); line-height:1.35; font-weight:400; margin-top:1px; }
-  .mi.hover .sub { color:rgba(255,255,255,.75); }
-  .sym { width:20px; height:20px; flex:none; color:var(--text); }
-  .sym svg { width:100%; height:100%; display:block; overflow:visible; }
-  .mi.hover .sym { color:#fff; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="eyebrow">shiibar-cc — 確定デザイン</div>
-  <h1>メニューバー表示仕様</h1>
-  <p class="lede">見た目の正はこのファイル。挙動(状態モデル・通知・接続)の正は DESIGN.md §4.5。</p>
+  <h1>トレイアイコン表示仕様</h1>
+  <p class="lede">メニューバーのトレイアイコンの見た目の正はこのファイル。ポップオーバーとウィンドウの見た目の正は
+    window-design.html。挙動(状態モデル・通知・接続)の正は DESIGN.md §3 / §4.5。</p>
 
   <h2>デザイン原則</h2>
   <ul>
@@ -91,7 +74,7 @@
     <li>ロールアップ優先度: <strong>waiting &gt; working &gt; idle</strong>。トレイは全セッションの状態の代表 1 表示</li>
     <li><strong>テンプレートアイコン</strong>(モノクロ・メニューバーの文字色に自動追従)。暗い壁紙のバーでは白いグリフになる</li>
     <li>左上スロット(素の U+273B、x 6.4 基準)の <strong>1 グリフが状態そのもの</strong>:
-      idle・エージェントなしは静止した ✻ / working はドロップダウン行と同じグリフ循環スピナーが瞬く /
+      idle・エージェントなしは静止した ✻ / working は一覧の行と同じグリフ循環スピナーが瞬く /
       waiting は ✻ と入れ替えで太い <code>!</code>(✻ の約 1.1 倍)。
       working のときだけタイマーが動き、グリフの差し替えのみなのでテンプレート画像のまま成立する</li>
     <li>赤バッジは窓の右肩にさせ、<strong>細い明色フチ(ハロー)を常時描く</strong>
@@ -120,139 +103,18 @@
     </div>
   </div>
 
-  <h2>ドロップダウン: フラット一覧 + 行頭の状態記号(カスタムビュー)</h2>
-  <ul>
-    <li>最上部: <strong>⌄ ボタン</strong>(共通項目の並び順は一覧ウィンドウ表示中のアプリメニューと同一。
-      窓の項目(Keep on Top / Close Window)はアプリメニューのみ。
-      DESIGN.md §4.5/§8.30/§8.40) —
-      <strong>About Shiibar CC</strong>(標準の About パネル。アイコン・名前・バージョンは bundle から自動)/ ─── /
-      <strong>Settings…</strong>(実行項目。クリックで独立した Settings ウィンドウを開く)/
-      <strong>Setup Check…</strong>(導入状態の一覧点検ウィンドウ)/ ─── /
-      <strong>Rescan</strong> = <code>reconcile</code> /
-      <strong>Clear badges</strong>(全セッションの unreviewed フラグを一括で消す。未読が 1 つも無ければ disabled。
-      通知センターの配信済み通知は触らない)/
-      <strong>Sort by</strong>(サブメニュー・ラジオ 2 択: Grouped ✓ / Newest session)/ ─── /
-      <strong>Agents…</strong>(一覧(Agents)ウィンドウを開く。旧称 Open as Window — DESIGN.md §8.40。
-      窓が既にあるときは最前面に出す — §8.43)/
-      <strong>Conversations…</strong>(会話のウィンドウを開く。同じく既にあれば最前面に出す)/ ─── /
-      <strong>Quit</strong>。項目はすべてクリックで閉じる(Sort by のラジオも —
-      閉じるとドロップダウン一覧に並び替え結果がすぐ映る)。
-      <strong>Filter 欄は post-v1</strong>(v1 の topbar は ⌄ のみで、空白も残さない)</li>
-    <li><strong>一覧ウィンドウ</strong>(⌄ → Agents…。DESIGN.md §4.5/§8.30):
-      ドロップダウンと同じ一覧を、タイトルバー非表示(<code>hiddenTitleBar</code>)の普通のウィンドウで
-      出しっぱなしにできる。上端は信号機ボタンだけの細い帯(ドラッグ領域)、その下に同じ見た目の一覧。
-      幅は固定・縦はリサイズ可で高さを記憶(中身の増減では伸縮しない。DESIGN.md §8.32)。
-      <strong>topbar(⌄)は置かない</strong> — 窓がある間はアプリが通常アプリになり、操作は画面上端の
-      アプリメニューと Edit メニュー(標準項目のみ — DESIGN.md §8.41)に出る。アプリメニューの
-      構成(About / Settings… ⌘, / Setup Check… / セクション見出し「Agents」+
-      Rescan ⌘R / Clear badges / Sort by / Keep on Top(トグル・既定 OFF。ON の間だけ最前面)/
-      Agents… / Conversations… / Close Window ⌘W(閉じられる窓が無ければ disabled)/ Quit ⌘Q)に出る</li>
-    <li><strong>Settings ウィンドウ</strong>(⌄ → Settings…): 独立ウィンドウ、表示時 <code>NSApp.activate</code>。
-      閉じるボタンは置かず、タイトルバーの赤ボタンと ⌘W で閉じる(全項目が選んだ瞬間に反映される)。
-      3 グループ — <strong>General</strong>: Start at Login(トグル)/
-      Appearance(ポップアップ: System ✓ / Light / Dark — アプリ全体の外観)/ <strong>Sounds</strong>: Mute sound
-      (トグル。hint「Notifications arrive silently」)/ <strong>Waiting sound</strong>・<strong>Done sound</strong>
-      (ポップアップ 2 つ、Waiting が上。候補は <code>/System/Library/Sounds</code> の標準サウンドを実行時に列挙、
-      拡張子抜きの名前をソートして表示。既定はどちらも Glass)。Mute sound が ON の間、音種 2 つは disabled。
-      音種を選んだ瞬間にその音を 1 回プレビュー再生する /
-      <strong>Conversations</strong>: Text size(ポップアップ — 会話ウィンドウの本文サイズ。
-      conversations-design.html・DESIGN.md §4.5/§9)</li>
-    <li>警告行(daemon 切断中 / 通知権限 denied / TCC エラー。DESIGN.md §4.5)は<strong>ドロップダウン末尾</strong>
-      (一覧の下。一覧ウィンドウでも同じく一覧の下)に常設表示 — <strong>モノクロ(セカンダリ色)+ ⚠ 記号</strong>で、赤は使わない(赤 = unreviewed 専用)。
-      クリック動作なし(切り分けは <code>doctor</code>)</li>
-    <li><strong>行頭の状態記号</strong>(20px 相当): <strong>薄い ✻(静止・50% 濃度)= idle</strong>
-      (U+273B の文字グリフ。本家 TUI が手を止めたときに出す「✻ Worked for Ns」の
-      マーカーと同じ「静止している Claude」)/
-      <strong>グリフ循環スピナー(100% 濃度)= working</strong>
-      (Claude Code の TUI と同じ <code>·</code> <code>✢</code> <code>✳</code> <code>✶</code>
-      <code>✻</code> <code>✽</code> の循環。位置 = <code>round((1−cos(2πt/2000))/2 × 5)</code> —
-      周期 2 秒のコサインイージングで、両端に留まり中間を素早く通過する本家のリズム。
-      等間隔ステップにしない。ドロップダウン(または一覧ウィンドウ)が見えている間だけ動かす)/
-      <strong>輪郭だけの吹き出し + 太い ! = waiting</strong>(塗りなし —
-      Claude があなたに話しかけて返事を待っている)。
-      下のモックは静止画のため working は循環の 1 コマ(✻)を示す(idle との差は濃度のみ)</li>
-    <li>行は 2 行: <strong>1 行目 = 作業内容</strong>(waiting は許可内容 = <code>message</code>、それ以外は最後のプロンプト先頭 = <code>task</code>。
-      どちらも無ければラベルを昇格)/ <strong>2 行目 = ラベル · 経過時間</strong></li>
-    <li><strong>未読(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
-      トレイの「窓の右肩バッジ」と同じ文法。行の右端には何も置かない)。focus(seen)で両方消える</li>
-    <li><strong>並び替え(Sort by、ラジオの並びは既定を先頭に)</strong>: <strong>Grouped(既定)</strong> =
-      グループ見出し <strong>Waiting / Working / Idle</strong>(太字テキストのみ。
-      空グループは非表示)+ グループごとの<strong>薄い背景カード</strong>、グループ内は新しいセッション順 /
-      <strong>Newest session</strong> = 登録時刻の新しい順のフラット一覧。
-      どちらもキー(登録時刻)が不変なので並びは安定 — 行が動くのはグループ間の移動だけ。
-      未読は位置で示さない(太字 + バッジが示す)。行クリックで focus</li>
-    <li><strong>ホバー / プレス</strong>: <strong>セッション行</strong>はホバーで<strong>選択色のハイライト</strong>
-      (角丸 7px。モック値 <code>#3478f6</code>・白文字 — 実装はシステムの選択色に追従させる)、
-      プレス中は<strong>一段暗く</strong>(モック値 <code>#2b66d9</code> 相当)。
-      <strong>⌄ ボタンは選択色を使わない</strong> — 常時見えるチップ(正方形 24×24・角丸 7px)を
-      敷く。実装値(実機確定): 前景色ベースで ベース 10% / ホバー 16% / プレス 24%
-      (素材背景の上でも視認できる濃度)。文字色は変えない。
-      ⌄ の中身(ネイティブメニュー項目)は OS 標準のハイライトのまま。
-      押せないもの(見出し・警告行)には何も付けない</li>
-    <li><strong>Rescan のフィードバック</strong>: ドロップダウンでは topbar の ⌄ の右
-      (v1 では空いている領域)、一覧ウィンドウでは下端(警告行と同じ場所)に一時テキストを出す —
-      実行中 <code>Rescanning…</code> / 正常終了後 <code>✓ Rescan done</code>(表示 2 秒 → 自然消滅。DESIGN.md §9)/
-      失敗(TCC 以外)<code>Rescan failed</code>(同じく 2 秒)。セカンダリ色 12px・クリック不可。
-      件数は出さない。TCC エラー(exit 3)は上記の警告行の扱い</li>
-    <li>UI 文言は英語。行の中身(プロンプト・許可内容)はユーザー入力そのまま。1 行目は末尾省略(ellipsis)、
-      一覧の高さはセッション数ぶん伸び、ディスプレイの可視領域で頭打ち → 縦スクロール
-      (DESIGN.md §8.32)</li>
-    <li>エージェントゼロのときは topbar + 「No agents」の一行のみ</li>
-    <li>状態記号の凡例は UI に置かない(吹き出し ! / 瞬くスピナー / 薄い ✻ は文法で読める、の割り切り)</li>
-  </ul>
-  <div class="mock">
-    <div class="mock-label">既定(Grouped): 見出し + カード、グループ内は新しいセッション順</div>
-    <div class="menu">
-      <div class="topbar"><span class="vbtn">⌄</span></div>
-      <div class="ghdr">Waiting</div>
-      <div class="gcard">
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
-      </div>
-      <div class="ghdr">Working</div>
-      <div class="gcard">
-      <div class="mi"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
-      </div>
-    </div>
-    <div class="mock-label">Newest session モード(Sort by で選択。フラット + 状態記号。上 = 新しいセッション。未読は太字 + 記号右肩のバッジ。1 行目はホバー例)</div>
-    <div class="menu">
-      <div class="topbar"><span class="vbtn">⌄</span><span class="search">🔍 Filter…(post-v1 の想定図。v1 では ⌄ のみ)</span></div>
-      <div class="mi hover"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">アイコンの比較ページを作って<span class="sub">shiibar/main · 2m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">Claude needs your permission<span class="sub">shiibar/wt-m5 · 14m</span></span></div>
-      <div class="mi strong"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" fill-opacity="0.5" stroke="none">&#x273B;&#xFE0E;</text><circle cx="16.4" cy="3.6" r="4.5" fill="var(--red)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></svg></span><span class="grow">README のアウトラインを書いて<span class="sub">blog/draft-post · 31m</span></span></div>
-      <div class="mi"><span class="sym"><svg viewBox="0 0 20 20"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" fill-opacity="0.5" stroke="none">&#x273B;&#xFE0E;</text></svg></span><span class="grow">dotfiles<span class="sub">1h</span></span></div>
-    </div>
-    <div class="mock-label">警告行の例(daemon 切断中。モノクロ + ⚠、赤は使わない。エージェント行がある場合は一覧の下に付く)</div>
-    <div class="menu" style="width:380px">
-      <div class="topbar"><span class="vbtn">⌄</span></div>
-      <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;color:var(--menu-text2);font-size:12px">⚠ Disconnected from daemon — reconnecting…</div>
-    </div>
-    <div class="mock-label">Rescan フィードバックの 2 状態(topbar の ⌄ 右に一時表示。完了表示は 2 秒で消える)</div>
-    <div class="menu" style="width:380px">
-      <div class="topbar"><span class="vbtn">⌄</span><span style="color:var(--menu-text2);font-size:12px;padding:4px 2px">Rescanning…</span></div>
-    </div>
-    <div class="menu" style="width:380px;margin-top:8px">
-      <div class="topbar"><span class="vbtn">⌄</span><span style="color:var(--menu-text2);font-size:12px;padding:4px 2px">✓ Rescan done</span></div>
-    </div>
-  </div>
-
   <h2>実装ノート</h2>
   <ul>
-    <li>本ページのモックアップの CSS 幅(<code>.menu { width:380px }</code>)は誌面上の例示。
-      <strong>実装の一覧幅は 340pt</strong>(ドロップダウン / 一覧ウィンドウ共通。DESIGN.md §8.32・§9)</li>
     <li>トレイは<strong>二層合成</strong>: 窓 + スロットグリフの<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
       <strong>赤バッジを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
-      一次案 = `MenuBarExtra` の label で ZStack(テンプレート NSImage + 赤 Circle オーバーレイ)、
-      不可なら effectiveAppearance 監視の非テンプレート合成にフォールバック。
       スロットの ✻・<code>!</code>・グリフ循環の各コマはすべて文字グリフ(attributed string)、バッジは自前描画</li>
     <li><strong>✻ は素の Unicode 文字グリフ(U+273B TEARDROP-SPOKED ASTERISK 系の文字記号)のまま使い、
       Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
-    <li>ドロップダウンは標準 NSMenu ではなく<strong>カスタムビュー(SwiftUI `MenuBarExtra` の window スタイル)</strong>。
-      ホバー・クリック・警告行は自前実装になる(M4 の工数に織り込む)</li>
     <li>線の太さ・間隔・光学調整はすべて<strong>実機(Retina レンダリング)で最終決定</strong>。実機確認項目:
       ✻ と枠の間隔が融合して見えないか / working のグリフ循環が小サイズで判読できるか
       (花弁が潰れる場合は 9.5pt → 10.5pt まで戻してよい) /
       赤バッジのハローが各種メニューバー色で機能するか</li>
-    <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は 1 クリックで見える)</li>
+    <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は、アイコンのクリックで開くポップオーバーの一覧が示す — window-design.html)</li>
   </ul>
 </div>
 </body>

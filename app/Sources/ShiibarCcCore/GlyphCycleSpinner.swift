@@ -1,7 +1,7 @@
 // The Claude Code TUI's own working-glyph cycle (DESIGN.md §9, M22 brief,
 // read from claude CLI 2.1.204): frames `· ✢ ✳ ✶ ✻ ✽`, selected by a
 // cosine-eased sweep over wall-clock time. Shared by every "working"
-// indicator in the app — the dropdown row symbol (`RowSymbolView`) and the
+// indicator in the app — the Running row symbol (`RowSymbolView`) and the
 // tray emblem slot (`TrayIconRenderer`, M24 T1) — so they always show the
 // same frame at the same instant instead of drifting apart.
 

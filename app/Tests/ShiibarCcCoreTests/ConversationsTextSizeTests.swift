@@ -1,7 +1,7 @@
 import XCTest
 @testable import ShiibarCcCore
 
-/// Text-size rules for the Conversations right pane (DESIGN.md §4.6/§9):
+/// Text-size rules for the conversation pane (DESIGN.md §4.6/§9):
 /// range 10-20pt, default 13pt, code blocks at body -1.5pt, one-point steps
 /// clamped at the edges.
 final class ConversationsTextSizeTests: XCTestCase {

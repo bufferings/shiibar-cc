@@ -1,5 +1,5 @@
-// Markdown block splitting and rendered-text math for the Conversations
-// window's right pane (DESIGN.md §4.6 "rendering grammar"). A user message is
+// Markdown block splitting and rendered-text math for the conversation
+// pane (DESIGN.md §4.6 "rendering grammar"). A user message is
 // a full-width band shown verbatim (no Markdown); a Claude message is split
 // into blocks — fenced code blocks / headings / bullet and numbered list
 // items / pipe tables / paragraphs — and inline styles (code, bold, italic,

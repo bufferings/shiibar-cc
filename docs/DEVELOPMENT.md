@@ -1,9 +1,9 @@
 # 開発メモ
 
 日々の開発・ドッグフーディングで使う手順のメモ。仕様の正は [DESIGN.md](DESIGN.md)、
-メニューバーの見た目の正は [menubar-design.html](menubar-design.html)、
-Conversations ウィンドウの見た目の正は [conversations-design.html](conversations-design.html)
-(タイポグラフィ・余白の CSS 値は規範 — DESIGN.md §8.39。色はシステム追従)。
+トレイアイコンの見た目の正は [menubar-design.html](menubar-design.html)、
+ポップオーバーとウィンドウの見た目の正は [window-design.html](window-design.html)
+(会話ペインのタイポグラフィ・余白の CSS 値は規範 — DESIGN.md §8.39。色はシステム追従)。
 
 ## レビュー・検証体制
 
@@ -27,6 +27,17 @@ Conversations ウィンドウの見た目の正は [conversations-design.html](c
   **`swift test` には Xcode 本体が必要**
   (CLT のみの環境では `could not determine XCTest paths` の警告が出るが、ビルドには無害)。
   Xcode を入れたら `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` で切り替える
+- **Swift の警告は 0 件を保つ**。変更後の確認には、警告をエラーにする次のコマンドを使用する
+  (テストのビルドを含むので Xcode 本体が必要)。
+
+  ```sh
+  (cd app && swift build --build-tests -Xswiftc -warnings-as-errors)
+  (cd app && swift test -Xswiftc -warnings-as-errors)
+  ```
+
+  `swift build` は変更したファイルだけを再コンパイルするので、フラグなしのビルドでは、変更していない
+  ファイルの警告が表示されない。2 つのコマンドに同じフラグを指定するのは、フラグの有無が変わると
+  全体が再ビルドされるためである。`scripts/` のビルドにはこのフラグを指定していない
 
 ## よく使うコマンド
 
@@ -47,7 +58,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ## CI
 
 - push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
-  cargo test / clippy(いずれも `--locked`)と swift build / swift test と cask テンプレートの
+  cargo test / clippy(いずれも `--locked`)と swift build / swift test(いずれも警告をエラーにする)と cask テンプレートの
   `brew style --cask` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
 - **push 後の結果確認は、必ずコミット SHA で run を特定する**。SHA は**フル(40 桁)が必須** —
   `--commit` に短縮 SHA を渡すとエラーにならず黙って 0 件が返り、「run が無い」と誤診する
@@ -169,16 +180,16 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
 - Conversations の会話索引(DESIGN.md §4.6)は状態ディレクトリ内の `conversations-index.db`。
   派生データなので、表示がおかしいときは消してよい — 次の `shiibar-cc conversations index`
-  (ウィンドウを開くだけでも走る)で全再構築される(手動の再インデックス UI は無い。§8.34)
+  (ポップオーバーまたはウィンドウを開くだけでも走る)で全再構築される(手動の再インデックス UI は無い。§8.34)
 - **アプリ側の診断ログ**(daemon の `SHIIBAR_CC_LOG` とは別系統): Conversations の配信・描画は
   unified log に**異常系だけ**を既定レベルで出す(正常系の毎回のログや会話内容は記録しない —
-  DESIGN.md §4.6)。右ペインが白い・表示が来ない等の調査は:
+  DESIGN.md §4.6)。会話ペインが白い・表示が来ない等の調査は:
 
   ```sh
   log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "webpane"'
   ```
 
-  category は `webpane`(右ペインの配信異常)/ `conversations`(CLI 呼び出しの異常)ほか
+  category は `webpane`(会話ペインの配信異常)/ `conversations`(CLI 呼び出しの異常)ほか
   ソース内の `Logger(subsystem:category:)` を参照
 - **README のスクリーンショット**(`docs/assets/`)の撮り直しは `scripts/dev-demo.sh` で:
   `stage` が偽 hook 再生(上記「hooks の検証」と同じ技法)で waiting / working / idle の

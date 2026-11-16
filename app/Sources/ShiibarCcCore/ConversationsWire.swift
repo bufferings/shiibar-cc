@@ -8,14 +8,19 @@
 import Foundation
 
 /// One row of `conversations search --json`
-/// (`{"session_id","cwd","title","updated_at","live"}`, §4.4). `title` is
-/// nullable — the folder-label fallback is the display side's job (§4.6).
-public struct ConversationSummary: Codable, Equatable, Identifiable {
+/// (`{"session_id","cwd","title","updated_at","live","last_prompt"}`, §4.4).
+/// `title` is nullable — the folder-label fallback is the display side's job
+/// (§4.6). `last_prompt` is the first line (80 chars) of the last human
+/// message, null when there is none; a missing key (older CLI) also decodes
+/// to nil.
+public struct ConversationSummary: Codable, Equatable, Identifiable, Sendable {
     public let sessionID: String
     public let cwd: String?
     public let title: String?
     public let updatedAt: Int64
     public let live: Bool
+    /// Line 3 of a History row (§4.6): the last prompt the user sent.
+    public let lastPrompt: String?
 
     public var id: String { sessionID }
 
@@ -25,14 +30,23 @@ public struct ConversationSummary: Codable, Equatable, Identifiable {
         case title
         case updatedAt = "updated_at"
         case live
+        case lastPrompt = "last_prompt"
     }
 
-    public init(sessionID: String, cwd: String?, title: String?, updatedAt: Int64, live: Bool) {
+    public init(
+        sessionID: String,
+        cwd: String?,
+        title: String?,
+        updatedAt: Int64,
+        live: Bool,
+        lastPrompt: String? = nil
+    ) {
         self.sessionID = sessionID
         self.cwd = cwd
         self.title = title
         self.updatedAt = updatedAt
         self.live = live
+        self.lastPrompt = lastPrompt
     }
 }
 
@@ -109,7 +123,9 @@ public struct ConversationDetail: Codable, Equatable {
 /// hands off to another — §4.6's relay), so a consumer must always render
 /// the latest line rather than assume progress only grows.
 public enum IndexProgressEvent: Equatable {
-    case start(total: Int)
+    /// `fullBuild`: the `full_build` field (§4.4) — true only for a full
+    /// build; a missing key reads as false.
+    case start(total: Int, fullBuild: Bool)
     case progress(done: Int, total: Int)
     case done(indexed: Int, removed: Int)
     case error(message: String)
@@ -121,6 +137,12 @@ public enum IndexProgressEvent: Equatable {
         let indexed: Int?
         let removed: Int?
         let message: String?
+        let fullBuild: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case event, total, done, indexed, removed, message
+            case fullBuild = "full_build"
+        }
     }
 
     /// Decode one NDJSON line. Returns nil for a blank or malformed line
@@ -131,7 +153,7 @@ public enum IndexProgressEvent: Equatable {
               let raw = try? JSONDecoder().decode(Raw.self, from: data) else { return nil }
         switch raw.event {
         case "start":
-            return .start(total: raw.total ?? 0)
+            return .start(total: raw.total ?? 0, fullBuild: raw.fullBuild ?? false)
         case "progress":
             return .progress(done: raw.done ?? 0, total: raw.total ?? 0)
         case "done":

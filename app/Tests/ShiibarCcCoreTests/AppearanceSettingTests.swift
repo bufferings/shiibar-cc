@@ -18,8 +18,8 @@ final class AppearanceSettingTests: XCTestCase {
     }
 
     func testRawValueRoundTripsForPersistence() {
-        // UserDefaults persistence goes through `rawValue` (same pattern as
-        // `SortMode`): every case must survive a store/load round trip.
+        // UserDefaults persistence goes through `rawValue`: every case must
+        // survive a store/load round trip.
         for setting in AppearanceSetting.allCases {
             XCTAssertEqual(AppearanceSetting(rawValue: setting.rawValue), setting)
         }

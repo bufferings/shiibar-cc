@@ -1,6 +1,6 @@
 // swift-tools-version:5.9
 // shiibar-cc menu bar app (DESIGN.md §4.5, menubar-design.html). macOS 14+
-// (§8.34: the Conversations window's bundled-SQLite trigram guarantee and
+// (§8.34: the conversation index's bundled-SQLite trigram guarantee and
 // Ventura's end of updates). Pure/testable logic lives in ShiibarCcCore;
 // ConversationsWebPaneKit hosts the Conversations message page (WKWebView —
 // §4.6/§8.38); ShiibarCcApp wires everything to SwiftUI, Network.framework
@@ -18,7 +18,7 @@ let package = Package(
             name: "ShiibarCcCore",
             path: "Sources/ShiibarCcCore"
         ),
-        // The WKWebView message pane for the Conversations window (DESIGN.md
+        // The WKWebView message surface of the conversation pane (DESIGN.md
         // §4.6 "rendering engine", §8.38). A separate library so the page +
         // bridge behavior is testable outside the app executable.
         .target(

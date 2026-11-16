@@ -172,7 +172,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// scheduling time.
     var currentAgentsProvider: () -> [Agent] = { [] }
 
-    /// `$HOME`, used to render the same cwd label the dropdown's second line
+    /// `$HOME`, used to render the same cwd label a list row's second line
     /// uses (§4.5/§3.6).
     var homeProvider: () -> String? = { nil }
 
@@ -232,12 +232,16 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     /// Sweep on focus / unreviewed-lowered (no removal reason involved).
     func sweepDelivered(target: String) {
-        center?.getDeliveredNotifications { [weak self] notifications in
+        guard let center else { return }
+        center.getDeliveredNotifications { notifications in
             let ids = notifications
                 .filter { $0.request.content.threadIdentifier == target }
                 .map(\.request.identifier)
             guard !ids.isEmpty else { return }
-            self?.center?.removeDeliveredNotifications(withIdentifiers: ids)
+            // `center` is the process-wide singleton; re-fetch it here
+            // because this completion handler runs off the main actor.
+            UNUserNotificationCenter.current()
+                .removeDeliveredNotifications(withIdentifiers: ids)
         }
     }
 

@@ -45,7 +45,16 @@ final class ConversationsWireTests: XCTestCase {
     }
 
     func testDecodeIndexProgressEvents() {
-        XCTAssertEqual(IndexProgressEvent.decode("{\"event\":\"start\",\"total\":4200}"), .start(total: 4200))
+        XCTAssertEqual(
+            IndexProgressEvent.decode("{\"event\":\"start\",\"total\":4200,\"full_build\":true}"),
+            .start(total: 4200, fullBuild: true)
+        )
+        XCTAssertEqual(
+            IndexProgressEvent.decode("{\"event\":\"start\",\"total\":3,\"full_build\":false}"),
+            .start(total: 3, fullBuild: false)
+        )
+        // A missing full_build key reads as an incremental run (§4.4).
+        XCTAssertEqual(IndexProgressEvent.decode("{\"event\":\"start\",\"total\":4200}"), .start(total: 4200, fullBuild: false))
         XCTAssertEqual(
             IndexProgressEvent.decode("{\"event\":\"progress\",\"done\":340,\"total\":4200}"),
             .progress(done: 340, total: 4200)

@@ -5,8 +5,8 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
 ## Source of truth
 
 - **Behavior spec**: `docs/DESIGN.md`. The state transition table (§3.4) IS the test spec. Protocol wire format is §4.2. Constants are §9.
-- **Visual spec**: `docs/menubar-design.html` (menu bar / dropdown) and `docs/conversations-design.html`
-  (Conversations window; its typography/spacing CSS values are normative — DESIGN.md §8.39 —
+- **Visual spec**: `docs/menubar-design.html` (tray icon) and `docs/window-design.html`
+  (the popover and the window; the conversation pane's typography/spacing CSS values are normative — DESIGN.md §8.39 —
   while colors follow the system).
 - **Dev procedures**: `docs/DEVELOPMENT.md`.
 - **Decision log**: `docs/DESIGN.md` §8. Read it BEFORE "improving" anything. The non-goals (tmux support, other agents, terminal abstraction layers, config files, launchd) are deliberate decisions with recorded reconsideration conditions. Do not implement them, even if it seems helpful.
@@ -68,9 +68,10 @@ or hook-field fact from memory — verify against the real thing and cite how yo
 cargo build                 # workspace build
 cargo test                  # all tests
 cargo clippy --all-targets  # keep it warning-free
-(cd app && swift build)     # menu bar app build (CLT is enough)
-(cd app && swift test)      # app unit tests (requires full Xcode, not just CLT)
+(cd app && swift build --build-tests -Xswiftc -warnings-as-errors)  # app + tests build; keep it warning-free
+(cd app && swift test -Xswiftc -warnings-as-errors)                 # app unit tests (same flag, so the build is reused)
 SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground   # run daemon with logs
 ```
 
 Toolchain is pinned by `rust-toolchain.toml` (rustup picks it up automatically).
+Both `swift` commands above require full Xcode, not just CLT (a plain `swift build` works with CLT alone).

@@ -63,9 +63,8 @@ final class SetupCheckViewModel: ObservableObject {
     /// throwaway SwiftUI `Window(id:)` harness, same toolchain) that a
     /// `Window` scene's hosted view — and therefore its `@StateObject` —
     /// survives close/reopen. `onAppear` fires exactly once per app run and
-    /// never again on reopen, the same "hosted view stays alive across
-    /// open/close" behavior already documented (and worked around the same
-    /// way) in `AppState.observeDropdownOpen` for the dropdown panel.
+    /// never again on reopen (the "hosted view stays alive across
+    /// open/close" behavior).
     ///
     /// `NSWindow.didBecomeKeyNotification` DOES fire reliably on reopen
     /// (verified in both a plain harness and an accessory + MenuBarExtra

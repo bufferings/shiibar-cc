@@ -1,7 +1,7 @@
-// Text-size rules for the Conversations window's right pane (DESIGN.md
+// Text-size rules for the conversation pane's message surface (DESIGN.md
 // §4.6/§9): cmd-plus / cmd-minus / cmd-0 (and the Settings window's
 // Conversations popup) move the body size within 10-20pt, default 13pt;
-// code blocks track the body at -1.5pt. The list and the status line are
+// code blocks track the body at -1.5pt. The list and the footer are
 // unaffected. Persistence (UserDefaults) and the key handling live in
 // ShiibarCcApp; the numbers and the clamping are pinned here by tests.
 

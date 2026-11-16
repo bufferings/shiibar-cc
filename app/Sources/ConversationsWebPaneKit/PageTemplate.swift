@@ -13,9 +13,13 @@
 //   (the M39 brief's two spike leftovers). If the API is ever missing the
 //   page logs one error through the bridge and degrades to no in-text
 //   highlight — counters, minimap hit lines, and jumps still work.
-// - Chrome (the prompt glyph, the reply marker, fold controls, minimap,
-//   end marker, scroll shadow) is
-//   excluded from selection and copy via user-select: none (§4.6).
+// - Chrome (the label row with its copy button, fold controls, minimap,
+//   end marker, scroll shadow) is excluded from selection and copy via
+//   user-select: none (§4.6). Labels are generated content, never text
+//   nodes, so they also stay out of hits, folds, and textContent.
+// - Per-message copy (§4.6): the page only reports WHICH message's button
+//   was pressed (its seq); Swift assembles and writes the text, then tells
+//   the page to show the check mark.
 //
 // All text in this page is English (repo rule: docs-only Japanese).
 
@@ -27,58 +31,83 @@ let pageTemplate = #"""
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'nonce-__NONCE__'; style-src 'nonce-__NONCE__'">
 <style nonce="__NONCE__">
+  /* Values below are window-design.html's message-surface CSS (§8.39: the
+     CSS values are normative for typography and spacing; colors follow the
+     system). The design's fixed 13px / 13.5px body sizes are expressed
+     relative to --docsize so ⌘+/⌘− keep scaling the body (§4.6). */
   :root {
     --docsize: 13px;
-    --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de;
+    --text:#1d1d1f; --text2:#6e6e73; --label2:#7c7c82; --line:#d9d9de;
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
     --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75); --sel:#3478f6;
+    /* The You label is the system blue (§4.6), resolved by WebKit for the
+       view's effective appearance, so it follows light/dark by itself. */
+    --you:-apple-system-blue;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --text:#ededf0; --text2:#9b9ba3; --line:#38383d;
+    :root { --text:#ededf0; --text2:#9b9ba3; --label2:#a5a5ad; --line:#38383d;
       --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
       --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); }
   }
   /* The app's Appearance override (§4.5) wins in both directions. */
-  html[data-theme="light"] { --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de;
+  html[data-theme="light"] { --text:#1d1d1f; --text2:#6e6e73; --label2:#7c7c82; --line:#d9d9de;
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
     --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75); }
-  html[data-theme="dark"] { --text:#ededf0; --text2:#9b9ba3; --line:#38383d;
+  html[data-theme="dark"] { --text:#ededf0; --text2:#9b9ba3; --label2:#a5a5ad; --line:#38383d;
     --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
     --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); }
 
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:transparent; }
   body { color:var(--text); font-size:var(--docsize); line-height:1.7;
-    font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", sans-serif; }
+    font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; }
   #doc { height:100%; overflow-y:auto; padding:12px 0 16px; position:relative; }
+  /* Focusable (tabindex -1) only so the keyboard scrolls it; no ring. */
+  #doc:focus { outline:none; }
 
   /* Hit highlights: painted ranges, never DOM structure (§8.38). */
   ::highlight(shiibar-hit) { background-color: var(--hl); }
   ::highlight(shiibar-hit-current) { background-color: var(--hlcur); }
 
-  /* User band: full width, glyph column shared with the reply marker.
-     The 22px section gap (html .prompt margin-top) lives on the holder —
-     in this DOM each band is the first child of its own holder, so the
-     mock's .prompt:first-child rule would zero the gap on every band
-     (§8.39 audit finding). */
-  .user-holder { margin-top:22px; }
-  .user-holder:first-child { margin-top:0; }
-  .prompt { display:flex; gap:9px; font-size:calc(var(--docsize) + .5px); line-height:1.6;
-    padding:7px 28px 7px 16px; background:var(--card); } /* text clears the minimap by 8px (§9); the band bg still bleeds to the edge */
-  .prompt .g { flex:none; width:12.5px; text-align:center; font-weight:600;
-    font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  /* One element per message: the label row (.who) + the content. A user
+     message (.band) carries the band background over label and text and
+     bleeds to the right edge (under the minimap); a Claude message (.ans)
+     has no background. The container keeps 18px on the right so code and
+     table BACKGROUNDS keep their extent; text elements add 10-14px so text
+     wraps 8px short of the 20px minimap (§4.6/§9). */
+  .msg { padding:0 18px 0 16px; margin-top:16px; }
+  .msg:first-child { margin-top:0; }
+  .msg.ans { font-size:var(--docsize); line-height:1.7; max-width:60em; }
+  .msg.band { background:var(--card); padding:7px 18px 8px 16px; margin-top:20px; }
+  .msg.band:first-child { margin-top:0; }
+  .msg.band + .msg { margin-top:10px; }
 
-  /* Claude message: hanging reply marker + body column, 60em measure.
-     Values are conversations-design.html's .ans (§8.39: the CSS is the
-     single source of truth): 10px top padding is the band-to-first-reply
-     gap. */
-  .msg { display:flex; gap:9px; padding:10px 18px 0 16px; max-width:60em; }
-  .msg .dot { flex:none; width:12.5px; text-align:center; color:var(--text2);
-    font-size:calc(var(--docsize) / 13 * 9); line-height:2.4; }
-  .msg .body { flex:1; min-width:0; }
-  /* Text wraps 8px short of the 20px minimap (28px total inset, §9). The
-     .msg container keeps its 18px so code/table BACKGROUNDS keep their
-     extent (§4.6: only the text column narrows). */
+  /* Label row (§4.6/§8.49). The label is generated content (::before from
+     data-label), so it is never a DOM text node: it cannot enter hits, fold
+     boundaries, textContent, selection ranges, or WebKit's copy. The label
+     size is the design's fixed 11px (assumption: labels are chrome and do
+     not follow the body text size, like the fold controls). */
+  .who { display:flex; align-items:center; font-size:11px; font-weight:650; line-height:1.6;
+    margin-bottom:2px; }
+  .who::before { content:attr(data-label); }
+  .who.you { color:var(--you); }
+  .who.ai { color:var(--label2); }
+
+  /* Per-message copy button (§4.6 "per-message copy"): right end of the
+     label row, 14px icon, secondary color; the check mark keeps the same
+     position, size, and color. margin-right 10px keeps it inside the
+     8px-before-the-minimap line like the text. */
+  .cp { flex:none; margin-left:auto; margin-right:10px; padding:2px 3px; border-radius:5px;
+    color:var(--label2); display:flex; border:0; background:transparent; cursor:default;
+    font:inherit; line-height:0; }
+  .cp:hover { background:var(--card); }
+  .cp svg { width:14px; height:14px; display:block; fill:none; stroke:currentColor;
+    stroke-width:1.3; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* User message: shown as typed (no Markdown), regular weight, body +0.5pt. */
+  .mt { font-size:calc(var(--docsize) + .5px); line-height:1.6; padding-right:14px; }
+
+  /* Claude message body. */
   .body p, .body h1, .body h2, .body h3, .body h4, .body .li { padding-right:10px; }
   .body p { margin:0 0 8px; }
   .body h1, .body h2, .body h3, .body h4 { margin:10px 0 8px; line-height:1.35; }
@@ -92,7 +121,7 @@ let pageTemplate = #"""
     font-size:calc(var(--docsize) - 1.5px); line-height:1.55; }
   /* Inline code with padding + radius (§4.6 — one of the reasons this pane
      is HTML). */
-  code { font-family:"SF Mono", ui-monospace, Menlo, monospace; font-size:.9em;
+  code { font-family:"SF Mono", ui-monospace, Menlo, monospace; font-size:.88em;
     background:var(--codebg); padding:2px 5px; border-radius:4px; }
   pre code { background:none; padding:0; font-size:inherit; }
   .b { font-weight:600; } .i { font-style:italic; } .st { text-decoration:line-through; }
@@ -102,19 +131,20 @@ let pageTemplate = #"""
      inside itself (§4.6). */
   .tbl { border:1px solid var(--line); border-radius:8px; overflow-x:auto;
     margin:0 0 8px; max-width:100%; width:fit-content; }
-  .tbl table { border-collapse:collapse; line-height:1.5; }
+  .tbl table { border-collapse:collapse; font-size:var(--docsize); line-height:1.5; }
   .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line);
     vertical-align:top; max-width:28em; overflow-wrap:break-word; white-space:normal; }
   .tbl th { border-top:0; font-weight:600; background:var(--card); }
 
   .expand { border:0; background:transparent; color:var(--sel); font-size:11px;
     cursor:pointer; padding:0; font-family:inherit; display:block; margin:2px 0 8px; }
-  .prompt-expand { margin-left:calc(16px + 12.5px + 9px); }
+  .band .expand { margin:2px 0 0; }
   .expand .cnt { color:var(--text); background:var(--hl); border-radius:4px;
     padding:0 5px; font-size:10px; font-weight:600; }
 
-  /* Chrome is not content: excluded from selection AND copy (§4.6). */
-  .prompt .g, .msg .dot, .expand {
+  /* Chrome is not content: excluded from selection AND copy (§4.6) — the
+     label row (label + copy button) and the fold controls. */
+  .who, .cp, .expand {
     -webkit-user-select:none; user-select:none;
   }
 
@@ -136,7 +166,7 @@ let pageTemplate = #"""
 
   /* Bottom cues (§4.6/§8.39): the end marker after the last message, and a
      top scroll shadow while content extends above. Both are chrome. */
-  .endcap { display:flex; align-items:center; gap:10px; color:var(--text2); font-size:11px;
+  .endcap { display:flex; align-items:center; gap:10px; color:var(--label2); font-size:11px;
     margin:14px 16px 4px; -webkit-user-select:none; user-select:none; }
   .endcap::before, .endcap::after { content:""; flex:1; height:1px; background:var(--line); }
   #topshadow { position:fixed; top:0; left:0; right:20px; height:8px; opacity:0;
@@ -145,7 +175,7 @@ let pageTemplate = #"""
 </style>
 </head>
 <body>
-<div id="doc"></div>
+<div id="doc" tabindex="-1"></div>
 <div id="mm"></div>
 <div id="topshadow"></div>
 <script nonce="__NONCE__">
@@ -158,6 +188,7 @@ const S = {
   nodeMaps: [],        // per message: [{node, start, end}] in message coords
   msgEls: [],          // per message: container element
   ranges: [],          // per hit: resolved Range or null (behind the fold)
+  copied: new Map(),   // message seq -> timer of its check-mark feedback
   hasSelection: false,
   warnedNoHighlight: false,
 };
@@ -165,6 +196,20 @@ const doc = document.getElementById('doc');
 const mm = document.getElementById('mm');
 const topShadow = document.getElementById('topshadow');
 const post = m => window.webkit.messageHandlers.shiibar.postMessage(m);
+
+// Keyboard scrolling (DESIGN.md §4.5 "key operations": ↑ / ↓, Space and
+// Page Up / Page Down scroll the conversation on the one-column detail
+// page). WebKit scrolls the focused element's scroller; with nothing
+// focused it tries the document, which never scrolls here (#doc is the
+// scroller). So a key that arrives with nothing focused focuses #doc first
+// (no scroll, no selection change) and WebKit's default handling of the
+// same key scrolls it.
+document.addEventListener('keydown', () => {
+  const active = document.activeElement;
+  if (!active || active === document.body || active === document.documentElement) {
+    doc.focus({ preventScroll: true });
+  }
+}, true);
 
 // Silent breakage is forbidden: everything unexpected goes to the native log.
 window.onerror = (message, source, line) => {
@@ -243,10 +288,10 @@ function buildBlock(blk, mi, folded) {
   return p;
 }
 
-function expandControl(mi, msg, forPrompt) {
+function expandControl(mi, msg) {
   const folded = !S.expanded.has(mi);
   const btn = document.createElement('button');
-  btn.className = 'expand' + (forPrompt ? ' prompt-expand' : '');
+  btn.className = 'expand';
   if (folded) {
     btn.appendChild(document.createTextNode('Show full message'));
     // Badge count = Core's hidden flags; the page never recomputes it.
@@ -271,41 +316,94 @@ function expandControl(mi, msg, forPrompt) {
   return btn;
 }
 
-// One message's element (a fragment holding band + control for user
-// messages). Registers its text nodes into nodeMaps[mi].
+// Icons are fixed page geometry (window-design.html's i-copy / i-check
+// symbols), never transcript content.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICONS = {
+  copy: ['M5.5 7a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 13.5 7v5a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 12z',
+         'M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5'],
+  check: ['M3.5 8.5l3 3 6-7'],
+};
+
+function setCopyIcon(btn, done) {
+  btn.textContent = '';
+  btn.dataset.state = done ? 'done' : 'idle';
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  for (const d of ICONS[done ? 'check' : 'copy']) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  btn.appendChild(svg);
+}
+
+// The label row: generated-content label + the per-message copy button.
+function labelRow(msg) {
+  const row = document.createElement('div');
+  const isUser = msg.role === 'user';
+  row.className = 'who ' + (isUser ? 'you' : 'ai');
+  row.dataset.label = isUser ? 'You' : 'Claude';
+  const btn = document.createElement('button');
+  btn.className = 'cp';
+  btn.title = 'Copy';
+  btn.dataset.seq = msg.seq;
+  setCopyIcon(btn, S.copied.has(msg.seq));
+  // Pressing the button must leave the selection alone (§4.6): no focus
+  // move, no selection change on mousedown.
+  btn.addEventListener('mousedown', e => e.preventDefault());
+  btn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    post({ type: 'copyMessage', seq: msg.seq });
+  });
+  row.appendChild(btn);
+  return row;
+}
+
+// One message's element: label row + content (+ fold control). Registers
+// its text nodes into nodeMaps[mi]; the label row registers none.
 function buildMessage(msg, mi) {
   S.nodeMaps[mi] = [];
   const folded = msg.folds && !S.expanded.has(mi);
   const holder = document.createElement('div');
   holder.dataset.mi = mi; holder.dataset.seq = msg.seq;
+  holder.appendChild(labelRow(msg));
   if (msg.role === 'user') {
-    const band = document.createElement('div'); band.className = 'prompt';
-    const g = document.createElement('span'); g.className = 'g'; g.textContent = '\u276F';
-    band.appendChild(g);
-    const span = document.createElement('span');
+    holder.className = 'msg band';
+    const mt = document.createElement('div'); mt.className = 'mt';
     const blk = msg.blocks[0];
     if (blk) {
       const vis = folded ? blk.foldedLen : blk.text.length;
-      addText(span, mi, blk.text.slice(0, vis), blk.start);
+      addText(mt, mi, blk.text.slice(0, vis), blk.start);
     }
-    band.appendChild(span);
-    holder.appendChild(band);
-    if (msg.folds) holder.appendChild(expandControl(mi, msg, true));
-    holder.className = 'user-holder';
+    holder.appendChild(mt);
+    if (msg.folds) holder.appendChild(expandControl(mi, msg));
   } else {
-    const row = document.createElement('div'); row.className = 'msg';
-    const dot = document.createElement('span'); dot.className = 'dot'; dot.textContent = '\u23FA';
-    row.appendChild(dot);
+    holder.className = 'msg ans';
     const body = document.createElement('div'); body.className = 'body';
     msg.blocks.forEach(blk => {
       const el = buildBlock(blk, mi, folded);
       if (el) body.appendChild(el);
     });
-    if (msg.folds) body.appendChild(expandControl(mi, msg, false));
-    row.appendChild(body);
-    holder.appendChild(row);
+    if (msg.folds) body.appendChild(expandControl(mi, msg));
+    holder.appendChild(body);
   }
   return holder;
+}
+
+// Check-mark feedback after Swift wrote the copy (§4.6/§9): same position,
+// size, and color; reverts after `ms`. Survives a rebuild of the message
+// (fold toggles) because the state lives in S.copied, keyed by seq.
+function markCopied(seq, ms) {
+  const prev = S.copied.get(seq);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    S.copied.delete(seq);
+    doc.querySelectorAll('.cp[data-seq="' + seq + '"]').forEach(b => setCopyIcon(b, false));
+  }, ms);
+  S.copied.set(seq, timer);
+  doc.querySelectorAll('.cp[data-seq="' + seq + '"]').forEach(b => setCopyIcon(b, true));
 }
 
 function render() {
@@ -401,8 +499,8 @@ function rebuildMinimap() {
   S.msgEls.forEach((holder, mi) => {
     if (!holder || !S.msgs[mi]) return;
     if (S.msgs[mi].role === 'user') {
-      const band = holder.querySelector('.prompt');
-      if (band) put('band', contentY(band), band.offsetHeight);
+      // The whole band (label row included) is the stripe.
+      put('band', contentY(holder), holder.offsetHeight);
       return;
     }
     const body = holder.querySelector('.body');
@@ -484,7 +582,7 @@ window.addEventListener('mouseup', () => {
 // ---- Copy support (§4.6 "selection and copy") ----
 
 // The selection as rendered-text ranges, one entry per touched message:
-// {m, s, l} in UTF-16 message coordinates. Chrome text (markers, buttons)
+// {m, s, l} in UTF-16 message coordinates. Chrome text (labels, buttons)
 // is not in the node maps, so it can never enter a range. Native converts
 // to Character offsets and serializes via Core (§8.38).
 function selectionRanges() {
@@ -547,6 +645,7 @@ window.shiibarAPI = {
     S.msgs = payload.messages;
     S.elapsed = payload.elapsed || null;
     S.hits = []; S.cur = -1; S.expanded = new Set();
+    S.copied.forEach(t => clearTimeout(t)); S.copied = new Map();
     render();
     void doc.scrollHeight; // force layout before positioning
     const anchorEl = anchorSeq === null ? null : doc.querySelector('[data-seq="' + anchorSeq + '"]');
@@ -599,6 +698,7 @@ window.shiibarAPI = {
   setTheme(dark) {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   },
+  markCopied,
   selectionRanges,
   hasSelection() { return S.hasSelection; },
 };
@@ -612,7 +712,7 @@ function refreshFoldControls() {
     if (!holder) return;
     const old = holder.querySelector('.expand');
     if (!old) return;
-    const fresh = expandControl(mi, msg, msg.role === 'user');
+    const fresh = expandControl(mi, msg);
     old.replaceWith(fresh);
   });
 }

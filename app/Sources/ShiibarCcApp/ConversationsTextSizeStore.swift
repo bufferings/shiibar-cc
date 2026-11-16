@@ -1,6 +1,6 @@
-// The one owner of the Conversations body text size (DESIGN.md §4.6/§4.5):
-// cmd-plus / cmd-minus / cmd-0 on the Conversations window and the Settings
-// window's Conversations stepper all read and write THIS object, so both
+// The one owner of the conversation pane's body text size (DESIGN.md
+// §4.6/§4.5): cmd-plus / cmd-minus / cmd-0 in the popover and the window and
+// the Settings window's Text size popup all read and write THIS object, so both
 // UIs stay live-synced (a change from either side republishes immediately).
 // Persisted in UserDefaults (§8.9: app UX settings are UserDefaults); the
 // range/step/default numbers live in ShiibarCcCore.ConversationsTextSize,

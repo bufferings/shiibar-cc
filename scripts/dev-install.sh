@@ -179,5 +179,5 @@ echo "  $BIN_DIR/shiibar-cc doctor"
 echo
 echo "First launch: macOS will prompt for a notification permission and,"
 echo "the first time focus/reconcile runs osascript against iTerm2, an"
-echo "Automation permission prompt. Grant both — see menubar-design.html"
-echo "for what a denied/disconnected state looks like in the dropdown."
+echo "Automation permission prompt. Grant both — see window-design.html"
+echo "for how warnings (e.g. a disconnected daemon) look in the popover's footer."

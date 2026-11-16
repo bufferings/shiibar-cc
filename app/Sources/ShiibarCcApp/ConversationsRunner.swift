@@ -1,6 +1,6 @@
-// Async, line-streaming, cancellable subprocess runner for the Conversations
-// window (DESIGN.md §4.6, task brief M35 T2). The dropdown's `CLIRunner` is
-// synchronous and buffers the whole output — unusable here, where the window
+// Async, line-streaming, cancellable subprocess runner for the History
+// section and the conversation pane (DESIGN.md §4.6). `CLIRunner` is
+// synchronous and buffers the whole output — unusable here, where the app
 // must: read `conversations index --json` progress line-by-line while it
 // runs; terminate an in-flight `conversations search` when a newer keystroke
 // arrives (SIGTERM mid-catch-up is safe — the SQLite discipline in §4.6

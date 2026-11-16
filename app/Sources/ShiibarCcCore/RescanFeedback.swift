@@ -1,13 +1,14 @@
-// Manual Rescan (`shiibar-cc reconcile` from the dropdown's ⌄ menu) transient
-// feedback (DESIGN.md §4.5, §9): decides what the topbar should show, and for
-// how long, given the rescan's lifecycle. Pure state only, same split as
+// Manual Rescan (`shiibar-cc reconcile` from the ⌄ menu / the app menu)
+// transient feedback (DESIGN.md §4.5, §9): decides what the message line
+// shows (`MessageTransient.rescan`), and for how long, given the rescan's
+// lifecycle. Pure state only, same split as
 // NotificationLogic's delayed re-check — the Timer/DispatchQueue that clears
 // a terminal state after `displaySeconds` lives in the app layer (AppState).
 
 import Foundation
 
 /// One state of the transient "Rescanning… / ✓ Rescan done / Rescan failed"
-/// text shown next to the ⌄ button. `nil` (no case) means nothing is shown;
+/// text shown on the message line of the fixed footer. `nil` (no case) means nothing is shown;
 /// callers model "no feedback" as an `Optional<RescanFeedback>` rather than
 /// adding an `.idle` case here.
 public enum RescanFeedback: Equatable, Sendable {

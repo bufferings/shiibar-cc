@@ -15,8 +15,8 @@
 // non-persistent.
 //
 // Bridge surface — native -> JS: load / setHits / jump / setSize / setTheme
-// / selectionRanges. JS -> native: ready / rendered / hitsApplied /
-// selection / anchor / error. Every JS-side exception and every
+// / selectionRanges / markCopied. JS -> native: ready / rendered /
+// hitsApplied / selection / anchor / copyMessage / error. Every JS-side exception and every
 // evaluateJavaScript failure lands in the unified log (category "webpane")
 // — nothing breaks silently.
 
@@ -71,10 +71,19 @@ public final class WebPaneController: NSObject, ObservableObject {
     /// sandbox (the same principle as the temp-state-dir rule).
     public var openExternalURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
-    /// Where Copy as Markdown writes. Injectable for the same sandbox rule:
-    /// tests use a uniquely named pasteboard, never the user's general one.
-    /// (Plain Copy never comes through here — it is WebKit's own `copy:`.)
+    /// Where Copy as Markdown and the per-message copy button write.
+    /// Injectable for the same sandbox rule: tests use a uniquely named
+    /// pasteboard, never the user's general one. (Plain Copy never comes
+    /// through here — it is WebKit's own `copy:`.)
     public var pasteboard: NSPasteboard = .general
+
+    /// How long the copy button shows its check mark (§9). Injectable only
+    /// so tests can observe the revert without waiting the full duration.
+    public var copyFeedbackSeconds: Double = MessageCopy.feedbackSeconds
+
+    /// Called after a per-message copy wrote the pasteboard, with the
+    /// message's seq (optional; for a view layer that wants to react).
+    public var onMessageCopied: ((Int64) -> Void)?
 
     /// How ⌘C reaches WebKit (§4.6/§8.38(6): Copy just invokes the standard
     /// `copy:` — rich formats included, no writing path of our own).
@@ -88,6 +97,9 @@ public final class WebPaneController: NSObject, ObservableObject {
     /// The conversation currently in the page — Copy as Markdown serializes
     /// from the block structure the display was built from (§4.6).
     private var loadedRendered: [RenderedMessage] = []
+    /// The conversation's messages as `conversations show` returned them —
+    /// the per-message copy copies these texts (§4.6).
+    private var loadedMessages: [ConversationMessage] = []
 
     private var pageReady = false
     private var queuedScripts: [String] = []
@@ -143,6 +155,7 @@ public final class WebPaneController: NSObject, ObservableObject {
         anchorSeq: Int64?, elapsed: String? = nil
     ) {
         loadedRendered = rendered
+        loadedMessages = messages
         loadGeneration += 1
         let generation = loadGeneration
         let payload = ConversationsWebPayload.payload(messages: messages, rendered: rendered, elapsed: elapsed)
@@ -278,10 +291,25 @@ public final class WebPaneController: NSObject, ObservableObject {
         }
     }
 
-    private func writePasteboard(_ string: String) {
-        guard !string.isEmpty else { return }
+    /// The per-message copy button (§4.6 "per-message copy"): the FULL
+    /// text of the message with `seq` (a Claude message's Markdown source;
+    /// folded messages included) as plain text. The page's selection is not
+    /// touched. After the write the page swaps the icon to a check mark for
+    /// `copyFeedbackSeconds` (§9). An unknown seq or an empty text writes
+    /// nothing and shows no check mark.
+    public func copyMessage(seq: Int64) {
+        guard let text = MessageCopy.text(forSeq: seq, in: loadedMessages),
+              writePasteboard(text) else { return }
+        let milliseconds = Int((copyFeedbackSeconds * 1000).rounded())
+        run("shiibarAPI.markCopied(\(seq), \(milliseconds))")
+        onMessageCopied?(seq)
+    }
+
+    @discardableResult
+    private func writePasteboard(_ string: String) -> Bool {
+        guard !string.isEmpty else { return false }
         pasteboard.clearContents()
-        pasteboard.setString(string, forType: .string)
+        return pasteboard.setString(string, forType: .string)
     }
 
     private struct SelectionRange: Decodable {
@@ -366,6 +394,12 @@ public final class WebPaneController: NSObject, ObservableObject {
             onHitsApplied?(body["ms"] as? Double ?? 0)
         case "selection":
             pageHasSelection = body["has"] as? Bool ?? false
+        case "copyMessage":
+            if let seq = body["seq"] as? Int64 ?? (body["seq"] as? Int).map(Int64.init) {
+                copyMessage(seq: seq)
+            } else {
+                webPaneLog.error("copyMessage without a seq")
+            }
         case "anchor":
             if let seq = body["seq"] as? Int64 ?? (body["seq"] as? Int).map(Int64.init) {
                 onAnchor?(seq)

@@ -1,7 +1,8 @@
 // Central app state (DESIGN.md §4.5): owns the agent table (kept in sync via
 // the daemon subscribe stream), drives reconcile at startup/reconnect,
-// dispatches CLI subprocess calls for focus/back/rescan, and wires
-// `agent_removed` into notification cleanup.
+// dispatches CLI subprocess calls for focus/rescan, wires `agent_removed`
+// into notification cleanup, and owns the shared model of the popover and
+// the window (`MainSurfaceModel`).
 
 import AppKit
 import Combine
@@ -18,68 +19,41 @@ final class AppState: ObservableObject {
         didSet {
             refreshWorkingAnimationTimer()
             rememberObservedTerminal()
+            surface.agentsUpdated(agents)
         }
     }
     @Published private(set) var connected = false {
-        didSet { refreshWorkingAnimationTimer() }
+        didSet {
+            refreshWorkingAnimationTimer()
+            pushWarnings()
+        }
     }
-    /// Either focus or reconcile returned exit 3 (§4.5: not focus-only — a
-    /// reconcile silenced by a missing Automation permission would silently
-    /// lose the whole backstop).
-    @Published var tccWarning = false
-    /// Transient topbar text for a manually-triggered Rescan (§4.5/§9:
+    /// Either focus, resume, or reconcile returned exit 3 (§4.5: not
+    /// focus-only — a reconcile silenced by a missing Automation permission
+    /// would silently lose the whole backstop).
+    @Published var tccWarning = false {
+        didSet { pushWarnings() }
+    }
+    /// Transient message-line text for a manually-triggered Rescan (§4.5/§9:
     /// "Rescanning…" while in flight, then "✓ Rescan done" / "Rescan failed"
     /// for `RescanFeedback.displaySeconds` before it clears). `nil` = show
     /// nothing. Only the manual ⌄-menu Rescan drives this — the automatic
     /// reconcile calls at startup/reconnect stay silent (§4.5).
-    @Published private(set) var rescanFeedback: RescanFeedback?
+    @Published private(set) var rescanFeedback: RescanFeedback? {
+        didSet { surface.showRescanFeedback(rescanFeedback) }
+    }
     /// Bumped every time `rescanFeedback` is set, so a stale clear-after-2s
     /// timer from an earlier run can recognize it's no longer current (e.g.
     /// the user re-ran Rescan while the previous "✓ Rescan done" was still
     /// fading out) and skip clearing a newer state out from under it.
     private var rescanFeedbackGeneration = 0
-    /// Elapsed-time base for the dropdown (DESIGN.md §4.5): captured when
-    /// the dropdown opens, fixed while it stays open, refreshed on reopen.
-    /// See `observeDropdownOpen` for the open signal.
-    @Published private(set) var dropdownOpenedAt: Int64 = Int64(Date().timeIntervalSince1970)
-    /// Whether the dropdown panel is currently open (M5 T9: the row status
-    /// symbol's working spinner animates only while it is). Tracked via the
-    /// same `NSWindow` key notifications as `dropdownOpenedAt`.
-    @Published private(set) var isDropdownOpen = false
-    /// `visibleFrame` height (menu bar and Dock excluded) of the display
-    /// the dropdown panel is actually on, captured per open like
-    /// `dropdownOpenedAt` (§4.5/§8.32, M29 T1 — multi-display setups use
-    /// the panel's own display, read off the panel `NSWindow` the open
-    /// notification carries). Drives the dropdown list's height cap — see
-    /// `AgentListView`. Seeded from the main screen so the very first
-    /// render (before the first open signal lands) has a sane value.
-    @Published private(set) var dropdownScreenVisibleHeight: Double =
-        Double(NSScreen.main?.visibleFrame.height ?? 800)
-    /// "Sort by" selection (§4.5/§8.25/§8.31, M5 T9): persisted in
-    /// UserDefaults, falling back to `SortMode.defaultMode` ("Grouped")
-    /// when nothing — or an unknown value, e.g. one stored by a build
-    /// that still had the mode §8.31 removed — is stored.
-    @Published private(set) var sortMode: SortMode
-    private static let sortModeKey = "cc.shiibar.sortMode"
     /// Settings > General "Appearance" (§4.5/§8.30, M27 T5): System /
-    /// Light / Dark, persisted in UserDefaults (same pattern as
-    /// `sortMode`), applied as `NSApp.appearance` the moment it's picked
+    /// Light / Dark, persisted in UserDefaults, applied as `NSApp.appearance` the moment it's picked
     /// and re-applied at launch (`start()`). The tray icon is a template
     /// image, so it keeps following the menu bar's own appearance
     /// regardless (§4.5).
     @Published private(set) var appearanceSetting: AppearanceSetting
     private static let appearanceKey = "cc.shiibar.appearance"
-    /// App menu "Keep on Top" (§4.5/§8.33, M30): while ON, the Agents
-    /// window sits at the floating window level — and ONLY the level;
-    /// `collectionBehavior` (Space following) is deliberately untouched
-    /// (§8.33: a separate kind of pushiness, kept out). Persisted in
-    /// UserDefaults (same pattern as `sortMode`), default OFF
-    /// (`AgentsWindowKeepOnTop.defaultEnabled` — floating is only ever the
-    /// user's explicit choice, §8.30/§8.33). Observed by the app menu via
-    /// `AppMenuModel`'s deduped facade, never directly (the M27
-    /// menu-churn lesson).
-    @Published private(set) var keepAgentsWindowOnTop: Bool
-    private static let keepOnTopKey = "cc.shiibar.agentsWindowKeepOnTop"
     /// Current `GlyphCycleSpinner` frame index of the tray's working
     /// animation (M5 T8, M24 T1). Only meaningful while
     /// `workingAnimationTimer` is running; `trayIcon` reads it on every
@@ -88,29 +62,20 @@ final class AppState: ObservableObject {
     private var workingAnimationTimer: Timer?
 
     let notificationManager: NotificationManager
-    /// The Conversations body text size (§4.6/§4.5): a single shared store so
-    /// the Conversations window's cmd shortcuts and the Settings window's
-    /// stepper read/write the same live value. Owned here because both
-    /// windows are created from AppState's surroundings.
-    let conversationsTextSize = ConversationsTextSizeStore()
+    /// The conversation pane's body text size (§4.6/§4.5): a single shared
+    /// store so the ⌘ shortcuts and the Settings window's popup read/write
+    /// the same live value.
+    let conversationsTextSize: ConversationsTextSizeStore
+    /// The one state shared by the popover and the window (§4.5).
+    let surface: MainSurfaceModel
+    /// The global hotkey (§4.5 "global hotkey"): registered in `start()`;
+    /// the Settings window records its combination.
+    let hotKey: GlobalHotKeyModel
     private let lifecycle: DaemonLifecycleManager
     /// Not `private`: the Setup Check window (§4.5, M5 T5) also needs it to
     /// run `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /
     /// `runReconcile` below.
     let helpersDirectory: URL?
-    private var dropdownOpenObserver: NSObjectProtocol?
-    private var dropdownCloseObserver: NSObjectProtocol?
-    private var dropdownPlacementObservers: [NSObjectProtocol] = []
-    /// Enforces the dropdown panel window's height (M29 panel-height
-    /// bugfix — see `DropdownPanelSizer` at the bottom of this file).
-    /// Deliberately non-isolated so the `didMove` closure can call it
-    /// synchronously — a main-actor hop would defer the correction past
-    /// the panel's next draw.
-    private let dropdownPanelSizer = DropdownPanelSizer()
-    /// Places the Agents window pre-paint on (re)open (see
-    /// `AgentsWindowPlacer` in AgentsWindowView.swift); armed by
-    /// `VMenuHandler.openAgentsWindow` via `expectAgentsWindowPlacement`.
-    private let agentsWindowPlacer = AgentsWindowPlacer()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
     /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
@@ -121,30 +86,40 @@ final class AppState: ObservableObject {
     /// catch-up stays small (interval/tolerance in `ConversationsIndexWarming`,
     /// ShiibarCcCore). NO FSEvents (§4.6).
     private var conversationsIndexScheduler: NSBackgroundActivityScheduler?
-    /// Titles of the currently-open windows that put the app in regular mode
-    /// (§8.30, extended by §4.5 to "the agent list window OR the
-    /// Conversations window"). The app is regular while this is non-empty and
-    /// accessory the moment it empties. Both windows' view models report
-    /// their open/close here so a single owner decides the activation policy
-    /// — two independent writers would race (one closing while the other is
-    /// still open would wrongly drop the app to accessory). Also the enabled
-    /// state for each window's menu verb (Agents… / Conversations…).
-    @Published private(set) var openRegularWindowTitles: Set<String> = []
-
     var home: String? { ProcessInfo.processInfo.environment["HOME"] }
+
+    /// Set by `MainSurfaceController`: the app menu's Close Window closes
+    /// the popover while it is key, else the key window (§4.5).
+    var closeKeySurface: () -> Void = { NSApp.keyWindow?.performClose(nil) }
+    /// Set by `MainSurfaceController`: opening About / Settings / Setup
+    /// Check closes the popover (§4.5 "popover" close triggers).
+    var willOpenAuxiliaryWindow: () -> Void = {}
+    /// Set by `MainSurfaceController`: Dock click / reopen raises the window.
+    var raiseMainWindow: () -> Void = {}
 
     init(helpersDirectory: URL?) {
         self.helpersDirectory = helpersDirectory
         let notificationManager = NotificationManager()
         self.notificationManager = notificationManager
-        let storedSortMode = UserDefaults.standard.string(forKey: Self.sortModeKey).flatMap(SortMode.init(rawValue:))
-        self.sortMode = storedSortMode ?? SortMode.defaultMode
         let storedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey)
             .flatMap(AppearanceSetting.init(rawValue:))
         self.appearanceSetting = storedAppearance ?? AppearanceSetting.defaultSetting
-        // `bool(forKey:)` reads a missing key as false ==
-        // `AgentsWindowKeepOnTop.defaultEnabled` (pinned by a Core test).
-        self.keepAgentsWindowOnTop = UserDefaults.standard.bool(forKey: Self.keepOnTopKey)
+        let textSize = ConversationsTextSizeStore()
+        self.conversationsTextSize = textSize
+        self.hotKey = GlobalHotKeyModel(registrar: CarbonHotKeyRegistrar(), defaults: .standard)
+        let home = ProcessInfo.processInfo.environment["HOME"]
+        self.surface = MainSurfaceModel(
+            home: home,
+            defaults: .standard,
+            textSize: textSize,
+            runCommand: { arguments, completion in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // Exit 2 (Jump: no such tab) is an expected outcome.
+                    let result = CLIRunner.run(arguments, helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
+                    Task { @MainActor in completion(result.exitCode) }
+                }
+            }
+        )
 
         let root = StateDirectory.resolveRoot() ?? (NSHomeDirectory() + "/.local/state/shiibar-cc")
         self.lifecycle = DaemonLifecycleManager(
@@ -158,87 +133,55 @@ final class AppState: ObservableObject {
         notificationManager.onFocusRequested = { [weak self] target in
             self?.focus(target: target)
         }
-        observeDropdownOpen()
-        agentsWindowPlacer.start()
+        surface.helpersDirectory = helpersDirectory
+        surface.resumeTerminal = { [weak self] in self?.resumeTerminal ?? ResumeTerminal.iterm2 }
+        surface.onPermissionDenied = { [weak self] in self?.tccWarning = true }
+        surface.onSurfaceShown = { [weak self] in
+            // §4.5: re-evaluate the notification-permission warning row every
+            // time the popover or the window shows (a permission changed in
+            // System Settings mid-session shows without a restart).
+            self?.notificationManager.refreshPermissionStatus()
+        }
+        notificationManager.$permissionDenied
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                // `$permissionDenied` emits before the property changes.
+                DispatchQueue.main.async { self?.pushWarnings() }
+            }
+            .store(in: &subscriptions)
+        pushWarnings()
     }
 
-    /// §4.5/§8.43: the window verbs raise an existing window instead of
-    /// disabling — the same deminiaturize + activate + front semantics as
-    /// the Dock-click reopen path (`applicationShouldHandleReopen`). The
-    /// icon-anchored placement is NOT armed here: raising must never move
-    /// an existing window. Returns false when no such window exists (the
-    /// caller opens fresh).
-    @discardableResult
-    func raiseWindow(titled title: String) -> Bool {
-        guard let window = NSApp.windows.first(where: { $0.title == title }) else { return false }
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        return true
-    }
+    private var subscriptions: Set<AnyCancellable> = []
 
-    /// Arm the Agents window's pre-paint placement for the open the ⌄
-    /// menu's "Agents…" item is about to trigger (see
-    /// `AgentsWindowPlacer` for the measured mechanism).
-    func expectAgentsWindowPlacement(
-        topLeft: NSPoint,
-        firstOpenFallbackHeight: Double,
-        maximumHeight: Double
-    ) {
-        agentsWindowPlacer.expect(
-            topLeft: topLeft,
-            firstOpenFallbackHeight: firstOpenFallbackHeight,
-            maximumHeight: maximumHeight
-        )
+    /// The fixed footer's warning rows (§4.5 "making failures visible").
+    private func pushWarnings() {
+        var warnings: [SurfaceWarning] = []
+        if !connected { warnings.append(.disconnected) }
+        if notificationManager.permissionDenied { warnings.append(.notificationsDenied) }
+        if tccWarning { warnings.append(.automationPermission) }
+        surface.setWarnings(warnings)
     }
 
     deinit {
-        if let observer = dropdownOpenObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = dropdownCloseObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        let placementObservers = dropdownPlacementObservers
-        for observer in placementObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
         workingAnimationTimer?.invalidate()
         periodicReconcileScheduler?.invalidate()
         conversationsIndexScheduler?.invalidate()
     }
 
-    // MARK: - Regular-app windows (§4.5/§8.30)
+    // MARK: - Regular app while the window is open (§4.5/§8.30)
 
-    /// True while the Agents window exists — gates both menus' "Agents…"
-    /// item (disabled while it's open, §4.5/§8.40).
-    var isAgentsWindowOpen: Bool {
-        openRegularWindowTitles.contains(AgentsWindow.title)
+    /// The window opened: the app becomes a regular app (Dock, ⌘Tab, menu
+    /// bar) for as long as it stays open.
+    func noteRegularWindowOpened() {
+        switchToRegularApp()
     }
 
-    /// Report that a regular-mode window (Agents or Conversations) has
-    /// opened. The first one flips the app to regular (§8.30); a second one
-    /// opening while already regular is a no-op switch.
-    func noteRegularWindowOpened(title: String) {
-        let wasEmpty = openRegularWindowTitles.isEmpty
-        openRegularWindowTitles.insert(title)
-        if wasEmpty {
-            switchToRegularApp()
-        }
-    }
-
-    /// Report that a regular-mode window has closed. The app returns to
-    /// accessory only once the LAST such window is gone (§4.5's extended
-    /// §8.30 condition).
-    func noteRegularWindowClosed(title: String) {
-        openRegularWindowTitles.remove(title)
-        if openRegularWindowTitles.isEmpty {
-            // §8.30 (M27 T1): back to the resident accessory the moment the
-            // last regular window closes. No activation dance on the way
-            // down — the system hands focus (and the menu bar) to another
-            // app by itself.
-            NSApp.setActivationPolicy(.accessory)
-        }
+    /// The window closed: back to the resident accessory app. No activation
+    /// dance on the way down — the system hands focus (and the menu bar) to
+    /// another app by itself.
+    func noteRegularWindowClosed() {
+        NSApp.setActivationPolicy(.accessory)
     }
 
     /// Flip the app to a regular app for as long as a window exists
@@ -249,8 +192,7 @@ final class AppState: ObservableObject {
     /// deactivate+activate, nor a next-turn activate refreshes it. The one
     /// reliable order: set the policy, hand activation to another app (the
     /// Dock — always running, shows no menu bar of its own), then take it
-    /// back a beat later. (Moved here from `AgentsWindowViewModel` so the
-    /// Agents and Conversations windows share one policy owner.)
+    /// back a beat later.
     private func switchToRegularApp() {
         NSApp.setActivationPolicy(.regular)
         if let dock = NSRunningApplication.runningApplications(
@@ -267,148 +209,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Refresh `dropdownOpenedAt` (and `isDropdownOpen`) every time the
-    /// dropdown panel opens; track its close the same way.
-    ///
-    /// The open signal is `NSWindow.didBecomeKeyNotification`: the
-    /// MenuBarExtra window-style panel becomes the key window on every
-    /// open (it's an interactive panel — that's also why clicking outside
-    /// closes it: it resigns key), and key status is granted anew per
-    /// open, so this fires per open by AppKit window-lifecycle semantics.
-    /// `onAppear` on the dropdown view is NOT reliable here: the hosted
-    /// view stays alive across open/close (verified on-device — that's
-    /// what froze the old render-time elapsed values on reopen), so it may
-    /// fire only once at launch. NSWindow notifications are per-process;
-    /// the only other window this app owns is the status item's host
-    /// (class `NSStatusBarWindow`), which is filtered out — the same
-    /// assumption `dismissDropdown` relies on. The close signal
-    /// (`didResignKeyNotification`) is the same window's counterpart,
-    /// filtered identically — that's what stops the row spinner from
-    /// animating while the dropdown is closed (M5 T9).
-    private func observeDropdownOpen() {
-        dropdownOpenObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let window = notification.object as? NSWindow,
-                  !window.className.contains("NSStatusBarWindow"),
-                  let self else { return }
-            // The panel is on screen when it becomes key, so its `screen`
-            // is the display the dropdown actually opened on (M29 T1).
-            let screenVisibleHeight = (window.screen?.visibleFrame.height).map(Double.init)
-            Task { @MainActor in
-                self.captureDropdownOpenTime(screenVisibleHeight: screenVisibleHeight)
-            }
-        }
-        dropdownCloseObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let window = notification.object as? NSWindow,
-                  !window.className.contains("NSStatusBarWindow"),
-                  let self else { return }
-            // Losing key status is NOT the same as closing: opening the
-            // v-chip's NSMenu also resigns key while the panel stays on
-            // screen (and in an LSUIElement app, key may never come back
-            // after the menu closes). Treat "closed" as key-loss WHILE
-            // no longer visible; a visible panel stays "open" so the row
-            // spinners keep turning through menu interactions.
-            let stillVisible = window.isVisible
-            Task { @MainActor in
-                self.isDropdownOpen = stillVisible
-            }
-        }
-        // Panel placement and size enforcement (§4.5 "panel placement" +
-        // the M29 panel-height bugfix), hooked on BOTH `didMove` and
-        // `didResize` — measured on-device:
-        // - Near the display's right edge the OS flips the panel to extend
-        //   LEFT from the icon; the spec wants the NSMenu edge behavior
-        //   instead (shift the whole panel left, right edge flush with the
-        //   visible area). `didBecomeKey` is too early (on first open the
-        //   panel still sits at (0,0), and a shift applied there is
-        //   overwritten by the OS placement that follows); the placement
-        //   itself fires `didMove`, so correcting here runs AFTER each OS
-        //   move and sticks — while the panel is still occluded
-        //   (pre-first-draw), so no visible jump.
-        // - SwiftUI's own MenuBarExtra sizing clamps the panel height to
-        //   ~1/3 of the display's visible height regardless of the
-        //   content's ideal, and it reasserts that height on reopen and on
-        //   content changes — sometimes WITHOUT an origin change, which is
-        //   why `didResize` must be hooked too (with `didMove` alone the
-        //   reassertion won on reopen/growth; with both, every scenario
-        //   converges to the desired height in one correction).
-        // Self-triggering is safe: our own setFrame re-fires these
-        // notifications, where desired == current and the tolerance guards
-        // no-op. The class-name filter is the same private-API assumption
-        // family as `dismissDropdown` (measured class:
-        // `_TtGC7SwiftUI18MenuBarExtraWindow…`); if a macOS version renames
-        // it, no correction happens and the panel degrades to the OS
-        // flip + OS height clamp.
-        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
-            dropdownPlacementObservers.append(NotificationCenter.default.addObserver(
-                forName: name,
-                object: nil,
-                queue: .main,
-                using: { [sizer = dropdownPanelSizer] notification in
-                    guard let panel = notification.object as? NSWindow,
-                          panel.className.contains("MenuBarExtraWindow"),
-                          let icon = NSApp.windows.first(where: { $0.className.contains("NSStatusBarWindow") }),
-                          let screen = panel.screen ?? icon.screen else { return }
-                    let visible = screen.visibleFrame
-                    let desiredX = DropdownPanelPlacement.clampedX(
-                        iconMinX: Double(icon.frame.minX),
-                        panelWidth: Double(panel.frame.width),
-                        visibleMinX: Double(visible.minX),
-                        visibleMaxX: Double(visible.maxX)
-                    )
-                    if abs(Double(panel.frame.minX) - desiredX) > DropdownPanelPlacement.tolerance {
-                        panel.setFrameOrigin(NSPoint(x: desiredX, y: panel.frame.minY))
-                    }
-                    sizer.enforce(on: panel)
-                }
-            ))
-        }
-    }
-
-    /// The whole-dropdown panel height the view wants (M29 panel-height
-    /// bugfix): reported by `AgentListView` (measured natural list height,
-    /// capped, plus chrome — see
-    /// `AgentListHeights.dropdownPanelContentHeight`), enforced immediately
-    /// and re-enforced after every OS move/resize of the panel. `nil`
-    /// reports (window container / no measurement yet) are ignored.
-    func setDropdownDesiredPanelHeight(_ height: Double?) {
-        guard let height, height > 0 else { return }
-        dropdownPanelSizer.desiredHeight = height
-        if let panel = NSApp.windows.first(where: { $0.className.contains("MenuBarExtraWindow") }) {
-            dropdownPanelSizer.enforce(on: panel)
-        }
-    }
-
-    /// Also called from the dropdown's `onAppear` as a belt-and-braces
-    /// second trigger (harmless if both fire on the same open; covers a
-    /// macOS version whose panel mounts the view fresh per open — that
-    /// path has no panel window at hand, so it passes no screen height
-    /// and the last captured value stays).
-    func captureDropdownOpenTime(screenVisibleHeight: Double? = nil) {
-        dropdownOpenedAt = Int64(Date().timeIntervalSince1970)
-        isDropdownOpen = true
-        if let screenVisibleHeight {
-            dropdownScreenVisibleHeight = screenVisibleHeight
-        }
-        // §4.5: re-evaluate the notification-permission warning row on every
-        // open, not just at launch — a permission change made mid-session
-        // (e.g. granted in System Settings after startup) must be reflected
-        // without an app restart. `getNotificationSettings` is async, so the
-        // row can lag by a beat right after opening; that's accepted (M25 —
-        // it converges to the latest value on this open, no debouncing).
-        notificationManager.refreshPermissionStatus()
-    }
-
     func start() {
         // §4.5 (M27 T5): re-apply the persisted appearance at launch.
         applyAppearance()
+        // §4.5 "global hotkey": register the stored combination (M45 T1).
+        hotKey.start()
         notificationManager.requestAuthorizationIfNeeded()
         lifecycle.onConnectedChanged = { [weak self] isConnected in
             self?.connected = isConnected
@@ -495,7 +300,8 @@ final class AppState: ObservableObject {
 
     /// Run `conversations index` (no `--json` — this is background warming,
     /// not a progress-reporting open). Failure is quiet: log only (§4.6). The
-    /// window's own open flow runs `index --json` for visible progress.
+    /// popover / window open flow runs `index --json` for visible progress
+    /// (`MainSurfaceModel`).
     /// `completion` is called after the subprocess finishes so the scheduler
     /// can hand `NSBackgroundActivityScheduler` its completion handler.
     private func runConversationsIndexWarming(completion: (() -> Void)?) {
@@ -577,52 +383,6 @@ final class AppState: ObservableObject {
         )
     }
 
-    /// Grouped dropdown rows as of `now`. `now` is a parameter (not read
-    /// inside) so the caller — a `TimelineView` in `DropdownView` — controls
-    /// the render clock: elapsed times are recomputed from each agent's
-    /// `since` epoch on every tick, never stored as strings.
-    func groups(now: Int64) -> [AgentGroup] {
-        Grouping.groupedRows(agents: agents, now: now, home: home)
-    }
-
-    /// Flat "Newest session" rows as of `now`, computed live from `agents`
-    /// on every render — `created_at` descending, the same per-render
-    /// approach as `groups(now:)` above (§4.5/§8.31: the key is immutable,
-    /// so the order is stable by construction, no freezing needed).
-    func flatRows(now: Int64) -> [AgentRow] {
-        Sorting.newestFirst(agents: agents).map { Grouping.makeRow(agent: $0, now: now, home: home) }
-    }
-
-    /// "Sort by" selection (§4.5, M5 T9): persist and publish. Both
-    /// containers order live from `agents` on every render, so the new
-    /// mode shows immediately with nothing to re-settle (§8.31).
-    func setSortMode(_ mode: SortMode) {
-        sortMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: Self.sortModeKey)
-    }
-
-    /// App menu "Keep on Top" toggle (§4.5/§8.33, M30): publish (the app
-    /// menu's checkmark follows via `AppMenuModel`), persist, and apply
-    /// immediately to a visible Agents window.
-    func setKeepAgentsWindowOnTop(_ enabled: Bool) {
-        keepAgentsWindowOnTop = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.keepOnTopKey)
-        applyAgentsWindowLevel()
-    }
-
-    /// Apply the Keep on Top level to the Agents window if it currently
-    /// exists (§4.5: ON = floating, OFF = the normal level; toggling takes
-    /// effect immediately on a visible window). Also called on every open
-    /// by `AgentsWindowViewModel.noteWindowBecameKey` — the existing open
-    /// detection (§8.33/M30: no new observers) — so a window opened later
-    /// picks the remembered value up. Level only; `collectionBehavior` is
-    /// deliberately never touched (§8.33). Finding the window by title is
-    /// the same technique every other Agents-window hook uses.
-    func applyAgentsWindowLevel() {
-        guard let window = NSApp.windows.first(where: { $0.title == AgentsWindow.title }) else { return }
-        window.level = keepAgentsWindowOnTop ? .floating : .normal
-    }
-
     /// Settings "Appearance" pick (§4.5, M27 T5): applied the moment it's
     /// selected (no "OK to confirm", §8.26), persisted for the launch-time
     /// re-apply in `start()`.
@@ -633,8 +393,7 @@ final class AppState: ObservableObject {
     }
 
     /// §4.5: System = `NSApp.appearance = nil` (follow the OS); Light /
-    /// Dark pin the whole app — dropdown, Agents window, Settings, Setup
-    /// Check — to aqua / darkAqua. The name strings live in
+    /// Dark pin the whole app — popover, window, Settings, Setup Check — to aqua / darkAqua. The name strings live in
     /// `AppearanceSetting` (ShiibarCcCore) where a unit test pins them to
     /// the real `NSAppearance.Name` constants.
     private func applyAppearance() {
@@ -698,56 +457,6 @@ final class AppState: ObservableObject {
 
     // MARK: - Actions (§8.4: only read/jump/refresh/UX-setting verbs live here)
 
-    func rowClicked(target: String) {
-        // §4.5: a row click runs focus AND closes the dropdown. Focusing
-        // iTerm2 deactivates this app, which usually makes the panel resign
-        // and hide on its own — the explicit dismissal below is the
-        // guarantee for when that alone doesn't close it.
-        dismissDropdown()
-        focus(target: target)
-    }
-
-    /// Close the MenuBarExtra window-style dropdown panel (§4.5).
-    ///
-    /// macOS 13 exposes no public dismissal API for this panel and no
-    /// presented-state binding for MenuBarExtra (`isInserted` only controls
-    /// menu bar insertion), so the panel must be closed through
-    /// MenuBarExtra's OWN toggle path: synthesizing a click on the status
-    /// item's button (`performClick`). Closing the panel's window directly
-    /// (`window.close()`) hides it but leaves MenuBarExtra's internal
-    /// open/closed state saying "open" — the next tray click is then
-    /// consumed flipping that state back and appears to do nothing (seen
-    /// on-device). The synthetic click keeps the internal state in sync,
-    /// exactly like a user clicking the tray to close.
-    ///
-    /// Private-API assumptions (shared with `observeDropdownOpen`): the
-    /// status item's host window class is `NSStatusBarWindow`, and its view
-    /// hierarchy contains the status button (an NSButton subclass). Failure
-    /// mode if a macOS version breaks either: we fall back to closing the
-    /// panel window directly, which still closes the dropdown but degrades
-    /// to the consumed-first-click behavior (on-device checkpoint).
-    func dismissDropdown() {
-        if let statusWindow = NSApp.windows.first(where: { $0.className.contains("NSStatusBarWindow") }),
-           let button = firstButton(in: statusWindow.contentView) {
-            button.performClick(nil)
-            return
-        }
-        // Degraded fallback: closes the panel but desyncs MenuBarExtra's
-        // toggle (next tray click gets consumed).
-        for window in NSApp.windows where window.isVisible && !window.className.contains("NSStatusBarWindow") {
-            window.close()
-        }
-    }
-
-    private func firstButton(in view: NSView?) -> NSButton? {
-        guard let view else { return nil }
-        if let button = view as? NSButton { return button }
-        for subview in view.subviews {
-            if let found = firstButton(in: subview) { return found }
-        }
-        return nil
-    }
-
     /// Raise the TCC warning row when a subprocess reported exit 3 (§4.5).
     /// The nonzero-exit os_log line is emitted centrally by CLIRunner.
     private func noteExitCode(_ exitCode: Int32) {
@@ -756,15 +465,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Focus a terminal tab (§4.5 row click / notification click, and §4.6
-    /// Conversations Jump). Fire-and-forget for the row/notification callers;
-    /// `completion` lets the Conversations Jump observe the exit code to decide
-    /// on the no-match sheet (§4.6/§8.48) WITHOUT changing the row-click path —
-    /// the shared TCC (exit 3) handling in `noteExitCode` runs the same for
-    /// every caller. `completion` runs on the main actor after the subprocess
-    /// returns; `seen`-on-success stays the CLI's job, unchanged.
+    /// Focus a terminal tab on a notification click (§4.5). The shared TCC
+    /// (exit 3) handling in `noteExitCode` raises the warning row;
+    /// `completion` runs on the main actor after the subprocess returns;
+    /// `seen`-on-success stays the CLI's job. (The list's Jump runs through
+    /// `MainSurfaceModel`'s row-verb runner.)
     func focus(target: String, completion: (@MainActor (Int32) -> Void)? = nil) {
-        DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, helpersDirectory] in
             let result = CLIRunner.focus(target: target, helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
@@ -818,7 +525,7 @@ final class AppState: ObservableObject {
             guard rescanFeedback != .running else { return }
             showRescanFeedback(.running)
         }
-        DispatchQueue.global(qos: .utility).async { [helpersDirectory] in
+        DispatchQueue.global(qos: .utility).async { [weak self, helpersDirectory] in
             let result = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
@@ -915,41 +622,6 @@ final class AppState: ObservableObject {
     /// to avoid re-entering the termination sequence.
     func bestEffortShutdownDaemon() {
         lifecycle.shutdown {}
-    }
-}
-
-/// Keeps the MenuBarExtra panel window as tall as the dropdown content
-/// wants (M29 panel-height bugfix). Measured on-device: SwiftUI's own
-/// MenuBarExtra sizing clamps the panel to roughly a third of the
-/// display's visible height (342pt on a 1025pt visible frame) no matter
-/// how tall the content's ideal is, so the M29 "grow to the display" cap
-/// could never engage — while a direct window `setFrame` above that limit
-/// sticks, the hosted content re-lays out to fill it (the list's
-/// `maxHeight` cap keeps it bounded), and later content churn does not
-/// snap it back. `desiredHeight` comes from the view's measurement
-/// (`AppState.setDropdownDesiredPanelHeight`); enforcement is top-edge
-/// anchored (the panel hangs from the menu bar). Not `@MainActor` on
-/// purpose: called synchronously from the `didMove` notification closure
-/// (main thread via `queue: .main`), where an actor hop would defer past
-/// the panel's next draw. `@unchecked Sendable` is sound here: every
-/// access is on the main thread by construction (`queue: .main` observers
-/// and `@MainActor AppState` methods).
-private final class DropdownPanelSizer: @unchecked Sendable {
-    var desiredHeight: Double?
-
-    func enforce(on panel: NSWindow) {
-        guard let desired = desiredHeight,
-              abs(Double(panel.frame.height) - desired) > DropdownPanelPlacement.tolerance else { return }
-        let frame = panel.frame
-        panel.setFrame(
-            NSRect(
-                x: frame.minX,
-                y: frame.maxY - CGFloat(desired),
-                width: frame.width,
-                height: CGFloat(desired)
-            ),
-            display: true
-        )
     }
 }
 

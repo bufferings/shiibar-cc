@@ -10,7 +10,7 @@ import Foundation
 /// not show a stale rollup while disconnected).
 ///
 /// `.working` carries the current `GlyphCycleSpinner` frame index (M24 T1:
-/// the tray emblem slot runs the same glyph-cycle spinner as the dropdown
+/// the tray emblem slot runs the same glyph-cycle spinner as the Running
 /// row symbol, §9) — the glyph alone doesn't say which cycle frame is
 /// current, so the frame index travels with it. `.idle` and `.none` both
 /// render the static ✻ in the emblem slot (M24 T1); they differ only in
@@ -61,7 +61,7 @@ public enum Rollup {
     ///
     /// An `.unknown` status (forward-compat fallback) is ignored entirely
     /// (DESIGN.md §4.2/§4.5: clients ignore unknown statuses): it does not
-    /// participate in the rollup, same as the dropdown hides it. If every
+    /// participate in the rollup, same as the list hides it. If every
     /// agent's status is unknown, the tray shows the no-agents glyph.
     public static func icon(
         statuses: [AgentStatus],

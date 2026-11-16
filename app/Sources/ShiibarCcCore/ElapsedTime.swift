@@ -1,5 +1,5 @@
-// Elapsed-time formatting for the dropdown's second line ("label · elapsed",
-// menubar-design.html). DESIGN.md does not pin an exact format (only the
+// Elapsed-time formatting for a list row's second line ("label · elapsed",
+// window-design.html). DESIGN.md does not pin an exact format (only the
 // mockup's example values like "2m" / "1h"); this picks the coarsest unit
 // that keeps at least one digit of precision, which matches every example
 // in the mockup.

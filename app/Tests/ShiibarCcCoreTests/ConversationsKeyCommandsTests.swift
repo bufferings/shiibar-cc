@@ -1,8 +1,8 @@
 import XCTest
 @testable import ShiibarCcCore
 
-/// The Conversations window's key-command mapping (DESIGN.md §4.6/§8.38(7)):
-/// what the window-scoped monitor consumes (text size, ⌘G find navigation)
+/// The conversation pane's key-command mapping (DESIGN.md §4.6/§8.38(7)):
+/// what the key monitor consumes (text size, ⌘G find navigation)
 /// and — just as load-bearing — what it must pass through (⌘C belongs to
 /// the message pane).
 final class ConversationsKeyCommandsTests: XCTestCase {

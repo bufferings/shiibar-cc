@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shiibar-cc ポップオーバーとウィンドウ確定デザイン</title>
+<style>
+  :root { --bg:#ececf0; --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de; --accent:#b45309;
+    --menu-text2:#7c7c82; --sel:#3478f6; --tint:#dce7f7; --tintline:#9db9e4; --link:#0a5fc2;
+    --graytint:#ebebec; --grayline:#bbbbbe;
+    --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75);
+    --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
+    --cardsbg:#f3f4f8; --cardbg:#ffffff; --cardline:#e3e3e6; --panebg:#ffffff;
+    --red:#e5484d; --star:#f5b400; --star-line:#d39700;
+    --shadow:0 12px 36px rgba(0,0,0,.20), 0 0 0 .5px rgba(0,0,0,.14); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --text:#ededf0; --text2:#9b9ba3; --line:#38383d; --accent:#e8a10e;
+      --menu-text2:#a5a5ad; --tint:#1f3a5c; --tintline:#3a5a86; --link:#4c9bff;
+      --graytint:#474749; --grayline:#6c6c70;
+      --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55);
+      --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
+      --cardsbg:#1e1f23; --cardbg:#2b2b2f; --cardline:#3a3b40; --panebg:#2b2b2f;
+      --shadow:0 12px 36px rgba(0,0,0,.55), 0 0 0 .5px rgba(255,255,255,.16); }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-size:15px; line-height:1.65;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; }
+  .wrap { max-width:1120px; margin:0 auto; padding:48px 24px 96px; }
+  .eyebrow { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:10px; }
+  h1 { font-size:27px; font-weight:700; letter-spacing:-.02em; margin:0 0 8px; }
+  h2 { font-size:19px; letter-spacing:-.01em; margin:44px 0 14px; }
+  p.lede { color:var(--text2); margin:0 0 8px; max-width:46em; }
+  ul { margin:8px 0; padding-left:1.4em; }
+  li { margin:3px 0; }
+  code { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.88em; background:var(--card); padding:2px 5px; border-radius:4px; }
+  kbd { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:11px; background:var(--card);
+    border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  table.keys { border-collapse:collapse; font-size:13.5px; margin:8px 0; }
+  table.keys th, table.keys td { text-align:left; padding:6px 14px 6px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.keys th { font-size:12px; color:var(--text2); font-weight:600; }
+
+  .mock { border:1px solid var(--line); border-radius:12px; padding:22px 18px 18px; display:flex; flex-wrap:wrap; gap:26px 24px; align-items:flex-start; overflow-x:auto; }
+  .mock-label { font-size:11px; letter-spacing:.08em; color:var(--text2); margin:2px 2px -8px; flex-basis:100%; }
+  figure { margin:0; flex:none; display:flex; flex-direction:column; gap:12px; }
+  figcaption { font-size:12px; line-height:1.5; color:var(--text2); max-width:420px; }
+
+  /* アイコン: 線画の SVG(定義は body 先頭の <symbol>) */
+  .ic { width:15px; height:15px; display:block; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+  .ic.s13 { width:13px; height:13px; stroke-width:1.5; }
+  .ic.s14 { width:14px; height:14px; stroke-width:1.3; }
+
+  /* 器: ポップオーバー(矢印あり・幅 420)とウィンドウ(1 列 = 幅 420 / 2 列 = 幅 880 以上) */
+  .app { font-size:13px; line-height:1.35; color:var(--text); }
+  .pop { position:relative; width:420px; height:640px; margin-top:10px; border-radius:11px; box-shadow:var(--shadow);
+    background:var(--cardsbg); display:flex; flex-direction:column; }
+  .pop::before { content:""; position:absolute; top:-7px; left:50%; width:15px; height:15px; margin-left:-7.5px;
+    background:var(--cardsbg); transform:rotate(45deg); border-radius:3px 0 0 0;
+    box-shadow:-.5px -.5px 0 0 rgba(127,127,127,.35); }
+  .pop > .clip { flex:1; min-height:0; display:flex; flex-direction:column; border-radius:11px; overflow:hidden; position:relative; }
+  .win { width:420px; height:640px; border-radius:11px; box-shadow:var(--shadow); background:var(--cardsbg);
+    display:flex; overflow:hidden; }
+  .win.two { width:1040px; }
+  .col { width:420px; flex:none; display:flex; flex-direction:column; min-height:0; background:var(--cardsbg); }
+  .win.two .col { border-right:1px solid var(--line); }
+  .main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--panebg); }
+  .page { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--panebg); }
+
+  /* 見出し行: (信号機ボタン)+ 検索欄 + ⟳ + Open in window またはピン + ⌄ */
+  .hrow { display:flex; align-items:center; gap:8px; padding:10px 10px 8px; flex:none; }
+  .tls { display:flex; gap:6px; padding-right:2px; flex:none; }
+  .tl { width:11px; height:11px; border-radius:50%; }
+  .tl.r { background:#ff5f57; } .tl.y { background:#febc2e; } .tl.g { background:#28c840; }
+  /* 検索欄: アプリが描画する地(カードの色 + 1px の枠・角丸 6px・高さ 24px = 見出し行のボタンと同じ)と
+     虫眼鏡のアイコン(13px)。その中に枠なしの入力欄(12px)を配置する */
+  .search { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:24px; padding:0 8px;
+    background:var(--cardbg); border:1px solid var(--cardline); border-radius:6px;
+    color:var(--menu-text2); font-size:12px; line-height:1; white-space:nowrap; }
+  .search .q { color:var(--text); }
+  .search.dis { opacity:.5; }
+  .caret { display:inline-block; width:1px; height:12px; background:var(--text); margin-left:1px; vertical-align:-2px; }
+  .hb { width:24px; height:24px; flex:none; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--menu-text2); }
+  .hb.on { color:var(--sel); }
+  .hb.on .ic { fill:currentColor; }
+  .hb.chip { background:rgba(127,127,127,.10); }
+  .hb.chip.hov, .hb.hov { background:rgba(127,127,127,.16); }
+  .hb.chip.prs, .hb.prs { background:rgba(127,127,127,.24); }
+
+  /* 一覧: 区画の見出し + カード(行頭スロット / 3 行の文字 / 1 列では右端の > ボタン) */
+  .rows { padding:0 10px 8px; flex:1; min-height:0; overflow:hidden; }
+  .sec { display:flex; align-items:baseline; gap:6px; padding:10px 4px 6px; }
+  .sec b { font-size:12px; font-weight:700; }
+  .sec span { font-size:11px; color:var(--menu-text2); }
+  .row { display:flex; align-items:center; gap:9px; padding:8px 8px 9px 11px; margin-bottom:6px;
+    background:var(--cardbg); border:1px solid var(--cardline); border-radius:10px; }
+  .row.hov { border-color:var(--tintline); }
+  .row.sel { background:var(--tint); border-color:var(--tintline); }
+  /* 検索欄にフォーカスがある間とウィンドウが key でない間の選択中のカード: 淡い灰色の地 + 灰色の枠 */
+  .row.sel.inact { background:var(--graytint); border-color:var(--grayline); }
+  .sym { width:20px; height:20px; flex:none; color:var(--text); align-self:flex-start; margin-top:1px; }
+  .sym svg { width:100%; height:100%; display:block; overflow:visible; }
+  .star { fill:none; stroke:var(--menu-text2); stroke-width:1.1; stroke-linejoin:round; }
+  .star.on { fill:var(--star); stroke:var(--star-line); stroke-width:.7; }
+  .sym .star { width:16px; height:16px; margin:2px; }
+  .rt { flex:1; min-width:0; }
+  .t1, .sub, .t3 { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row.strong .t1 { font-weight:650; }
+  .sub, .t3 { font-size:11px; color:var(--menu-text2); line-height:1.45; margin-top:1px; }
+  .t3 .g { font-family:"SF Mono",ui-monospace,Menlo,monospace; margin-right:5px; opacity:.8; }
+  /* 行の > ボタン(1 列だけ) */
+  .ib { width:28px; height:26px; flex:none; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--text2); }
+  .ib.hov { background:rgba(127,127,127,.16); }
+  .ib.prs { background:rgba(127,127,127,.24); }
+  .empty { padding:8px 4px; color:var(--menu-text2); font-size:12px; }
+
+  /* 固定フッター: 警告行 + メッセージ行 + キーの案内(2 列の左の列)。
+     1 列では、警告行とメッセージ行(.stat)の下に下部パネル(.actions)を置く */
+  .foot { border-top:1px solid var(--line); flex:none; }
+  .stat { flex:none; padding-bottom:7px; }
+  .warn, .msgline { display:flex; align-items:center; gap:7px; padding:7px 12px 0; color:var(--menu-text2); font-size:12px; }
+  .msgline { font-size:11px; }
+  .hints { display:flex; align-items:center; gap:14px; padding:7px 12px 9px; color:var(--menu-text2); font-size:11px; white-space:nowrap; }
+  .hints .k { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:10.5px; background:var(--card); border-radius:4px; padding:1px 5px; margin-right:5px; color:var(--text2); }
+
+  /* 会話ペイン: ヘッダ / 検索バー行 / メッセージ面 + ミニマップ / 下部パネル */
+  .hdr { padding:9px 10px 8px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px; flex:none; }
+  .hdr.pad { padding-left:16px; padding-top:11px; }
+  .hdr .hx { flex:1; min-width:0; }
+  .hdr .ht { font-weight:650; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .main .hdr .ht { font-size:15px; }
+  .hdr .hp { font-size:11px; color:var(--menu-text2); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pos { font-size:11px; color:var(--menu-text2); font-variant-numeric:tabular-nums; flex:none; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; flex:none; }
+  .seg .nav { width:26px; height:22px; display:flex; align-items:center; justify-content:center; background:var(--card); color:var(--text2); }
+  .seg .nav + .nav { border-left:1px solid var(--line); }
+  .findbar { display:flex; align-items:center; gap:8px; padding:5px 16px; font-size:11px; color:var(--menu-text2);
+    border-bottom:1px solid var(--line); flex:none; }
+  /* 1 列の詳細ページ: 左端に検索文字列の文、カウンタと ‹ › は右端 */
+  .findbar .qs { flex:1; min-width:0; display:flex; gap:4px; white-space:nowrap; }
+  .findbar .qs .qt { color:var(--text); overflow:hidden; text-overflow:ellipsis; }
+  .findbar .seg .nav { width:24px; height:18px; font-size:12px; }
+
+  .docwrap { position:relative; flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+  .doc { flex:1; padding:12px 0 16px; }
+  /* 発言: ラベルの行(.who)+ 内容。自分の発言(.band)は帯の地、Claude の発言(.ans)は地なし。
+     コンテナの右は 18px のままにして、コードブロックと表の背景の幅を保つ。
+     文字の要素が 10px〜14px を追加し、文字が幅 20px のミニマップから 8px 以上離れる。 */
+  .msg { padding:0 18px 0 16px; margin-top:16px; }
+  .msg:first-child { margin-top:0; }
+  .msg.ans { font-size:13px; line-height:1.7; max-width:60em; }
+  .msg.band { background:var(--card); padding:7px 18px 8px 16px; margin-top:20px; }
+  .msg.band:first-child { margin-top:0; }
+  .msg.band + .msg { margin-top:10px; }
+  .who { display:flex; align-items:center; font-size:11px; font-weight:650; line-height:1.6; margin-bottom:2px; }
+  .who.you { color:var(--link); }
+  .who.ai { color:var(--menu-text2); }
+  .mt { font-size:13.5px; line-height:1.6; padding-right:14px; }
+  .ans p { margin:0 0 8px; padding-right:10px; }
+  .ans pre { margin:0 0 8px; background:var(--codebg); border-radius:8px; padding:9px 12px; overflow-x:auto;
+    font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.55; }
+  .tbl { border:1px solid var(--line); border-radius:8px; overflow-x:auto; margin:0 0 8px; max-width:100%; width:fit-content; }
+  .tbl table { border-collapse:collapse; font-size:13px; line-height:1.5; }
+  .tbl th, .tbl td { padding:5px 12px; text-align:left; border-top:1px solid var(--line); vertical-align:top;
+    max-width:28em; overflow-wrap:break-word; }
+  .tbl th { border-top:0; font-weight:600; background:var(--card); }
+  .expand { font-size:11px; color:var(--sel); }
+  .expand .cnt { color:var(--text); background:var(--hl); border-radius:4px; padding:0 5px; font-size:10px; font-weight:600; }
+  .hl { background:var(--hl); border-radius:2px; }
+  .hlcur { background:var(--hlcur); border-radius:2px; }
+  /* 発言ごとのコピー: ラベルの行の右端。アイコン 14px */
+  .cp { flex:none; margin-left:auto; margin-right:10px; padding:2px 3px; border-radius:5px; color:var(--menu-text2); display:flex; }
+
+  .mm { position:absolute; top:0; bottom:0; right:0; width:20px; }
+  .mm .m { position:absolute; left:4px; right:4px; border-radius:1px; }
+  .mm .band { background:rgba(127,127,127,.34); }
+  .mm .txt { background:rgba(127,127,127,.16); }
+  .mm .codeb { background:rgba(127,127,127,.24); }
+  .mm .hit { left:2px; right:2px; height:2px; background:var(--hl); }
+  .mm .hit.cur { background:var(--hlcur); }
+  .mm .thumb { left:0; right:0; border-radius:5px; background:rgba(127,127,127,.22); }
+  .endcap { display:flex; align-items:center; gap:10px; color:var(--menu-text2); font-size:11px; margin:14px 16px 4px; }
+  .endcap::before, .endcap::after { content:""; flex:1; height:1px; background:var(--line); }
+  .actions { display:flex; align-items:center; gap:10px; padding:9px 12px 10px; border-top:1px solid var(--line); flex:none; }
+  .actions .hints { padding:0; flex:1; min-width:0; }
+  .actions .sp { flex:1; }
+  /* 行を選択していない間: ボタンの場所を空けたまま表示しない(パネルの高さとボタンの位置を保つ) */
+  .actions .ph { visibility:hidden; }
+  /* Resume / Jump は同幅(長い方 = Resume に揃えて固定。DESIGN.md §4.6 / §8.48) */
+  .btn { background:var(--sel); color:#fff; border-radius:6px; padding:5px 14px; min-width:97px;
+    text-align:center; font-size:13px; font-weight:600; flex:none; }
+  .btn.dis { background:rgba(127,127,127,.18); color:rgba(127,127,127,.75); }
+  /* Branch は副ボタン(枠線のみ・内容サイズ) */
+  .btn.sec { background:transparent; color:var(--text); border:1px solid var(--line); min-width:0; padding:4px 14px; font-weight:400; }
+  /* ボタンの中のショートカット: ラベルに続けて、ラベルより淡く表示する(disabled の間も表示する) */
+  .btn .kc { font-weight:400; opacity:.6; margin-left:5px; }
+  /* 検索欄にフォーカスがある間: 記号を表示しない(場所は残すので、ボタンの幅と位置は変わらない) */
+  .actions.sf .kc { visibility:hidden; }
+  .note { font-size:11px; color:var(--menu-text2); }
+
+  .strip { background:var(--panebg); border-radius:9px; box-shadow:0 0 0 .5px rgba(127,127,127,.5);
+    max-width:560px; display:flex; flex-direction:column; gap:10px; font-size:13px; line-height:1.35; padding:14px; }
+  .strip.side { background:var(--cardsbg); width:420px; max-width:100%; padding:0; gap:0; overflow:hidden; }
+  .strip .lab { font-size:10px; color:var(--text2); letter-spacing:.08em; text-transform:uppercase; }
+  .rowc { display:flex; align-items:center; justify-content:space-between; }
+  .inl { display:flex; align-items:center; gap:10px; }
+  .popup { padding:2px 10px 2px 12px; border-radius:5px; background:rgba(127,127,127,.16); }
+  .popup .chev { margin-left:8px; opacity:.55; font-size:9px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 L14 14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 3v3h-3"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6z"/><path d="M8 8.5V14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>
+  <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+  <symbol id="i-window" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6.2h12"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 16 16"><path d="M6 3.5L10.5 8 6 12.5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6 4.2 13.6l.7-4.3-3.1-3 4.3-.6z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <!-- 状態記号(20 単位のボックス): waiting の吹き出し / working・idle の ✻ / 未確認の赤バッジ -->
+  <symbol id="s-wait" viewBox="0 0 20 20" overflow="visible"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text></symbol>
+  <symbol id="s-glyph" viewBox="0 0 20 20" overflow="visible"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></symbol>
+  <symbol id="s-badge" viewBox="0 0 20 20" overflow="visible"><circle cx="16.4" cy="3.6" r="4.5" fill="#e5484d"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></symbol>
+</svg>
+<div class="wrap">
+  <div class="eyebrow">shiibar-cc — 確定デザイン</div>
+  <h1>ポップオーバーとウィンドウの表示仕様</h1>
+  <p class="lede">ポップオーバーとウィンドウの見た目の正はこのファイル。挙動(開閉・幅による切り替え・
+    キー操作・一覧の区画・検索・会話ペイン・Resume / Branch / Jump)の正は DESIGN.md §4.5 / §4.6。
+    トレイアイコンの見た目は menubar-design.html。</p>
+  <p class="lede">ポップオーバーとウィンドウは同じ内容を表示し、レイアウトは 1 種類である。
+    実行中のセッションと過去の会話を 1 つの一覧に表示し、選択した会話の全文を会話ペインに表示する。
+    幅が狭いときは一覧のページと詳細ページを切り替え(1 列)、広いときは一覧と会話ペインを並べる(2 列)。</p>
+
+  <h2>デザイン原則</h2>
+  <ul>
+    <li><strong>色</strong>: <strong>赤 = 未確認(unreviewed)専用</strong>、<strong>黄 = スター専用</strong>。
+      <strong>青(アクセントカラー)</strong>は、選択・<code>You</code> のラベル・ピンの ON・主ボタン・
+      テキストボタンに使用する。
+      status(waiting / working / idle)には色を使用しない — 記号と濃度で表す(DESIGN.md §3.1 / §8.49)</li>
+    <li><strong>レイアウトは 1 種類</strong>: ポップオーバー、細いウィンドウ、広いウィンドウは、
+      同じ構成要素(見出し行・一覧・会話ペイン・フッター)を表示する。幅によって変化するのは列の数だけである</li>
+    <li><strong>行のクリックは選択、実行は下部パネルのボタン</strong>: 行のクリックは、行を選択するだけである。
+      Jump / Resume / Branch は、選択中の行を対象にするラベル付きのボタン 1 組だけを下部パネルに表示し、
+      行の中には配置しない。下部パネルは一覧のページと詳細ページで同じ位置・同じ見た目なので、
+      ページを切り替えてもボタンは移動しない。ボタン以外の実行の操作は、一覧にフォーカスがある間の ↩ と ⌘↩ と、
+      行のダブルクリック(↩ と同じく、選択した行の Jump / Resume を実行する)である。1 列で詳細ページを開くのは、行の右端の <code>&gt;</code> ボタンと
+      一覧にフォーカスがある間の → である(DESIGN.md §4.5「実行のボタン」「行の <code>&gt;</code> ボタン」「行のクリック」
+      「行のダブルクリック」)</li>
+    <li><strong>キーの割り当てを画面に表示する</strong>: 実行のキーは、下部パネルのボタンの中に表示する
+      (<code>Resume ↩</code> / <code>Jump ↩</code> / <code>Branch ⌘↩</code>)。移動のキーは、キーの案内に表示する
+      (1 列では下部パネルの左側、2 列では左の列のフッター)。同じキーを 2 か所に表示しない。
+      表示するキーはフォーカスの位置で変わる — 検索欄にフォーカスがある間は、キーの案内に <code>↩ List</code> だけを表示し、
+      ボタンの中の記号を表示しない</li>
+    <li><strong>会話ペインは長い文章の閲覧を主目的として構成する</strong>: 主な内容は「自分の短い依頼 →
+      Claude の長い発言」の繰り返しである。どの発言にも <code>You</code> / <code>Claude</code> のラベルを付け、
+      自分の発言には<strong>全幅の帯の地</strong>を付ける。Claude の発言は
+      <strong>Markdown を描画した本文</strong>として扱う</li>
+    <li><strong>一覧と会話ペインは背景で区別する</strong>: 一覧は淡い地にカードを並べ、
+      会話ペインは通常のウィンドウ背景にする。選択する場所と閲覧する場所を背景で判別できる</li>
+    <li><strong>History に残る実行中の会話は文字の印で示す</strong>: 2 行目の末尾に <code>running</code>。
+      状態記号(スピナー・<code>!</code>)は Running の区画の行だけが使用する — <code>running</code> の印は
+      最後に一覧を取得した時点の情報であり、現在の status を示さない</li>
+    <li><strong>アイコンは線画の SVG</strong>(絵文字を使用しない)。状態記号の凡例は UI に配置しない
+      (吹き出し <code>!</code> / 瞬くスピナー / 薄い <code>✻</code> は形で判別できる)</li>
+  </ul>
+
+  <h2>見出し行</h2>
+  <ul>
+    <li>ポップオーバーとウィンドウの上端は<strong>見出し行</strong> 1 行である。ポップオーバーは左から
+      <strong>検索欄 / ⟳ / Open in window / ⌄</strong>、ウィンドウは <strong>検索欄 / ⟳ / ピン / ⌄</strong> を並べる
+      (ウィンドウでは Open in window の位置がピンに替わる)。ウィンドウはタイトルバーを表示せず、
+      見出し行の左端に信号機ボタンを配置する(挙動は DESIGN.md §4.5「見出し行」)</li>
+    <li>検索欄のプレースホルダは <code>Search (2+ characters)</code>。先頭に虫眼鏡のアイコン(13px・二次色)</li>
+    <li><strong>検索欄の形</strong>: 高さ 24px(見出し行のボタンと同じ高さで、上下の中心が揃う)・角丸 6px・
+      カードの色の地 + 1px の枠・左右の余白 8px・アイコンと文字の間隔 6px・文字 12px。
+      地とアイコンはアプリが描画し、その中に枠なしの入力欄を配置する(DESIGN.md §4.6「検索欄」)。
+      フォーカスリング・消去(×)のボタン・最近の検索のメニューは表示しない。
+      地のどこをクリックしても、入力欄にフォーカスが移る</li>
+    <li><strong>⟳</strong>(ツールチップ <code>Refresh</code>): 静止時は背景なし。ホバーでグレーの背景を表示し、
+      押下で一段濃くする。実行中は矢印グリフが回転する(回転の規律は DESIGN.md §4.6 / §9。
+      working のグリフ循環スピナー <code>✻</code> とは別の文法)</li>
+    <li><strong>Open in window</strong>(ツールチップ <code>Open in window</code>): ウィンドウの枠のアイコン。
+      背景の表示は ⟳ と同じ</li>
+    <li><strong>ピン</strong>(ツールチップ <code>Keep on top</code>): <strong>OFF = 輪郭だけ・二次色 /
+      ON = アクセントカラーの塗り</strong>(DESIGN.md §4.5「ピン」)</li>
+    <li><strong>⌄</strong>: 常に表示するチップ(正方形 24×24・角丸 7px)を背景に持つ。
+      前景色ベースで 通常 10% / ホバー 16% / プレス 24%。グリフの色は変更しない。
+      メニューの内容(ネイティブメニュー項目)は OS 標準のハイライトのまま</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip side"><div class="hrow">
+        <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+        <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+        <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
+        <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+      </div></div>
+      <figcaption>ポップオーバーの見出し行</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="hrow">
+        <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
+        <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+        <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+        <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
+        <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+      </div></div>
+      <figcaption>ウィンドウの見出し行</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side" style="width:auto"><div class="hrow" style="padding:10px">
+        <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
+        <span class="hb on"><svg class="ic"><use href="#i-pin"/></svg></span>
+        <span style="width:20px"></span>
+        <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        <span class="hb chip hov"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        <span class="hb chip prs"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+      </div></div>
+      <figcaption>ピンの 2 状態(左 = OFF: 輪郭 / 右 = ON: アクセントカラーの塗り)と ⌄ のチップ(通常 / ホバー / プレス)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip" style="width:240px; gap:4px">
+        <span>About Shiibar CC</span>
+        <span class="note">───</span>
+        <span>Settings…</span>
+        <span>Setup Check…</span>
+        <span class="note">───</span>
+        <span>Rescan</span>
+        <span>Clear badges</span>
+        <span class="note">───</span>
+        <span>Quit</span>
+      </div>
+      <figcaption>⌄ メニューの項目(─── はセパレーター。構成と各項目の挙動の正は DESIGN.md §4.5「⌄ メニュー」)</figcaption>
+    </figure>
+  </div>
+
+  <h2>一覧のページ(1 列): Running と History</h2>
+  <ul>
+    <li>区画は上が <strong>Running</strong>、下が <strong>History</strong>。見出しは
+      <strong>太字の区画名 + 行数</strong>(行数は二次色)。検索中の行数は、表示している行の数である。
+      行が 1 つも無い区画は見出しごと表示しない(DESIGN.md §4.5「一覧は 2 つの区画」)</li>
+    <li><strong>行は 1 枚ずつのカード</strong>(角丸 10px・1px の枠・カード間 6px)。構成は両区画で共通:
+      <strong>行頭スロット(20px)/ 3 行の文字 / 右端の <code>&gt;</code> ボタン</strong>(1 列だけ)。
+      行の中に実行のボタンは無い。どの行も末尾省略(ellipsis)。2 行目と 3 行目は二次色 11px</li>
+    <li><strong>Running の行</strong>: 行頭スロット = 状態記号。1 行目 = タイトル(waiting の間は許可内容)、
+      2 行目 = ラベル · 経過時間、3 行目 = <code>❯</code> + 最後に自分が送った発話
+      (内容の規則は DESIGN.md §4.5「Running の行」)。選択中は、下部パネルの主ボタンが Jump になる</li>
+    <li><strong>History の行</strong>: 行頭スロット = スター。1 行目 = タイトル、
+      2 行目 = フォルダラベル · 経過時間、3 行目 = <code>❯</code> + 最後に自分が送った発話。
+      選択中は、下部パネルの主ボタンが Resume になる。スター付きの行が先に並ぶ(DESIGN.md §4.6「History の区画」)</li>
+    <li><strong>History に残る実行中の会話</strong>: 2 行目の末尾に <code>· running</code>。
+      選択中は、下部パネルの主ボタンが <strong>disabled の Jump</strong>(ツールチップ
+      <code>Running in a terminal Shiibar CC can't drive</code>)になり、Branch は通常の表示</li>
+    <li><strong>未確認(unreviewed)= 1 行目太字 + 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
+      トレイアイコンの「窓の右肩のバッジ」と同じ文法 — menubar-design.html)。行の右端には未確認の印を配置しない</li>
+    <li><strong>クリック</strong>: <code>&gt;</code> ボタンとスター以外の部分をクリックすると、その行を選択する。
+      青で表示している選択中の行をクリックすると、選択を解除する(選択なしになる)。
+      灰色で表示している選択中の行をクリックしたときは、選択を解除せず、一覧にフォーカスを移す
+      (ウィンドウが key でなかった場合は、key にする)。クリックでは詳細ページを開かない。
+      行のクリックと <code>&gt;</code> ボタンは、一覧にフォーカスを移す(検索欄のカーソルは消える。
+      DESIGN.md §4.5「行のクリック」「キー操作」)</li>
+    <li><strong>ダブルクリック</strong>: <code>&gt;</code> ボタンとスター以外の部分をダブルクリックすると、
+      その行を選択し、一覧にフォーカスを移して、Jump(Running の行)または Resume(History の行)を実行する。
+      対応するボタンが disabled のときは、選択とフォーカスの移動だけを行う。行の状態(未選択・青・灰色)による違いは無い。
+      ダブルクリックでは選択を解除しない。そのため、青で表示している選択中の行のクリックによる選択の解除は、
+      マウスのボタンを押してからシステムのダブルクリックの間隔が経過した時点で実行する。
+      3 回以上の連続したクリックは、Jump / Resume を再実行しない(DESIGN.md §4.5「行のダブルクリック」)</li>
+    <li><strong>ホバーと選択</strong>: ホバー中のカードは<strong>枠だけを淡い青</strong>にする。
+      選択中のカードは、キーの操作対象が一覧である間(ポップオーバーまたはウィンドウが key で、かつ一覧に
+      フォーカスがある間)は<strong>淡い青の地 + 淡い青の枠</strong>、検索欄にフォーカスがある間と、
+      ウィンドウが key でない間(他のアプリを操作している間など)は<strong>淡い灰色の地 + 灰色の枠</strong>にする
+      (キーの操作対象が一覧かどうかを、色で区別する。DESIGN.md §4.5「行の選択」)。選択中のカードは、ホバーしても枠の色を変更しない。文字・状態記号・スター・
+      <code>&gt;</code> ボタンの色は、選択中も変更しない。選択している行は 0 行または 1 行で、
+      利用者が行を選択するまでは、どの行も選択していない(DESIGN.md §4.5「行の選択」)。押せない部分(区画の見出し・フッター)にはホバーの表示を付けない</li>
+    <li><strong>固定フッター</strong>(スクロールに含めない): 上から警告行、メッセージ行、<strong>下部パネル</strong>。
+      下部パネルは詳細ページと同じもので、左側にキーの案内、右側に選択中の行の Branch と主ボタンを配置する。
+      行を選択していない間は、キーの案内だけを表示する(パネルの高さは変わらない)。
+      下部パネルの上端は 1px の区切り線(下記「固定フッター」「下部パネルの状態」)</li>
+    <li>UI 文言は英語。行の内容(依頼文・許可内容・タイトル)は利用者のデータをそのまま表示する</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app pop"><div class="clip">
+        <div class="hrow">
+          <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+          <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
+          <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="rows">
+          <div class="sec"><b>Running</b><span>3</span></div>
+          <div class="row strong sel"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="rt"><span class="t1">Claude needs your permission</span><span class="sub">demo/api-server · 4m</span><span class="t3"><span class="g">❯</span>本番に適用する前に dry-run の結果を見せて</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="rt"><span class="t1">Add retry to the upload client</span><span class="sub">example/mobile-app · 12m</span><span class="t3"><span class="g">❯</span>Use exponential backoff, at most 5 attempts</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="rt"><span class="t1">README の構成を見直して</span><span class="sub">blog/draft-post · 40m</span><span class="t3"><span class="g">❯</span>インストール手順を先頭に移動して</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="sec"><b>History</b><span>86</span></div>
+          <div class="row"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Release checklist review</span><span class="sub">demo/menubar-app · 3h</span><span class="t3"><span class="g">❯</span>plugin.json も上げる必要がある? hooks は変更していないけど</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row hov"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">CI がタグ push で起動しない件</span><span class="sub">demo/api-server · 2d</span><span class="t3"><span class="g">❯</span>workflow の on: の部分を見せて</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row"><span class="sym"></span><span class="rt"><span class="t1">Remote build cache setup</span><span class="sub">example/remote-tools · 5m · running</span><span class="t3"><span class="g">❯</span>Which bucket should the cache use?</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        </div>
+        <div class="stat"><div class="warn">⚠ Disconnected from daemon — reconnecting…</div></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
+      </div></div>
+      <figcaption>ポップオーバー · 一覧のページ。Running の先頭の行(waiting + 未確認)を選択していて、
+        一覧にフォーカスがある。下部パネルの主ボタンは Jump になる。どの行も右端に <code>&gt;</code> ボタンを表示する。
+        History は、スター付きが先頭、2 行目はホバー中(枠が淡い青・行頭に輪郭の星)、
+        3 行目は追跡外で実行中の会話。下部パネルの上は警告行の例</figcaption>
+    </figure>
+    <figure>
+      <div class="app pop"><div class="clip">
+        <div class="hrow">
+          <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span></span>
+          <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
+          <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="rows">
+          <div class="sec"><b>Running</b><span>1</span></div>
+          <div class="row"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="rt"><span class="t1">Cut the 0.6.0 release</span><span class="sub">demo/menubar-app · 2m</span><span class="t3"><span class="g">❯</span>Create the tag after CI is green</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="sec"><b>History</b><span>3</span></div>
+          <div class="row sel inact"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Release checklist review</span><span class="sub">demo/menubar-app · 3h</span><span class="t3"><span class="g">❯</span>plugin.json も上げる必要がある? hooks は変更していないけど</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row"><span class="sym"></span><span class="rt"><span class="t1">CI がタグ push で起動しない件</span><span class="sub">demo/api-server · 2d</span><span class="t3"><span class="g">❯</span>workflow の on: の部分を見せて</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+          <div class="row"><span class="sym"></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        </div>
+        <div class="actions sf"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+      </div></div>
+      <figcaption>ポップオーバー · 検索中(「tag」)。行の形は検索していないときと同じで、ヒットの抜粋も件数も
+        表示しない。3 行目は最後の発話のままである。区画の見出しの行数は、表示している行の数になる。
+        History の行を選択しているので、下部パネルの主ボタンは Resume。検索欄にフォーカスがあるので、
+        選択中のカードは灰色で、キーの案内は <code>↩ List</code> だけで、ボタンの中に <code>↩</code> / <code>⌘↩</code> を表示しない</figcaption>
+    </figure>
+  </div>
+
+  <h2>行の構成要素: 状態記号・スター・<code>&gt;</code> ボタン</h2>
+  <ul>
+    <li><strong>状態記号</strong>(行頭スロット・20px 相当。Running の行):
+      <strong>薄い ✻(静止・50% 濃度)= idle</strong>(U+273B の文字グリフ。Claude Code の TUI が
+      処理を終えたときに表示する「✻ Worked for Ns」のマーカーと同じ「静止している Claude」)/
+      <strong>グリフ循環スピナー(100% 濃度)= working</strong>
+      (Claude Code の TUI と同じ <code>·</code> <code>✢</code> <code>✳</code> <code>✶</code>
+      <code>✻</code> <code>✽</code> の循環。位置 = <code>round((1−cos(2πt/2000))/2 × 5)</code> —
+      周期 2 秒のコサインイージングで、両端に留まり中間を速く通過する。等間隔のステップにしない。
+      動作させる条件は DESIGN.md §4.5「表示中の更新」)/
+      <strong>輪郭だけの吹き出し + 太い ! = waiting</strong>(塗りなし —
+      Claude が利用者に話しかけて返事を待っている)。
+      モックは静止画のため、working は循環の 1 コマ(✻)を示す(idle との差は濃度のみ)</li>
+    <li><strong>赤バッジ</strong>: 状態記号の右肩に表示する塗りの円 + 細い明色のフチ(ハロー)。
+      状態記号の種類によらず同じ位置</li>
+    <li><strong>スター</strong>(行頭スロット・16px。History の行): 3 状態 —
+      <strong>なし</strong>(スロットは空)/ <strong>行のホバー中 = 輪郭だけの星</strong>(二次色)/
+      <strong>スター付き = 黄色の塗りの星</strong>(塗り <code>#f5b400</code>・輪郭 <code>#d39700</code>。
+      ホバーしていなくても表示する)。挙動は DESIGN.md §4.6「スター」</li>
+    <li><strong>行の <code>&gt;</code> ボタン</strong>(1 列だけ。28×26・角丸 6px・右向きの山形のアイコン 15px・線幅 1.4):
+      どの行も右端に常に表示する(ホバー時だけの表示にしない)。静止時は背景なし・二次色。
+      ホバーで 16%・プレスで 24% のグレーの背景(⌄ のチップと同じ濃度)。disabled の状態は無い。
+      ツールチップは <code>Open</code>。押すと、その行を選択して詳細ページを開く。
+      2 列では表示しない(DESIGN.md §4.5「行の <code>&gt;</code> ボタン」)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip side" style="width:auto"><div class="inl" style="padding:12px; gap:14px">
+        <span class="sym"><svg><use href="#s-wait"/></svg></span>
+        <span class="sym"><svg><use href="#s-glyph"/></svg></span>
+        <span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span>
+        <span style="width:16px"></span>
+        <span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span>
+        <span class="sym"><svg><g style="opacity:.5"><use href="#s-glyph"/></g><use href="#s-badge"/></svg></span>
+      </div></div>
+      <figcaption>状態記号の 3 種(waiting / working / idle)と、赤バッジを付けた形</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="inl" style="padding:10px 12px; gap:6px">
+        <span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span>
+        <span class="ib hov"><svg class="ic"><use href="#i-fwd"/></svg></span>
+        <span class="ib prs"><svg class="ic"><use href="#i-fwd"/></svg></span>
+      </div></div>
+      <figcaption>行の <code>&gt;</code> ボタン(左から 通常 / ホバー / プレス)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side" style="padding:10px 10px 4px">
+        <div class="row"><span class="sym"></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        <div class="row hov"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        <div class="row"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        <div class="row sel"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+        <div class="row sel inact"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
+      </div>
+      <figcaption>カードの 5 つの表示(上から: 通常・スターなし / ホバー中: 枠が淡い青・輪郭の星 /
+        スター付き / 選択中・キーの操作対象が一覧である間: 淡い青の地と枠 /
+        選択中・検索欄にフォーカスがある間またはウィンドウが key でない間: 淡い灰色の地と灰色の枠)。1 列の行なので、右端に <code>&gt;</code> ボタンを表示する</figcaption>
+    </figure>
+  </div>
+
+  <h2>固定フッター: 警告行・メッセージ行・キーの案内</h2>
+  <ul>
+    <li><strong>警告行</strong>(表示する条件は DESIGN.md §4.5「異常の可視化」):
+      <strong>モノクロ(二次色)+ ⚠ 記号</strong>・12px。赤は使用しない(赤 = 未確認専用)。
+      クリックの動作は無い</li>
+    <li><strong>メッセージ行</strong>(二次色 11px・クリック不可): 表示する内容があるときだけ、
+      キーの案内の上に 1 行で表示する(内容と優先順位は DESIGN.md §4.6「メッセージ行」)。
+      <ul>
+        <li>Rescan: 実行中 <code>Rescanning…</code> / 正常終了後 <code>✓ Rescan done</code> /
+          失敗(TCC 以外)<code>Rescan failed</code>。件数は表示しない。TCC エラーは警告行で表示する</li>
+        <li>⟳: 実行中 <code>Refreshing…</code> / 完了後 <code>Updated · N conversations</code></li>
+        <li>全構築中: <code>Indexing 340 of 4,200…</code>。全構築中は<strong>検索欄を無効</strong>の表示にする。
+          History は完了後に一度に表示する(徐々に行が増える表示にしない)。Running の区画は構築を待たずに
+          表示する。回転する <code>✻</code> は使用しない — グリフ循環スピナーは working を意味する</li>
+      </ul></li>
+    <li><strong>キーの案内</strong>(二次色 11px・常に表示する): キーの表記はモノスペースの小さなチップ、
+      その右に動作の名前。1 列では下部パネルの左側(一覧のページと詳細ページの両方)、
+      2 列では左の列のフッターに表示する。キーの案内は移動のキーだけを示す
+      (実行のキーは下部パネルのボタンの中に表示する)。表示する組み合わせは、フォーカスの位置で次のとおりに変わる
+      (DESIGN.md §4.5「固定フッター」):
+      <ul>
+        <li>検索欄にフォーカスがある間(1 列・2 列とも): <code>↩ List</code> だけ</li>
+        <li>一覧にフォーカスがある間の 1 列の一覧のページ(下部パネルの左側): <code>↑↓ Move</code> / <code>→ Open</code>
+          (<code>→ Open</code> は行を選択している間だけ)</li>
+        <li>一覧にフォーカスがある間の 2 列(左の列のフッター): <code>↑↓ Move</code></li>
+        <li>1 列の詳細ページ(下部パネルの左側): <code>⌥↑↓ Prev / Next</code> / <code>← Back</code>
+          (詳細ページには検索欄が無いので、フォーカスは常に一覧にある)</li>
+      </ul></li>
+    <li><strong>表示していない会話の数</strong>: History の行が上限(DESIGN.md §9)を超えたときは、
+      最後のカードの下に 1 行(二次色 12px・中央寄せ)— <code>242 more — search to narrow down</code>
+      (検索中は <code>242 more — refine your search</code>)。カードにはしない</li>
+    <li><strong>空状態</strong>: Running と History の両方に行が無いときだけ、一覧の位置に 1 行
+      (二次色 12px)— 空クエリは <code>No conversations</code>、検索中は
+      <code>No matching conversations</code>(DESIGN.md §4.6「空状態」)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip side">
+        <div class="stat"><div class="warn">⚠ Disconnected from daemon — reconnecting…</div>
+          <div class="msgline">✓ Rescan done</div></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>1 列の一覧のページ: 警告行 + メッセージ行(Rescan の正常終了)+ 下部パネル</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side">
+        <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions sf"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="foot"><div class="hints"><span><span class="k">↑↓</span>Move</span></div></div>
+        <div class="foot"><div class="hints"><span><span class="k">↩</span>List</span></div></div>
+      </div>
+      <figcaption>キーの案内(上から: 1 列で行を選択していなくて、一覧にフォーカスがある / 1 列で行を選択していて、一覧にフォーカスがある /
+        1 列で行を選択していて、検索欄にフォーカスがある(ボタンの中の記号を表示しない) /
+        2 列の左の列のフッターで、一覧にフォーカスがある / 同じく検索欄にフォーカスがある)。1 列では下部パネルの左側に配置し、
+        行を選択していない間はボタンを表示しない(パネルの高さは変わらない)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side">
+        <div class="hrow">
+          <span class="search dis"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+          <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
+          <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        </div>
+        <div style="height:36px"></div>
+        <div class="stat"><div class="msgline">Indexing 340 of 4,200…</div></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>全構築中(検索欄は無効・メッセージ行に進捗)。一覧にフォーカスがあり、行を選択していないので、
+        キーの案内は ↑↓ だけになり、下部パネルにボタンを表示しない</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side" style="padding:4px 10px">
+        <div class="empty">No conversations</div>
+        <div class="empty">No matching conversations</div>
+      </div>
+      <figcaption>空状態(上 = 空クエリ / 下 = 検索中)</figcaption>
+    </figure>
+  </div>
+
+  <h2>詳細ページ(1 列): 選択した会話の会話ペイン</h2>
+  <ul>
+    <li>1 列では、行の <code>&gt;</code> ボタン、または一覧にフォーカスがある間の → で、詳細ページを<strong>右からスライド</strong>して表示する。
+      戻るボタン、または一覧にフォーカスがある間の ← で、一覧のページに戻る(DESIGN.md §4.5「幅による切り替え」「キー操作」。時間は §9)</li>
+    <li><strong>ヘッダ</strong>: 左から <strong>戻るボタン</strong>(チップ)/ <strong>タイトルとフォルダ</strong>
+      (1 行目 = タイトル・13.5px・セミボールド、2 行目 = ホーム相対のフルパス · 経過時間・二次色 11px)/
+      <strong>一覧の中での位置</strong>(<code>2 / 4</code>・二次色 11px)/
+      <strong>前後の会話へ移動するボタン</strong>(上向きと下向きのセグメンテッドコントロール。⌥↑ / ⌥↓ と同じ)。
+      ヘッダ下の区切り線は常に表示する(DESIGN.md §4.6「会話ペインの表示」)</li>
+    <li><strong>検索バー行</strong>(会話内にヒットがあるときだけ): 左端に <strong>検索文字列の文</strong>
+      <code>Matches for “tag”</code>(<code>Matches for</code> は二次色、引用符で囲んだ検索文字列は通常の色。
+      長い検索文字列は途中を省略する。表示だけで変更できないので、地・枠・虫眼鏡のアイコンを付けない)、
+      右端にカウンタ <code>N of M</code> と <strong>‹ › のセグメンテッドコントロール</strong>
+      (ツールチップ <code>Previous match</code> / <code>Next match</code>)</li>
+    <li>その下がメッセージ面。古い順に並び、下端が最新である。右端はミニマップ、
+      最後のメッセージの下に終端マーカー。↑ / ↓ は会話をスクロールする(Space と Page Up / Page Down も同じ)。
+      前後の会話への切り替えは ⌥↑ / ⌥↓ である(DESIGN.md §4.5「キー操作」)</li>
+    <li><strong>下部パネル</strong>は常に表示する。左側にキーの案内、右端が主ボタン(Resume または Jump)、
+      その左が Branch(下記「下部パネルの状態」)。ボタンの位置と大きさは一覧のページの下部パネルと同じで、
+      ページを切り替えても移動しない。警告行とメッセージ行は、下部パネルのすぐ上に表示する</li>
+    <li>詳細ページに見出し行は無い。検索欄・⟳・ピン・⌄ は、一覧のページに戻って操作する</li>
+    <li>ウィンドウが 1 列の幅のときも同じ表示で、ヘッダの左端に信号機ボタンを配置する</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app pop"><div class="clip"><div class="page">
+        <div class="hdr">
+          <span class="hb chip"><svg class="ic"><use href="#i-back"/></svg></span>
+          <div class="hx"><div class="ht">Release checklist review</div><div class="hp">~/work/demo/menubar-app · 3h ago</div></div>
+          <span class="pos">2 / 4</span>
+          <span class="seg"><span class="nav"><svg class="ic s13"><use href="#i-up"/></svg></span><span class="nav"><svg class="ic s13"><use href="#i-chev"/></svg></span></span>
+        </div>
+        <div class="findbar"><span class="qs"><span>Matches for</span><span class="qt">“tag”</span></span><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
+        <div class="docwrap">
+          <div class="doc">
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+              <p>リリースコミットで 3 箇所のバージョンを揃えてからタグを作成します。</p>
+              <pre>git <span class="hl">tag</span> v0.6.0
+git push origin main --<span class="hl">tag</span>s</pre>
+              <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。<code>check-version.sh</code> が三点一致を確認します。</p></div>
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">plugin.json も上げる必要がある? hooks は変更していないけど</div></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+              <p>はい。hooks が無変更でも <code>check-version.sh</code> による三点一致の確認があるので、<code>plugin.json</code> も 0.6.0 に上げます。そのうえで <span class="hlcur">tag</span> を作成し、push します。</p></div>
+            <div class="endcap">Latest message · 3h ago</div>
+          </div>
+          <div class="mm">
+            <span class="m band" style="top:2%; height:5%"></span><span class="m txt" style="top:9%; height:6%"></span>
+            <span class="m codeb" style="top:16%; height:8%"></span>
+            <span class="m hit" style="top:18%"></span><span class="m hit" style="top:21%"></span>
+            <span class="m txt" style="top:26%; height:12%"></span><span class="m band" style="top:42%; height:7%"></span>
+            <span class="m txt" style="top:52%; height:12%"></span><span class="m hit cur" style="top:61%"></span>
+            <span class="m thumb" style="top:1%; height:98%"></span>
+          </div>
+        </div>
+        <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+      </div></div></div>
+      <figcaption>ポップオーバー · 詳細ページ。「tag」で検索中に、検索結果の 2 番目の会話を表示している。
+        検索バー行の左端に <code>Matches for “tag”</code>、右端にカウンタと ‹ ›。
+        初期位置は最新のヒットなので、カウンタは 3 of 3 になる</figcaption>
+    </figure>
+    <figure>
+      <div class="app win"><div class="col"><div class="page">
+        <div class="hdr">
+          <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
+          <span class="hb chip"><svg class="ic"><use href="#i-back"/></svg></span>
+          <div class="hx"><div class="ht">Add retry to the upload client</div><div class="hp">~/work/example/mobile-app · 12m ago</div></div>
+          <span class="pos">2 / 89</span>
+          <span class="seg"><span class="nav"><svg class="ic s13"><use href="#i-up"/></svg></span><span class="nav"><svg class="ic s13"><use href="#i-chev"/></svg></span></span>
+        </div>
+        <div class="docwrap">
+          <div class="doc">
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">Add retry to the upload client</div></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+              <p>I'll wrap the request in a retry loop. Which errors should be retried?</p></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+              <p>The client currently treats every non-2xx response as fatal. Timeouts and 5xx responses are the usual candidates… <span class="expand">Show full message</span></p></div>
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">Use exponential backoff, at most 5 attempts</div></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+              <p>Done. The delay doubles from 200 ms and the loop stops after the fifth attempt.</p></div>
+            <div class="endcap">Latest message · 12m ago</div>
+          </div>
+          <div class="mm">
+            <span class="m band" style="top:2%; height:5%"></span><span class="m txt" style="top:9%; height:5%"></span>
+            <span class="m txt" style="top:16%; height:9%"></span><span class="m band" style="top:28%; height:5%"></span>
+            <span class="m txt" style="top:35%; height:6%"></span>
+            <span class="m thumb" style="top:1%; height:98%"></span>
+          </div>
+        </div>
+        <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
+      </div></div></div>
+      <figcaption>ウィンドウ · 1 列の幅 · 詳細ページ。検索していないので、検索バー行は表示しない。
+        Running の行の会話を表示しているので、主ボタンは Jump。Claude の発言が連続するときも、
+        発言ごとにラベルを付ける。2 つ目の発言は畳まれている</figcaption>
+    </figure>
+  </div>
+
+  <h2>2 列(ウィンドウの幅が 880pt 以上)</h2>
+  <ul>
+    <li>左の列は一覧のページと同じ構成要素(見出し行・一覧・固定フッター)で、幅は固定である。
+      ただし、行に <code>&gt;</code> ボタンを表示せず(選択中の会話は右の列に表示している)、
+      固定フッターにはキーの案内だけを表示する(実行のボタンは右の列の下部パネルにある)。
+      右の列は会話ペインで、ウィンドウの幅を変更すると右の列だけが伸縮する
+      (しきい値と幅は DESIGN.md §9)。列の境界は 1px の区切り線</li>
+    <li>右の列のヘッダは<strong>タイトルとフォルダだけ</strong>を表示する(タイトルは 15px)。
+      戻るボタン・位置・前後の移動は配置しない(左の列が同じ役割を持つ)</li>
+    <li>検索バー行は、カウンタと ‹ › だけを表示する。検索欄が表示されているので、検索文字列は表示しない</li>
+    <li>下部パネルの左側には何も配置しない(キーの案内は左の列のフッターにある)</li>
+    <li>行を選択していない間は、右の列にヘッダも下部パネルも表示せず、中央に
+      <code>No conversation selected</code>(二次色 12px)だけを表示する</li>
+    <li>選択中の行に <code>session_id</code> が無いときは、ヘッダと下部パネルを通常どおり表示し、
+      メッセージ面の中央に <code>No conversation to show</code>(二次色 12px)だけを表示する
+      (1 列の詳細ページも同じ)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app win two" style="height:720px">
+        <div class="col">
+          <div class="hrow">
+            <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
+            <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span></span>
+            <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
+            <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
+            <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+          </div>
+          <div class="rows">
+            <div class="sec"><b>Running</b><span>1</span></div>
+            <div class="row"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="rt"><span class="t1">Cut the 0.6.0 release</span><span class="sub">demo/menubar-app · 2m</span><span class="t3"><span class="g">❯</span>Create the tag after CI is green</span></span></div>
+            <div class="sec"><b>History</b><span>3</span></div>
+            <div class="row sel inact"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="rt"><span class="t1">Release checklist review</span><span class="sub">demo/menubar-app · 3h</span><span class="t3"><span class="g">❯</span>plugin.json も上げる必要がある? hooks は変更していないけど</span></span></div>
+            <div class="row"><span class="sym"></span><span class="rt"><span class="t1">CI がタグ push で起動しない件</span><span class="sub">demo/api-server · 2d</span><span class="t3"><span class="g">❯</span>workflow の on: の部分を見せて</span></span></div>
+            <div class="row"><span class="sym"></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span></div>
+          </div>
+          <div class="foot"><div class="hints"><span><span class="k">↩</span>List</span></div></div>
+        </div>
+        <div class="main">
+          <div class="hdr pad"><div class="hx"><div class="ht">Release checklist review</div><div class="hp">~/work/demo/menubar-app · 3h ago</div></div></div>
+          <div class="findbar"><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
+          <div class="docwrap">
+            <div class="doc">
+              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+              <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+                <p>リリースコミットで 3 箇所のバージョンを揃えてからタグを作成します。</p>
+                <pre>git <span class="hl">tag</span> v0.6.0
+git push origin main --<span class="hl">tag</span>s</pre>
+                <div class="tbl"><table><tr><th>File</th><th>Field</th><th>Value</th></tr><tr><td>Cargo.toml</td><td>workspace.package.version</td><td>0.6.0</td></tr><tr><td>plugin.json</td><td>version</td><td>0.6.0</td></tr></table></div>
+                <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。<code>check-version.sh</code> が三点一致を確認します。</p></div>
+              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">plugin.json も上げる必要がある? hooks は変更していないけど</div></div>
+              <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+                <p>はい。hooks が無変更でも <code>check-version.sh</code> による三点一致の確認があるので、<code>plugin.json</code> も 0.6.0 に上げます。そのうえで <span class="hlcur">tag</span> を作成し、push します。</p></div>
+              <div class="endcap">Latest message · 3h ago</div>
+            </div>
+            <div class="mm">
+              <span class="m band" style="top:2%; height:5%"></span><span class="m txt" style="top:9%; height:4%"></span>
+              <span class="m codeb" style="top:14%; height:8%"></span>
+              <span class="m hit" style="top:16%"></span><span class="m hit" style="top:19%"></span>
+              <span class="m txt" style="top:24%; height:18%"></span><span class="m band" style="top:46%; height:5%"></span>
+              <span class="m txt" style="top:53%; height:6%"></span><span class="m hit cur" style="top:57%"></span>
+              <span class="m thumb" style="top:1%; height:98%"></span>
+            </div>
+          </div>
+          <div class="actions sf"><span class="sp"></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        </div>
+      </div>
+      <figcaption>ウィンドウ · 2 列 ·「tag」で検索中。行に <code>&gt;</code> ボタンは無い。
+        検索欄にフォーカスがあるので、選択中のカードは灰色で、左の列のフッターのキーの案内は <code>↩ List</code> だけで、
+        右の列の下部パネルのボタンの中に記号を表示しない(一覧にフォーカスがある間は <code>↑↓ Move</code> と記号を表示する)。
+        右の列の検索バー行は、カウンタと ‹ › だけを表示する</figcaption>
+    </figure>
+  </div>
+
+  <h2>下部パネルの状態</h2>
+  <ul>
+    <li>挙動の正は DESIGN.md §4.6「下部パネル」・「Jump」。ここでは形だけを示す:
+      右端 = 主ボタン(Resume または Jump)、その左 = Branch(副ボタン・枠線のみ)。対象は選択中の行である。
+      パネルの高さは変化しない。Resume と Jump は同幅
+      (行を移動してボタンが替わっても、端の位置が移動しない)</li>
+    <li><strong>ボタンの中のショートカット</strong>: ラベルに続けて、そのボタンを実行するキーを表示する —
+      主ボタンは <code>Resume ↩</code> / <code>Jump ↩</code>、Branch は <code>Branch ⌘↩</code>。
+      記号はラベルより淡い色(通常のウェイト)で表示し、disabled の間も表示する。
+      Enter と ⌘Enter は、一覧にフォーカスがある間だけボタンを実行する(DESIGN.md §4.5「キー操作」)。
+      そのため、<strong>検索欄にフォーカスがある間は記号を表示しない</strong>。記号の場所は残すので、
+      ボタンの幅と位置は変わらない。ボタンのクリックは、フォーカスの位置に関係なく有効である</li>
+    <li>表示する場所は、1 列の一覧のページの下端・1 列の詳細ページの下端・2 列の右の列の下端である。
+      画面に表示する実行のボタンは常に 1 組で、一覧のページと詳細ページで位置と大きさが同じ</li>
+    <li>1 列では、左側にキーの案内を配置する(一覧のページは一覧の案内、詳細ページは
+      <code>⌥↑↓ Prev / Next</code> / <code>← Back</code>)。2 列の右の列では、左側には何も配置しない</li>
+    <li>1 列の一覧のページで行を選択していない間は、ボタンを表示せず、キーの案内だけを表示する
+      (パネルの高さは変わらない)</li>
+    <li>disabled の主ボタンは標準の灰色の形にする(DESIGN.md §4.6 / §8.42)。理由はツールチップ
+      <code>Running in a terminal Shiibar CC can't drive</code> で示す</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip" style="width:420px; padding:0; gap:0">
+        <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>1 列の一覧のページ(上から: 行を選択していない / History の会話 / Running の行にある会話 /
+        History に残る実行中の会話(追跡外)。どれも一覧にフォーカスがある状態。
+        主ボタンが disabled の間も、ボタンの中の <code>↩</code> は表示する)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip" style="width:420px; padding:0; gap:0">
+        <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>1 列の詳細ページ(上 = History の会話 / 中 = Running の行にある会話 /
+        下 = History に残る実行中の会話(追跡外))</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip" style="width:420px; padding:0; gap:0">
+        <div class="actions" style="border-top:0"><span class="sp"></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>2 列の右の列(左側には何も配置しない)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip" style="width:420px; padding:0; gap:0">
+        <div class="actions sf" style="border-top:0"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions sf"><span class="sp"></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+      </div>
+      <figcaption>検索欄にフォーカスがある間(上 = 1 列の一覧のページ / 下 = 2 列の右の列)。
+        ボタンの中の記号を表示しない。ボタンの幅と位置は、一覧にフォーカスがある間と同じ</figcaption>
+    </figure>
+  </div>
+
+  <h2>メッセージ面の文法</h2>
+  <ul>
+    <li><strong>発言ごとにラベルの行</strong>: どの発言も、先頭に役割のラベル(11px・セミボールド)を表示する。
+      自分の発言は <strong><code>You</code>(青)</strong>、Claude の発言は
+      <strong><code>Claude</code>(二次色)</strong>。1 つの依頼に Claude の発言が連続するときも、
+      すべての発言にラベルを付ける(発言の境目を示す)。ラベルは描画後テキストに含めない
+      (ヒット計算・畳み境界・選択とコピーの対象外 — DESIGN.md §4.6)</li>
+    <li><strong>自分の発言 = 全幅の帯</strong>: 左端から右端までマージンなしで、ラベルと発言に帯の地を付ける。
+      発言は<strong>本文と同じウェイト</strong>で表示する。
+      太字にしない(帯が見出しの役割を持つので、文字を強調しない)。文字サイズは本文 +0.5pt。
+      帯の直前は広めの余白(節の切れ目)。スクロールすると、帯の並びから依頼の一覧を把握できる</li>
+    <li><strong>Claude の発言 = Markdown を描画</strong>(描画範囲は DESIGN.md §4.6「会話ペインの表示」):
+      コードブロックはモノスペース + 淡い背景 + 横スクロール。インラインコード・強調・見出し・
+      箇条書きも描画する。地は付けない</li>
+    <li><strong>パイプ表はグリッドで描画</strong>: ヘッダ行はセミボールド + 淡い背景、行間に罫線、
+      全列左揃え(列揃えの指定は無視)。セルの中のインライン(コード・強調)も描画する。
+      表は内容の幅のまま(本文の幅いっぱいに広げない)。<strong>セルは幅の上限(約 28em)で
+      折り返し</strong>、それでも収まらない表だけ、コードブロックと同じく表の中で横スクロール
+      (DESIGN.md §8.38)。等幅フォントで整形する形は採用しない — 日本語のグリフ幅が
+      モノスペースで揃わず、列が崩れる(DESIGN.md §8.37)</li>
+    <li><strong>発言ごとのコピー</strong>: 各発言のラベルの行の右端に、コピーのアイコンボタン
+      (14px・二次色)を常に表示する。本文の文字と同じく、ミニマップの手前 8px より内側に配置する。
+      押した後は一定時間、アイコンを<strong>チェックマーク</strong>に替える(同じ位置・同じ大きさ・同じ色。
+      表示時間は DESIGN.md §9、コピーする内容は §4.6「発言ごとのコピー」)</li>
+    <li><strong>選択とコピー</strong>(文法の正は DESIGN.md §4.6「選択とコピー」): 選択ハイライトは
+      メッセージをまたいで連続する。ラベル・展開 / 畳みのボタン・コピーのボタンは
+      選択に含まれない。右クリックメニューは Copy(⌘C)/ Copy as Markdown(⇧⌘C)の 2 項目だけ</li>
+    <li><strong>本文の幅の上限</strong>: 本文の行長は約 60em を上限とする。ウィンドウを広げても行が
+      長くなりすぎない(コードブロックと、折り返しても収まらない表は、この上限の内側で横スクロール)</li>
+    <li>本文の既定は 13pt・行間 1.7。コードブロックは本文 −1.5pt。
+      <strong>行間・段落間・ブロック間隔・帯の余白は本ページの CSS 値が実装の正</strong>(DESIGN.md §8.39)</li>
+    <li><strong>ミニマップ = スクロールバー</strong>(右端・常時・幅 20pt): 会話全体の略図
+      (帯 = 濃い縞・本文 = 淡い塊・コード = 中間。文字は描かない)+ 半透明グレーのつまみ。
+      本文の文字はミニマップの手前 8px で折り返す(狭くなるのは文字の列だけ — 帯の背景は
+      右端まで、コードブロック・表の背景は元の列幅のまま)。
+      ドラッグでスクロール・ホバーで濃く・地のクリックでジャンプ。会話ペイン内に OS のスクロールバーは
+      表示しない(DESIGN.md §4.6「ヒットナビゲーション」/ §8.39)</li>
+    <li><strong>下端の手がかり</strong>: 最後のメッセージの下に終端マーカー
+      <code>Latest message · 3h ago</code>(罫線ではさんだ淡い一行)。上に続きがある間だけ
+      ヘッダ下に薄いスクロールシャドウ(最上部で消える)</li>
+    <li>メッセージ間のツール実行は何も描かない(DESIGN.md §4.6)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip" style="width:640px; max-width:640px; padding:12px 0">
+        <div class="msg ans" style="margin-top:0"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+          <p>I found two broken links (both return <code>000</code>):</p>
+          <div class="tbl"><table>
+            <tr><th>Post</th><th>Broken link</th><th>Status</th></tr>
+            <tr><td>postgres-indexes</td><td><code>http://wiki.postgresql.org.example/Index_Maintenance</code></td><td>Real page exists ✅</td></tr>
+            <tr><td>rust-error-handling</td><td><code>http://blog.defunct-site.example/rust-errors</code></td><td>Dead site, <strong>no snapshot</strong> ❌</td></tr>
+          </table></div>
+          <p>The Postgres link is unambiguous — I'll fix that now.</p>
+        </div>
+      </div>
+      <figcaption>表の描画(グリッド・セル内のインラインも描画する)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip" style="width:420px; padding:0; gap:8px; overflow:hidden">
+        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-check"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+      </div>
+      <figcaption>コピーのボタンの反応(上 = 通常: コピーのアイコン / 下 = 押した直後: チェックマーク)</figcaption>
+    </figure>
+  </div>
+
+  <h2>検索(2 文字以上): ヒットの位置は会話ペインが示す</h2>
+  <ul>
+    <li>挙動の正は DESIGN.md §4.6(「検索の適用範囲」・「検索欄」・「ヒットナビゲーション」)。
+      ここでは形だけを示す(モックは上記「一覧のページ」「詳細ページ」「2 列」の検索中の図)</li>
+    <li><strong>検索は 1 つ</strong>: 見出し行の検索欄の検索文字列が、一覧の絞り込みと、会話内のヒットの両方に
+      適用される</li>
+    <li><strong>一覧の行の形は空クエリのときと同じ</strong>。ヒットの抜粋も件数も表示しない。
+      Running の区画も、結果に含まれる行だけになる</li>
+    <li>ハイライトはすべての検索語を同じ色で表示し、現在位置だけ濃くする</li>
+    <li>検索バー行(ヘッダの下)は macOS 標準の文書内検索の形: カウンタ <code>N of M</code> + <strong>‹ › の
+      セグメンテッドコントロール</strong>(内容サイズ — バーの幅いっぱいに広げない)。
+      N は、会話の先頭のヒットを 1 として数える。2 列では、カウンタと ‹ › を左寄せにする。
+      1 列の詳細ページでは、左端に <code>Matches for “tag”</code> の文を表示し(<code>Matches for</code> は二次色、
+      引用符で囲んだ検索文字列は通常の色。長い検索文字列は途中を省略する)、カウンタと ‹ › を右端に配置する。
+      この文は表示だけで、入力欄と区別できるように地・枠・虫眼鏡のアイコンを付けない</li>
+    <li>ヒットの分布はミニマップに線で表示する(現在位置だけ濃い線)。畳まれたメッセージの表示していない部分に
+      ヒットがあるときは、展開ボタンに件数バッジ <code>N matches</code>(ハイライト色)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip" style="width:420px; padding:12px 0">
+        <div class="msg ans" style="margin-top:0"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+          <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。
+            draft を作成したあとの公開前の確認項目は… <span class="expand">Show full message <span class="cnt">2 matches</span></span></p></div>
+      </div>
+      <figcaption>畳まれた部分にヒットがある発言(展開ボタンの隣に件数バッジ)</figcaption>
+    </figure>
+  </div>
+
+  <h2>畳みと展開</h2>
+  <ul>
+    <li>畳みの規則(閾値・展開と再度の畳み・ジャンプでの自動展開・展開状態の破棄)の正は
+      DESIGN.md §4.6「表示の状態規則」/ §9。見た目は <code>Show full message</code> / <code>Show less</code> の
+      淡いテキストボタンで、ヒットを含む畳みにはボタンの隣に件数バッジを表示する</li>
+  </ul>
+
+  <h2>キー操作</h2>
+  <ul>
+    <li>挙動の正は DESIGN.md §4.5「キー操作」。キーの動作は、検索欄にフォーカスがあるかどうかで 2 通りに分かれる。
+      「一覧にフォーカスがある」は、検索欄にフォーカスが無い状態を指す(詳細ページと、会話ペインにフォーカスがある場合を含む)。
+      検索欄にフォーカスがある間は検索欄にカーソルを表示し、一覧にフォーカスがある間は表示しない</li>
+    <li>移動のキーはキーの案内に、実行のキー(↩ と ⌘↩)は下部パネルのボタンの中に表示する</li>
+  </ul>
+  <table class="keys">
+    <tr><th>キー</th><th>検索欄にフォーカスがある間</th><th>一覧にフォーカスがある間</th></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>何もしない</td><td>前後の行に選択を移動する。選択なしの間は、先頭の行を選択する。1 列の詳細ページでは、会話をスクロールする(Space と Page Up / Page Down も同じ)</td></tr>
+    <tr><td><kbd>⌥↑</kbd> <kbd>⌥↓</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の詳細ページで、表示する会話を前後の行の会話に切り替える(選択も移動する。スライドはしない。端では何もしない)。それ以外では何もしない</td></tr>
+    <tr><td><kbd>↩</kbd></td><td>一覧にフォーカスを移す。選択なしの間は、先頭の行を選択する。行が 1 つも無いときは何もしない</td><td>Jump または Resume(下部パネルの主ボタンと同じ)</td></tr>
+    <tr><td><kbd>⌘↩</kbd></td><td>何もしない</td><td>Branch(下部パネルの Branch と同じ)</td></tr>
+    <tr><td><kbd>→</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の一覧のページで、選択中の行の詳細ページを開く(選択なしの間は何もしない)</td></tr>
+    <tr><td><kbd>←</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の詳細ページで、一覧のページに戻る</td></tr>
+    <tr><td>文字の入力 / <kbd>delete</kbd></td><td>検索欄に入力する</td><td>何もしない</td></tr>
+    <tr><td><kbd>⌘G</kbd> <kbd>⇧⌘G</kbd></td><td>会話内の次のヒット / 前のヒット(会話ペインを表示している間だけ)</td><td>同じ</td></tr>
+    <tr><td><kbd>⌘F</kbd></td><td>何もしない</td><td>検索欄にフォーカスを移す。1 列の詳細ページでは、一覧のページに戻ってから移す</td></tr>
+    <tr><td><kbd>esc</kbd></td><td>ポップオーバーを閉じる。ウィンドウでは何もしない</td><td>同じ</td></tr>
+  </table>
+  <ul>
+    <li>検索欄では文字の編集だけを行い、行の操作は一覧で行う</li>
+    <li><strong>一覧にフォーカスを移す操作</strong>: 検索欄での ↩、行のクリック、行の <code>&gt;</code> ボタン。
+      <strong>検索欄にフォーカスを移す操作</strong>: 検索欄のクリック、⌘F</li>
+    <li>選択なしの間と、対応するボタンが disabled のとき、一覧にフォーカスがある間の ↩ と ⌘↩ は何もしない。
+      日本語入力の変換が未確定の間は、すべてのキーを日本語入力に渡す</li>
+  </ul>
+
+  <h2>文字サイズ</h2>
+  <div class="mock">
+    <figure>
+      <div class="app strip" style="width:320px">
+        <span class="lab">Conversations</span>
+        <div class="rowc"><span>Text size</span>
+          <span class="popup">13 pt<span class="chev">▲▼</span></span></div>
+      </div>
+      <figcaption>Settings ウィンドウの Conversations 節(General / Sounds と同列)</figcaption>
+    </figure>
+  </div>
+  <ul>
+    <li>通常の調整は <kbd>⌘+</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd>(リセット)、設定として表示する場所は
+      Settings の Conversations 節の<strong>ポップアップ</strong>(音種の選択と同じコントロール)。
+      範囲・既定・コードブロックの連動などの値は DESIGN.md §9、挙動は §4.5 / §4.6「文字サイズ」。
+      対象は会話ペインの本文だけで、一覧・フッターの文字サイズは固定</li>
+    <li>フォントの切り替えは持たない — Markdown の描画により、コードは常にモノスペースで表示されるため</li>
+  </ul>
+
+  <h2>実装ノート</h2>
+  <ul>
+    <li>本ページのモックの寸法は紙面上の例示である。ポップオーバーの大きさ・ウィンドウの初回と最小の大きさ・
+      2 列になる幅・一覧の列の幅は DESIGN.md §9 が正</li>
+    <li><strong>ポップオーバーは OS 標準の NSPopover</strong>(矢印あり)。モックの矢印と影は例示で、
+      実装は OS の描画に従う</li>
+    <li><strong>ポップオーバーの高さの変更</strong>: 下端のドラッグ領域(高さは DESIGN.md §9)には、
+      線やつまみを描画しない。カーソルを上下リサイズの形に変更して、ドラッグできることを示す。
+      ドラッグ中は、アニメーションなしで高さを追従させる。初回の高さの近くでは、初回の高さに固定する
+      (DESIGN.md §4.5「ポップオーバー」)</li>
+    <li><strong>会話ペインのメッセージ面は WKWebView</strong>(DESIGN.md §4.6「描画エンジン」/ §8.38)。本ページの
+      メッセージ面の CSS(ラベル・帯・コードブロック・表・ハイライト)は紙面の例示であると同時に、
+      実装のスタイルシートの元になる。会話ペインのヘッダ・検索バー行・下部パネル・一覧はネイティブ</li>
+    <li>本ページの色の CSS 値(選択の地と枠・カードの地と枠・ハイライト色・帯の明度・ホバーの濃度を含む)は
+      紙面上の例示で、実装はシステムの色に追従させる(ライトとダークの両方で、カード・選択中のカード(青と灰色)・
+      ホバー中のカード・一覧の地を判別できる値にする。アクセントカラーはシステムの設定に従う)。
+      例外はスターの黄色と未確認の赤で、本ページの値を使用する</li>
+    <li>行頭の状態記号は文字グリフ(<code>✻</code> は素の U+273B)と自前描画の吹き出しで構成する。
+      寸法は本ページの SVG(20 単位のボックス)が正</li>
+    <li>ヘッダ下の区切り線は検索バー行の有無によらず常に表示する(DESIGN.md §4.6)</li>
+    <li>下部パネル(高さ不変・disabled は標準の灰色の形・Resume / Jump 同幅)の文法は
+      DESIGN.md §4.6 / §8.42 / §8.48</li>
+    <li>⟳ ボタンの状態と回転の規律は DESIGN.md §4.6 / §9(決定の背景は §8.42 / §8.44)</li>
+    <li>会話ペインのヘッダの 2 行目はホーム相対のフルパス + 経過時間(規則と理由は DESIGN.md §4.6)</li>
+    <li>行の差分描画・選択のキーは、Running の行が target、History の行が session_id である。
+      会話ごとのスクロール位置の記憶は session_id をキーにする
+      (再取得で行がちらつかず、選択が別の行へ移動しない)</li>
+    <li>UI 文言は英語。行・本文の内容(タイトル・発言)は利用者のデータをそのまま表示する</li>
+  </ul>
+</div>
+</body>
+</html>

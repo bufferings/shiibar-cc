@@ -1,5 +1,5 @@
-// Home-relative full path for the Conversations preview header (DESIGN.md
-// §4.6 / conversations-design.html: the right pane's second line is the
+// Home-relative full path for the conversation pane header (DESIGN.md
+// §4.6 / window-design.html: the pane header's second line is the
 // FULL home-relative path — `~/Documents/blog` form — plus elapsed time,
 // deliberately more detailed than the list's two-component folder label so
 // the resume destination is unambiguous). The list rows use `CwdLabel`

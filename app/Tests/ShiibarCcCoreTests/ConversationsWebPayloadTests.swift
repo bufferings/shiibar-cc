@@ -144,4 +144,24 @@ final class ConversationsWebPayloadTests: XCTestCase {
             #"{"messages":[{"blocks":[{"foldedLen":2,"kind":"user","start":0,"text":"hi"}],"folds":false,"len":2,"role":"user","seq":1}]}"#
         )
     }
+
+    // MARK: - Per-message copy (§4.6 "per-message copy", §9)
+
+    func testMessageCopyReturnsTheFullShowTextForEachRole() {
+        let longReply = "**bold** intro\n\n" + String(repeating: "filler ", count: 120) + "tail"
+        let messages = [
+            ConversationMessage(seq: 3, role: "user", text: "fix *this* as typed"),
+            ConversationMessage(seq: 4, role: "assistant", text: longReply),
+        ]
+        // User: the words as typed (no Markdown interpretation).
+        XCTAssertEqual(MessageCopy.text(forSeq: 3, in: messages), "fix *this* as typed")
+        // Claude: the Markdown source, whole even though it folds (§9 limit).
+        XCTAssertTrue(ConversationHits.isFolded(RenderedMessage(role: "assistant", text: longReply).renderedText))
+        XCTAssertEqual(MessageCopy.text(forSeq: 4, in: messages), longReply)
+        XCTAssertNil(MessageCopy.text(forSeq: 99, in: messages))
+    }
+
+    func testMessageCopyFeedbackIsTwoSeconds() {
+        XCTAssertEqual(MessageCopy.feedbackSeconds, 2)
+    }
 }

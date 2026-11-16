@@ -135,7 +135,7 @@ enum CLIRunner {
         return CLIRunResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
-    /// `shiibar-cc focus <target>` (dropdown row click, §4.5). Exit 2
+    /// `shiibar-cc focus <target>` (notification click, §4.5). Exit 2
     /// ("no match", §4.4) is expected: the target's tab can close in the
     /// window between the row rendering and the click (the stale-row race
     /// is designed in — `agent_removed` cleans the row up right after).
