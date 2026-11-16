@@ -47,8 +47,9 @@ a glance:
 Click the tray icon and a popover opens under it with one list: the
 sessions running right now (**Running**, newest first, each with its status
 symbol) and your past Claude Code conversations (**History**). Type to
-filter both at once. Click a row to select it (click it again to clear the
-selection); the buttons at the bottom act on the selected row, and
+filter both at once (the × at the right end of the search field clears
+it). Click a row to select it (click it again to clear the selection);
+the buttons at the bottom act on the selected row, and
 double-clicking a row runs its main button directly. On a running
 session the main button is **Jump** (it brings up that session's terminal
 tab; clicking a notification does the same), and on a past conversation it is **Resume** (it reopens the
@@ -77,13 +78,17 @@ to the list (in the popover or a narrow window). ⌘F (or a click) takes you
 back to the search field, and Esc closes the popover. The hint at the
 bottom left shows the keys that work right now, and while the list has
 focus the buttons show their keys (↩ and ⌘↩). The popover is as tall as
-you drag its bottom edge, and stays that way.
+you drag its bottom edge, and stays that way. ⌘= and ⌘− make the text
+and the rows in the popover and the window larger or smaller, and ⌘0 goes
+back to the default size (the same value is in Settings… → General → **Text size**).
 
 **Open in window** (the window button in the popover's header) moves the
 same list, with the same search and selection, into an ordinary window that
 stays put while you work through it. Widen the window and the selected
-conversation shows next to the list; pin it (the pin button) to keep it in
-front of other windows. While the window is open the app shows up in the
+conversation shows next to the list; drag the line between the two to
+resize the list, and double-click the line to go back to the default
+width. Pin the window (the pin button) to keep it in front of other
+windows. While the window is open the app shows up in the
 Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you can
 also switch the appearance between System, Light and Dark).
 
