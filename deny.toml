@@ -16,6 +16,20 @@ multiple-versions = "warn"
 [advisories]
 # Defaults: RustSec vulnerabilities are errors; unmaintained/unsound
 # advisories warn.
+ignore = [
+    # CVE-2026-119375 is a bug in SQLite itself (fixed in 3.54.0); the
+    # advisory covers the SQLite C source that libsqlite3-sys bundles
+    # (< 0.39.0). This workspace never enables the `bundled` feature and
+    # links the system libsqlite3 (Cargo.toml, DESIGN.md §10), so that
+    # source is not compiled in, and the SQLite that runs is the one macOS
+    # ships — the crate version does not change it. The patched line
+    # (rusqlite >= 0.41) cannot be used: it calls sqlite3_set_clientdata
+    # (SQLite 3.44+) unconditionally, which the macOS 15 SDK's libsqlite3
+    # does not export, so it fails to link on the CI and release runners.
+    # Remove this entry and update rusqlite once the oldest supported macOS
+    # ships SQLite >= 3.44.
+    { id = "RUSTSEC-2026-0459", reason = "bundled SQLite source is not compiled in; the system libsqlite3 is linked" },
+]
 
 [sources]
 # Defaults: crates.io only; any git or alternate-registry source is an error.
