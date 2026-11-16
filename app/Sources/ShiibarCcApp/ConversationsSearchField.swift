@@ -1,9 +1,9 @@
 // The header row's search field (DESIGN.md §4.6 "search field" /
 // §8.38(12); visual spec: docs/window-design.html `.search`). The app draws
 // the field itself — the rounded card-colored ground, its 1pt border and the
-// magnifier icon — with a borderless text field inside: the system search
-// field's bezel does not take the height it is given. No focus ring, no
-// cancel button, no recent-searches menu.
+// magnifier icon, and the clear button while the field holds text — with a
+// borderless text field inside: the system search field's bezel does not
+// take the height it is given. No focus ring, no recent-searches menu.
 //
 // The representable treats IME composition explicitly — while marked text is
 // active the query binding is NOT updated (no search dispatches on
@@ -13,6 +13,7 @@
 // focus with the caret at the end of the kept text, without selecting it).
 
 import AppKit
+import ShiibarCcCore
 import SwiftUI
 
 struct ConversationsSearchField: NSViewRepresentable {
@@ -31,6 +32,13 @@ struct ConversationsSearchField: NSViewRepresentable {
     func makeNSView(context: Context) -> SearchFieldView {
         let view = SearchFieldView()
         view.textField.delegate = context.coordinator
+        context.coordinator.view = view
+        // The clear button feeds the emptied text through the same handler
+        // as a keyboard edit, so the search, its debounce and the selection
+        // react exactly as when the text is deleted with keys (§4.6).
+        view.onTextCleared = { [weak coordinator = context.coordinator] in
+            coordinator?.handleTextChange("", isComposing: false)
+        }
         // `lastFocusToken` stays 0: a request issued before this field
         // existed (the popover's view is built on its first show) is still
         // honored by the first update.
@@ -45,6 +53,7 @@ struct ConversationsSearchField: NSViewRepresentable {
         if field.stringValue != text, !context.coordinator.isComposing(field) {
             field.stringValue = text
         }
+        view.updateClearButton()
         if context.coordinator.lastFocusToken != focusToken {
             // Record the request even when this field is not on screen (the
             // other surface's field handles it), so it never fires late.
@@ -64,6 +73,8 @@ struct ConversationsSearchField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var textBinding: Binding<String>
         var lastFocusToken = 0
+        /// The field whose clear button follows each edit.
+        weak var view: SearchFieldView?
 
         init(text: Binding<String>) {
             self.textBinding = text
@@ -77,6 +88,8 @@ struct ConversationsSearchField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
+            // The button follows the visible text, marked text included.
+            view?.updateClearButton()
             handleTextChange(field.stringValue, isComposing: isComposing(field))
         }
 
@@ -99,8 +112,9 @@ final class SearchTextField: NSTextField {}
 
 /// The drawn search field (window-design.html `.search`): 24pt tall, radius
 /// 6, the card color with a 1pt border, 8pt horizontal padding, the 13pt
-/// magnifier, 6pt to the 12pt text. A click anywhere on the ground focuses
-/// the text field.
+/// magnifier, 6pt to the 12pt text, and the 12pt clear button at the right
+/// padding while the field holds text. A click anywhere on the ground
+/// focuses the text field.
 final class SearchFieldView: NSView {
     static let height: CGFloat = 24
     static let cornerRadius: CGFloat = 6
@@ -110,8 +124,24 @@ final class SearchFieldView: NSView {
     static let fontSize: CGFloat = 12
     /// `SurfaceIconView`'s stroke for the 15pt icons, scaled to 13pt.
     static let iconLineWidth: CGFloat = 1.4
+    /// `.search .clr`: the clear button's circle, and the gap (the `.search`
+    /// flex gap) between the text and the button.
+    static let clearButtonSize: CGFloat = 12
+    static let clearButtonSpacing: CGFloat = 6
 
     let textField = SearchTextField()
+    let clearButton = SearchClearButton()
+    /// Propagates the emptied text after the clear button empties the field.
+    var onTextCleared: () -> Void = {}
+    /// Puts keyboard focus in the text field after a clear. Replaceable so
+    /// the clear can be checked without a window on screen.
+    var focusTextField: (SearchFieldView) -> Void = { $0.focusWithCaretAtEnd() }
+
+    /// The text field's trailing edge: at the right padding while the clear
+    /// button is hidden (no room is reserved for it), and short of the
+    /// button while it is shown, so typed text never runs under it.
+    private var textTrailingToPadding: NSLayoutConstraint!
+    private var textTrailingToClearButton: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -127,12 +157,60 @@ final class SearchFieldView: NSView {
         textField.cell?.wraps = false
         textField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(textField)
+
+        clearButton.translatesAutoresizingMaskIntoConstraints = false
+        clearButton.target = self
+        clearButton.action = #selector(clearButtonPressed)
+        clearButton.isHidden = true
+        addSubview(clearButton)
+
         let leading = Self.horizontalPadding + Self.iconSize + Self.iconTextSpacing
+        textTrailingToPadding = textField.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -Self.horizontalPadding)
+        textTrailingToClearButton = textField.trailingAnchor.constraint(
+            equalTo: clearButton.leadingAnchor, constant: -Self.clearButtonSpacing)
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
-            textField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.horizontalPadding),
+            textTrailingToPadding,
             textField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.horizontalPadding),
+            clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clearButton.widthAnchor.constraint(equalToConstant: Self.clearButtonSize),
+            clearButton.heightAnchor.constraint(equalToConstant: Self.clearButtonSize),
         ])
+    }
+
+    /// Shows or hides the clear button for the field's current text (marked
+    /// text included) and enabled state, and moves the text field's
+    /// trailing edge to match.
+    func updateClearButton() {
+        let shown = SearchFieldClearButton.isShown(text: textField.stringValue, isEnabled: textField.isEnabled)
+        guard clearButton.isHidden == shown else { return }
+        clearButton.isHidden = !shown
+        // Deactivate before activating so the two never conflict.
+        if shown {
+            textTrailingToPadding.isActive = false
+            textTrailingToClearButton.isActive = true
+        } else {
+            textTrailingToClearButton.isActive = false
+            textTrailingToPadding.isActive = true
+        }
+    }
+
+    /// Empties the field — an IME composition in progress is discarded, not
+    /// committed — propagates the empty text, and puts focus in the field.
+    @objc func clearButtonPressed() {
+        if let editor = textField.currentEditor() as? NSTextView, editor.hasMarkedText() {
+            // Empty the editor before ending the composition, so ending it
+            // has no composed text left to commit and report as a change.
+            editor.inputContext?.discardMarkedText()
+            editor.string = ""
+            editor.unmarkText()
+        }
+        textField.stringValue = ""
+        onTextCleared()
+        updateClearButton()
+        focusTextField(self)
     }
 
     @available(*, unavailable)
@@ -187,5 +265,63 @@ final class SearchFieldView: NSView {
         guard let window, window.makeFirstResponder(textField) else { return }
         let end = textField.stringValue.utf16.count
         textField.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+    }
+}
+
+/// The search field's clear button (window-design.html `.search .clr`): a
+/// filled 12pt circle in the secondary label color with a × in the opaque
+/// control background color (the card color is translucent on dark and
+/// would not show on the circle). Mouse only — it never takes keyboard
+/// focus, so the caret stays in the text field while the button is clicked.
+final class SearchClearButton: NSButton {
+    /// The ×'s strokes on a 16-unit box, and their width in those units.
+    static let crossStrokes: [(CGPoint, CGPoint)] = [
+        (CGPoint(x: 5.6, y: 5.6), CGPoint(x: 10.4, y: 10.4)),
+        (CGPoint(x: 10.4, y: 5.6), CGPoint(x: 5.6, y: 10.4)),
+    ]
+    static let crossLineWidth: CGFloat = 1.6
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        title = ""
+        isBordered = false
+        setButtonType(.momentaryChange)
+        refusesFirstResponder = true
+        toolTip = "Clear"
+        setAccessibilityLabel("Clear search")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var acceptsFirstResponder: Bool { false }
+    override var canBecomeKeyView: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Colors resolve against this view's appearance (light / dark).
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            let side = min(bounds.width, bounds.height)
+            let box = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+            context.setFillColor(NSColor.secondaryLabelColor.cgColor)
+            context.fillEllipse(in: box)
+
+            // The 16-unit box maps onto the circle; the × is symmetric, so
+            // the y direction does not matter.
+            let scale = side / 16
+            for (from, to) in Self.crossStrokes {
+                context.move(to: CGPoint(x: box.minX + from.x * scale, y: box.minY + from.y * scale))
+                context.addLine(to: CGPoint(x: box.minX + to.x * scale, y: box.minY + to.y * scale))
+            }
+            context.setStrokeColor(NSColor.controlBackgroundColor.cgColor)
+            context.setLineWidth(Self.crossLineWidth * scale)
+            context.setLineCap(.round)
+            context.strokePath()
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }

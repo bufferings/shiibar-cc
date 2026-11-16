@@ -16,8 +16,12 @@ enum SurfaceColors {
     static let listBackgroundNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor.windowBackgroundColor.blended(withFraction: 0.3, of: .black) ?? .windowBackgroundColor
-            : NSColor.controlBackgroundColor.blended(withFraction: 0.06, of: .systemGray) ?? .windowBackgroundColor
+            : NSColor.controlBackgroundColor.blended(withFraction: lightListGrayFraction, of: .systemGray)
+                ?? .windowBackgroundColor
     }
+    /// The share of gray in the light list ground: enough that the ground is
+    /// visibly off the white cards.
+    static let lightListGrayFraction: CGFloat = 0.10
     static let listBackground = Color(nsColor: listBackgroundNSColor)
     /// The conversation pane: the plain reading background.
     static let paneBackground = Color(nsColor: .controlBackgroundColor)

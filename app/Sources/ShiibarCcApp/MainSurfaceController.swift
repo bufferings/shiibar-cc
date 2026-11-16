@@ -243,6 +243,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         popover.contentSize = NSSize(width: PopoverHeight.width, height: height)
         model.surfaceDidShow(.popover)
         NSApp.activate(ignoringOtherApps: true)
+        // The popover follows the app's appearance (Settings > Appearance;
+        // System = the OS setting); a popover with no appearance set does
+        // not (NSPopover.h; §4.5 "popover").
+        // Set on every show so a change made while it was closed applies.
+        popover.appearance = NSApp.effectiveAppearance
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         installPopoverBackground()
         popover.contentViewController?.view.window?.makeKey()
@@ -722,8 +727,18 @@ final class PopoverBackgroundView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// AppKit makes this view's effective appearance the current drawing
+    /// appearance before calling `updateLayer` (NSAppearance.h), so the
+    /// dynamic color resolves to the popover's light or dark value.
     override func updateLayer() {
         layer?.backgroundColor = SurfaceColors.listBackgroundNSColor.cgColor
+    }
+
+    /// A `CGColor` does not follow appearance changes on its own: re-resolve
+    /// it when the popover switches between light and dark.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
 

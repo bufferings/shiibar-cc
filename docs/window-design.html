@@ -76,6 +76,12 @@
     background:var(--cardbg); border:1px solid var(--cardline); border-radius:6px;
     color:var(--menu-text2); font-size:12px; line-height:1; white-space:nowrap; }
   .search .q { color:var(--text); }
+  /* 消去のボタン: 文字がある間だけ、右端に表示する(12px の塗りつぶした円に ×) */
+  .search .clr { margin-left:auto; flex:none; width:12px; height:12px; border-radius:50%;
+    background:var(--menu-text2); position:relative; }
+  .search .clr::before, .search .clr::after { content:""; position:absolute; left:2.85px; top:5.4px;
+    width:6.3px; height:1.2px; border-radius:1px; background:var(--cardbg); transform:rotate(45deg); }
+  .search .clr::after { transform:rotate(-45deg); }
   .search.dis { opacity:.5; }
   .caret { display:inline-block; width:1px; height:12px; background:var(--text); margin-left:1px; vertical-align:-2px; }
   .hb { width:24px; height:24px; flex:none; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--menu-text2); }
@@ -277,7 +283,8 @@
     <li><strong>検索欄の形</strong>: 高さ 24px(見出し行のボタンと同じ高さで、上下の中心が揃う)・角丸 6px・
       カードの色の地 + 1px の枠・左右の余白 8px・アイコンと文字の間隔 6px・文字 12px。
       地とアイコンはアプリが描画し、その中に枠なしの入力欄を配置する(DESIGN.md §4.6「検索欄」)。
-      フォーカスリング・消去(×)のボタン・最近の検索のメニューは表示しない。
+      フォーカスリング・最近の検索のメニューは表示しない。文字がある間だけ、右端に消去のボタン
+      (12px の塗りつぶした円に ×)を表示する(DESIGN.md §4.6「検索欄」)。
       地のどこをクリックしても、入力欄にフォーカスが移る</li>
     <li><strong>⟳</strong>(ツールチップ <code>Refresh</code>): 静止時は背景なし。ホバーでグレーの背景を表示し、
       押下で一段濃くする。実行中は矢印グリフが回転する(回転の規律は DESIGN.md §4.6 / §9。
@@ -411,7 +418,7 @@
     <figure>
       <div class="app pop"><div class="clip">
         <div class="hrow">
-          <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span></span>
+          <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span><span class="clr"></span></span>
           <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
           <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
@@ -693,7 +700,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
         <div class="col">
           <div class="hrow">
             <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
-            <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span></span>
+            <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span><span class="clr"></span></span>
             <span class="hb"><svg class="ic" style="stroke-width:1.5"><use href="#i-refresh"/></svg></span>
             <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
             <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
