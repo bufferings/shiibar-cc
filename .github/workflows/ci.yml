@@ -43,6 +43,39 @@ jobs:
         run: swift test -Xswiftc -warnings-as-errors
         working-directory: app
 
+      # When the test process itself dies (an abort in the Swift runtime
+      # prints one line and no test failure), the crash report is the only
+      # place that names the crashing thread's frames. Print them into the
+      # log. macOS writes the report a few seconds after the crash.
+      - name: Print test crash reports
+        if: failure()
+        run: |
+          sleep 20
+          shopt -s nullglob
+          reports=("$HOME"/Library/Logs/DiagnosticReports/*.ips)
+          echo "crash reports: ${#reports[@]}"
+          for report in "${reports[@]}"; do
+            echo "== $report"
+            python3 - "$report" <<'PY'
+          import json, sys
+          text = open(sys.argv[1]).read()
+          head, body = text.split("\n", 1)
+          meta, data = json.loads(head), json.loads(body)
+          print(meta.get("app_name"), meta.get("timestamp"))
+          print("exception:", data.get("exception"))
+          print("asi:", data.get("asi"))
+          images = data.get("usedImages", [])
+          for index, thread in enumerate(data.get("threads", [])):
+              frames = thread.get("frames", [])
+              if not thread.get("triggered") and index != 0:
+                  continue
+              print(f"-- thread {index} triggered={thread.get('triggered', False)} queue={thread.get('queue')}")
+              for frame in frames[:80]:
+                  image = images[frame["imageIndex"]].get("name", "?")
+                  print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))))
+          PY
+          done
+
       - name: Cask template check (brew style --cask)
         # Renders packaging/homebrew/shiibar-cc.rb with dummy placeholder
         # values and runs it through `brew style --cask` so a Ruby syntax
