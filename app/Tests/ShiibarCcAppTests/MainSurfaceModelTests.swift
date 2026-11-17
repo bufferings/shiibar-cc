@@ -311,7 +311,7 @@ final class MainSurfaceModelTests: XCTestCase {
                 spy.indexCompletions.last?(0)
                 spy.searches.last?.completion(ok(resultJSON(["a"])))
             }
-            if c.detailPage { model.rowOpenClicked(.history(sessionID: "a")) }
+            if c.detailPage { openDetailPage(model, .history(sessionID: "a")) }
             let searchesBefore = spy.searches.count
             XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command], surface: c.surface,
                                searchFieldFocused: c.searchFieldFocused), .consumed, c.name)
@@ -374,7 +374,7 @@ final class MainSurfaceModelTests: XCTestCase {
         ] {
             let model = makeModel()
             openPopover(model, delivering: ["a", "b"])
-            model.rowOpenClicked(.history(sessionID: "b"))
+            openDetailPage(model, .history(sessionID: "b"))
             XCTAssertEqual(model.list.page, .detail)
             let showsBefore = spy.shows.count
             model.surfaceDidHide(.popover)
@@ -454,7 +454,7 @@ final class MainSurfaceModelTests: XCTestCase {
     func testRowClickLoadsTheConversationAndShowErrorsShowInThePane() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        model.rowOpenClicked(.history(sessionID: "b"))
+        openDetailPage(model, .history(sessionID: "b"))
         XCTAssertEqual(model.list.page, .detail)
         XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "b", "--json"]])
         spy.shows[0].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
@@ -521,7 +521,7 @@ final class MainSurfaceModelTests: XCTestCase {
             waitForSearches(2)
             spy.searches[1].completion(ok(resultJSON(["a"])))
         }
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(spy.shows.last?.arguments, ["conversations", "show", "a", "--json"])
         spy.shows.last?.completion(ok(showJSON("a", texts: texts)))
     }
@@ -583,21 +583,36 @@ final class MainSurfaceModelTests: XCTestCase {
         return buttons
     }
 
-    func testRowClickSelectsAndTheOpenButtonOpensTheDetailPage() {
+    /// §4.5 "row click" / "opening the detail page": a click only selects;
+    /// the bottom panel's View button opens the selected row's detail page
+    /// (one column), the same as → with list focus.
+    func testRowClickSelectsAndTheViewButtonOpensTheDetailPage() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil))
+        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsViewButton: true))
         model.rowClicked(.history(sessionID: "a"))
         XCTAssertEqual(model.list.page, .list)
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
         XCTAssertTrue(spy.shows.isEmpty, "a click never opens (or loads) the detail page")
         XCTAssertEqual(spy.focusListSurfaces, [.popover], "a click moves focus to the list")
+        XCTAssertEqual(model.list.listBottomPanel?.slots, [.view, .branch, .primary])
+        XCTAssertNotNil(model.list.listBottomPanel?.buttons, "View shows with the other buttons")
         let paneFocus = model.paneFocusRequests[.popover] ?? 0
-        model.rowOpenClicked(.history(sessionID: "b"))
+        model.viewClicked()
         XCTAssertEqual(model.list.page, .detail)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
-        XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "b", "--json"]])
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "a", "--json"]])
         XCTAssertEqual(model.paneFocusRequests[.popover], paneFocus + 1)
+        XCTAssertTrue(spy.commands.isEmpty, "View runs no command")
+        guard case .conversation(let pane) = model.list.paneContent else { return XCTFail("expected the detail page") }
+        XCTAssertEqual(pane.bottomPanel.slots, [.branch, .primary], "the detail page has no View")
+
+        // → with list focus does the same from the list page.
+        let viaKey = makeModel()
+        openPopover(viaKey, delivering: ["a", "b"])
+        viaKey.rowClicked(.history(sessionID: "a"))
+        XCTAssertEqual(key(viaKey, .rightArrow), .consumed)
+        XCTAssertEqual(viaKey.list, model.list, "→ leaves the same state as View")
     }
 
     func testResumeRunsTheCliAndClosesThePopoverOnSuccess() {
@@ -786,7 +801,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(spy.focusListSurfaces, [.popover])
         XCTAssertTrue(spy.commands.isEmpty, "never runs a verb")
 
-        withRows.rowOpenClicked(.history(sessionID: "b"))
+        openDetailPage(withRows, .history(sessionID: "b"))
         let paneRequests = withRows.paneFocusRequests[.popover] ?? 0
         withRows.openedByHotKey()
         XCTAssertEqual(withRows.list.page, .detail, "the detail page stays")
@@ -822,7 +837,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.searchFocusRequests[.popover] ?? 0, searchFocus, "the search field does not take focus")
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
         XCTAssertEqual(model.query, "")
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: " ")), .passThrough, "detail page: Space to the pane")
         XCTAssertEqual(model.list.page, .detail)
 
@@ -869,7 +884,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "list page: ⌥↓ does nothing")
         XCTAssertEqual(key(model, .downArrow, [.option], searchFieldFocused: true), .passThrough,
                        "search field: ⌥↓ is text editing")
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
         for arrow in [ListKey.downArrow, .upArrow] {
             XCTAssertEqual(key(model, arrow), .passToConversationPane, "\(arrow)")
@@ -901,7 +916,7 @@ final class MainSurfaceModelTests: XCTestCase {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
         model.rowClicked(.history(sessionID: "a"))
-        XCTAssertEqual(model.list.footerHints, [.move, .open])
+        XCTAssertEqual(model.list.footerHints, [.move])
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
         model.searchFieldFocusChanged(surface: .popover, focused: true)
         XCTAssertEqual(model.list.footerHints, [.list])
@@ -912,7 +927,7 @@ final class MainSurfaceModelTests: XCTestCase {
         // A key event carries the live focus location too.
         XCTAssertEqual(key(model, .escape, surface: .window, searchFieldFocused: false), .consumed)
         XCTAssertFalse(model.list.isSearchFieldFocused)
-        XCTAssertEqual(model.list.footerHints, [.move, .open])
+        XCTAssertEqual(model.list.footerHints, [.move])
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
     }
 
@@ -940,7 +955,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
         model.rowClicked(.history(sessionID: "a"))
         XCTAssertNil(model.list.selection)
-        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil))
+        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsViewButton: true))
         XCTAssertEqual(spy.focusListSurfaces, [.popover, .popover], "each click moves focus to the list")
     }
 
@@ -1054,6 +1069,50 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(spy.focusListSurfaces, [.popover, .popover])
     }
 
+    /// §4.5 "row double-click": ⌘ held at the second press runs Branch
+    /// (`resume --fork`, `focus` never) instead of Jump / Resume; with Branch
+    /// disabled the double-click runs nothing. The AppKit layer passes ⌘
+    /// from the press's modifier flags.
+    func testCommandDoubleClickRunsBranch() {
+        struct Case {
+            let name: String
+            let surface: MainSurface
+            let key: UnifiedRowKey
+            let expected: [[String]]
+        }
+        let cases = [
+            Case(name: "popover, Running", surface: .popover, key: .running(target: "iterm2:T1"),
+                 expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "s1"]]),
+            Case(name: "popover, History", surface: .popover, key: .history(sessionID: "a"),
+                 expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "a"]]),
+            Case(name: "window, History", surface: .window, key: .history(sessionID: "a"),
+                 expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "a"]]),
+            Case(name: "popover, Running without a session_id (Branch disabled)", surface: .popover,
+                 key: .running(target: "iterm2:T0"), expected: []),
+        ]
+        for testCase in cases {
+            let model = makeModel()
+            model.agentsUpdated([agent("iterm2:T1", session: "s1"), agent("iterm2:T0", session: "")])
+            if testCase.surface == .popover {
+                openPopover(model, delivering: ["a"])
+            } else {
+                model.windowDidBecomeKey()
+                spy.indexCompletions[0](0)
+                spy.searches[0].completion(ok(resultJSON(["a"])))
+            }
+            model.pointerDown(surface: testCase.surface, surfaceWasKey: true, searchFieldFocused: false,
+                              clickCount: 1, pressedAt: 100, commandKey: true)
+            model.rowClicked(testCase.key)
+            XCTAssertTrue(spy.commands.isEmpty, "\(testCase.name): a single ⌘-click runs nothing")
+            model.pointerDown(surface: testCase.surface, surfaceWasKey: true, searchFieldFocused: false,
+                              clickCount: 2, pressedAt: 100.2, commandKey: true)
+            model.rowClicked(testCase.key)
+            XCTAssertEqual(spy.commands.map(\.arguments), testCase.expected, testCase.name)
+            XCTAssertEqual(model.list.selection?.key, testCase.key, testCase.name)
+            XCTAssertEqual(model.list.page, .list, testCase.name)
+        }
+    }
+
     /// The deferred deselect waits for the system double-click interval
     /// from the press: the click action runs on mouse-up, so the time since
     /// the press is subtracted (never below zero).
@@ -1128,7 +1187,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNil(model.list.selectionActiveAtPointerDown, "the hidden window's press is ignored")
         model.surfaceKeyChanged(surface: .popover, isKey: false)
         XCTAssertFalse(model.list.isSelectionActive)
-        XCTAssertEqual(model.list.footerHints, [.move, .open], "hints follow the search field only")
+        XCTAssertEqual(model.list.footerHints, [.move], "hints follow the search field only")
         XCTAssertNotNil(model.list.listBottomPanel?.buttons, "the buttons follow the search field only")
         // A key event comes from the key window only.
         XCTAssertEqual(key(model, .escape, surface: .popover, searchFieldFocused: false), .consumed)
@@ -1143,7 +1202,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.requestInitialFocus()
         XCTAssertEqual(model.searchFocusRequests[.popover], search + 1)
         XCTAssertNil(model.searchFocusRequests[.window], "a popover request never reaches the window")
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(model.paneFocusRequests[.popover], 1, "opening the detail page focuses the pane")
         let pane = model.paneFocusRequests[.popover] ?? 0
         model.requestInitialFocus()
@@ -1154,7 +1213,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.searchFocusRequests[.popover], searchBeforeBack, "back never focuses the search field")
         XCTAssertEqual(spy.focusListSurfaces.count, focusListBeforeBack + 1, "back to the list focuses the list")
         // ⌘F from the detail page: back to the list page, then the search field.
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "f"), [.command]), .consumed)
         XCTAssertEqual(model.list.page, .list)
         XCTAssertEqual(model.searchFocusRequests[.popover], searchBeforeBack + 1)
@@ -1246,15 +1305,15 @@ final class MainSurfaceModelTests: XCTestCase {
 
     func testTextSizeChangeThatFlipsTheColumnsFollowsTheWidthRules() {
         let model = makeModel()
-        model.windowWidthChanged(900)
+        model.windowWidthChanged(800)
         model.windowDidBecomeKey()
-        XCTAssertEqual(model.list.columns, .two, "900 >= 880 at 13")
+        XCTAssertEqual(model.list.columns, .two, "800 >= 780 at 13")
         spy.indexCompletions.last?(0)
         spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
         model.rowClicked(.history(sessionID: "b"))
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
 
-        // 14: the list column is 452pt, two columns from 912pt.
+        // 14: the list column is 452pt, two columns from 812pt.
         model.textSize.increase()
         XCTAssertEqual(model.list.columns, .one)
         XCTAssertEqual(model.list.page, .list, "two -> one column shows the list page")
@@ -1267,10 +1326,22 @@ final class MainSurfaceModelTests: XCTestCase {
         // From the detail page, widening into two columns keeps the same
         // conversation selected.
         model.textSize.increase()
-        model.rowOpenClicked(.history(sessionID: "a"))
+        openDetailPage(model, .history(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
         model.textSize.decrease()
         XCTAssertEqual(model.list.columns, .two)
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
     }
+}
+
+/// Opens a row's detail page the way the user does in one column: a click
+/// selects the row (skipped when it is already selected, where a click would
+/// deselect it), then the bottom panel's View button opens the page (§4.5
+/// "opening the detail page").
+@MainActor
+private func openDetailPage(_ model: MainSurfaceModel, _ key: UnifiedRowKey) {
+    if model.list.selection?.key != key {
+        model.rowClicked(key)
+    }
+    model.viewClicked()
 }

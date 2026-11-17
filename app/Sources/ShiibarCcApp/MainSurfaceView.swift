@@ -50,26 +50,51 @@ struct MainSurfaceView: View {
     /// This view sets the environment value, so it computes its own copy.
     private var scale: SurfaceScale { SurfaceScale(ratio: CGFloat(textSize.size.ratio)) }
 
-    @ViewBuilder
+    /// One layout for both column modes, so the list page keeps one view
+    /// identity when the column count changes (§4.5 "when the width
+    /// changes": the key target stays). A list page built anew would bring a
+    /// new search field, and a new field honors the surface's latest focus
+    /// request on its first update (`ConversationsSearchField`), which would
+    /// move the focus to it; the list's scroll position also stays.
     private func content(width: CGFloat) -> some View {
-        if columns == .two {
-            TwoColumnLayout(
-                columnWidth: model.listColumnWidth,
-                textSize: textSize.size,
-                windowWidth: width,
-                listColumn: {
-                    ListPageView(model: model, surface: surface)
-                        .background(listBackground)
-                },
-                rightColumn: {
-                    rightColumn
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // One column: the list page stays mounted underneath (its scroll
+        // position and search field survive), the detail page slides over it.
+        let detailPane: ConversationPaneModel? = {
+            guard columns == .one, model.list.columns == .one,
+                  case .conversation(let pane) = model.list.paneContent else { return nil }
+            return pane
+        }()
+        return SurfaceColumns(
+            columnWidth: model.listColumnWidth,
+            columns: columns,
+            textSize: textSize.size,
+            windowWidth: width,
+            listPage: {
+                ListPageView(model: model, surface: surface, isCoveredByDetailPage: detailPane != nil)
+                    .background(listBackground)
+                    .allowsHitTesting(detailPane == nil)
+                    .accessibilityHidden(detailPane != nil)
+            },
+            rightColumn: {
+                rightColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(paneBackground)
+            },
+            detailPage: {
+                if let detailPane {
+                    ConversationPaneView(model: model, pane: detailPane, surface: surface)
                         .background(paneBackground)
+                        .transition(.move(edge: .trailing))
+                        .zIndex(1)
                 }
-            )
-        } else {
-            oneColumn
-        }
+            }
+        )
+        .clipped()
+        // Only the one-column page change slides; leaving one column (the
+        // detail page closes at the same time) switches without animation.
+        .animation(
+            columns == .one ? .easeInOut(duration: MainWindowMetrics.pageSlideSeconds) : nil,
+            value: detailPane != nil)
     }
 
     @ViewBuilder
@@ -86,68 +111,59 @@ struct MainSurfaceView: View {
         }
     }
 
-    /// One column: the list page stays mounted underneath (its scroll
-    /// position and search field survive), the detail page slides over it.
-    private var oneColumn: some View {
-        let detailPane: ConversationPaneModel? = {
-            guard model.list.columns == .one,
-                  case .conversation(let pane) = model.list.paneContent else { return nil }
-            return pane
-        }()
-        return ZStack {
-            ListPageView(model: model, surface: surface)
-                .background(listBackground)
-                .allowsHitTesting(detailPane == nil)
-                .accessibilityHidden(detailPane != nil)
-            if let detailPane {
-                ConversationPaneView(model: model, pane: detailPane, surface: surface)
-                    .background(paneBackground)
-                    .transition(.move(edge: .trailing))
-                    .zIndex(1)
-            }
-        }
-        .clipped()
-        .animation(.easeInOut(duration: MainWindowMetrics.pageSlideSeconds), value: detailPane != nil)
-    }
 }
 
-/// Two columns (§4.5): the list column, the 1pt boundary line, and the
-/// pane; the boundary's drag area lies over both columns. Only this view
-/// observes the column width, so a drag re-lays out the two columns
-/// without touching the popover or the one-column layout.
-private struct TwoColumnLayout<ListColumn: View, RightColumn: View>: View {
+/// The columns of the surface (§4.5). One column: the list page at the full
+/// width, with the detail page (when open) over it. Two columns: the list
+/// column, the 1pt boundary line, and the pane; the boundary's drag area
+/// lies over both columns. The list page sits at the same place in the view
+/// tree in both modes, so it keeps its identity — its search field, focus,
+/// scroll position and selection — when the column count or its width
+/// changes. Only this view observes the column width, so a drag re-lays out
+/// the columns without re-evaluating the rest of the surface.
+private struct SurfaceColumns<ListPage: View, RightColumn: View, DetailPage: View>: View {
     @ObservedObject var columnWidth: ListColumnWidthStore
+    let columns: ColumnMode
     let textSize: TextSize
     let windowWidth: CGFloat
-    @ViewBuilder let listColumn: ListColumn
+    @ViewBuilder let listPage: ListPage
     @ViewBuilder let rightColumn: RightColumn
+    @ViewBuilder let detailPage: DetailPage
 
     var body: some View {
-        let width = CGFloat(columnWidth.shownWidth(windowWidth: Double(windowWidth), textSize: textSize))
-        HStack(spacing: 0) {
-            // The list column keeps its identity while its width changes,
-            // so its scroll position and selection stay.
-            listColumn
-                .frame(width: width)
-            Rectangle().fill(SurfaceColors.line).frame(width: 1)
-            rightColumn
-        }
-        // §4.5 / §9: the drag area is centered on the boundary line (4pt on
-        // each side of its center) and sits above both columns, so it takes
-        // the mouse before the list, the pane, or the header row's window
-        // drag. Outside its 8pt nothing is covered: the leading padding has
-        // no content and is not hit-tested.
-        .overlay(alignment: .topLeading) {
-            ColumnBoundaryDragArea(
-                onBegin: { columnWidth.beginDrag(windowWidth: Double(windowWidth), textSize: textSize) },
-                onDrag: { delta in columnWidth.updateDrag(delta: delta, windowWidth: Double(windowWidth)) },
-                onEnd: { columnWidth.endDrag() },
-                onCancel: { columnWidth.cancelDrag() },
-                onDoubleClick: { columnWidth.resetToDefault() }
-            )
-            .frame(width: CGFloat(ListColumnWidth.dragAreaWidth))
-            .frame(maxHeight: .infinity)
-            .padding(.leading, width + 0.5 - CGFloat(ListColumnWidth.dragAreaWidth) / 2)
+        let twoColumns = columns == .two
+        let listWidth = twoColumns
+            ? CGFloat(columnWidth.shownWidth(windowWidth: Double(windowWidth), textSize: textSize))
+            : windowWidth
+        ZStack {
+            HStack(spacing: 0) {
+                listPage
+                    .frame(width: listWidth)
+                if twoColumns {
+                    Rectangle().fill(SurfaceColors.line).frame(width: 1)
+                    rightColumn
+                }
+            }
+            // §4.5 / §9: the drag area is centered on the boundary line (4pt
+            // on each side of its center) and sits above both columns, so it
+            // takes the mouse before the list, the pane, or the header row's
+            // window drag. Outside its 8pt nothing is covered: the leading
+            // padding has no content and is not hit-tested.
+            .overlay(alignment: .topLeading) {
+                if twoColumns {
+                    ColumnBoundaryDragArea(
+                        onBegin: { columnWidth.beginDrag(windowWidth: Double(windowWidth), textSize: textSize) },
+                        onDrag: { delta in columnWidth.updateDrag(delta: delta, windowWidth: Double(windowWidth)) },
+                        onEnd: { columnWidth.endDrag() },
+                        onCancel: { columnWidth.cancelDrag() },
+                        onDoubleClick: { columnWidth.resetToDefault() }
+                    )
+                    .frame(width: CGFloat(ListColumnWidth.dragAreaWidth))
+                    .frame(maxHeight: .infinity)
+                    .padding(.leading, listWidth + 0.5 - CGFloat(ListColumnWidth.dragAreaWidth) / 2)
+                }
+            }
+            detailPage
         }
     }
 }

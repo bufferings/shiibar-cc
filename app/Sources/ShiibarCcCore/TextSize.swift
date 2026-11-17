@@ -22,8 +22,9 @@ public struct TextSize: Equatable, Hashable, Sendable {
     /// the base size.
     public static let surfaceWidthAtBase: Double = 420
     /// §4.5 / §9: the two-column threshold is the list column width plus
-    /// this (880pt at the base size).
-    public static let twoColumnPaneAllowance: Double = 460
+    /// this (780pt at the base size). It is the right column's minimum
+    /// width, the same value as the window's minimum width.
+    public static let twoColumnPaneAllowance: Double = 360
 
     /// The body text size in points, always within `minimum...maximum`.
     public let points: Int

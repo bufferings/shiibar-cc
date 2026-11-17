@@ -9,7 +9,7 @@ final class ListColumnWidthTests: XCTestCase {
 
     func testConstantsMatchSection9() {
         XCTAssertEqual(ListColumnWidth.minimum, 280)
-        XCTAssertEqual(ListColumnWidth.paneMinimum, 460)
+        XCTAssertEqual(ListColumnWidth.paneMinimum, 360)
         XCTAssertEqual(ListColumnWidth.dragAreaWidth, 8)
         XCTAssertEqual(ListColumnWidth.defaultWidth(textSize: .default), 420)
         XCTAssertEqual(MainSurfaceDefaultsKeys.listColumnWidth, "cc.shiibar.listColumnWidth")
@@ -19,7 +19,7 @@ final class ListColumnWidthTests: XCTestCase {
 
     func testNoRememberedWidthShowsTheDefault() {
         XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 1400, textSize: .default), 420)
-        XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 880, textSize: .default), 420)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 780, textSize: .default), 420)
     }
 
     func testRememberedWidthIsShownInsideTheRange() {
@@ -34,17 +34,17 @@ final class ListColumnWidthTests: XCTestCase {
     }
 
     func testNarrowWindowKeepsThePaneMinimum() {
-        // 700 + 460 > 1000: the list column gives way, the right column
-        // (the 1pt line included) keeps 460.
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 1000, textSize: .default), 540)
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 880, textSize: .default), 420)
+        // 700 + 360 > 1000: the list column gives way, the right column
+        // (the 1pt line included) keeps 360.
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 1000, textSize: .default), 640)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 780, textSize: .default), 420)
         // Exactly fitting is shown as is.
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 540, windowWidth: 1000, textSize: .default), 540)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 640, windowWidth: 1000, textSize: .default), 640)
     }
 
     func testShownWidthDoesNotRewriteTheRememberedWidth() {
         let remembered = 700.0
-        XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1000, textSize: .default), 540)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1000, textSize: .default), 640)
         // Widening the window again shows the remembered width.
         XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1400, textSize: .default), 700)
     }
@@ -66,7 +66,7 @@ final class ListColumnWidthTests: XCTestCase {
         // §8.53: the threshold comes from the default width only. The
         // column mode takes no remembered width, so a remembered list column
         // (wide or narrow) cannot move it.
-        let cases: [(Int, Double)] = [(9, 751), (13, 880), (18, 1042)]
+        let cases: [(Int, Double)] = [(9, 651), (13, 780), (18, 942)]
         for (points, threshold) in cases {
             let size = TextSize(clamping: points)
             XCTAssertEqual(size.twoColumnMinimumWidth, threshold, "\(points)")
@@ -79,7 +79,7 @@ final class ListColumnWidthTests: XCTestCase {
     }
 
     func testMinimumWinsWhenTheRangeIsEmpty() {
-        // 600 − 460 = 140 < 280.
+        // 600 − 360 = 240 < 280.
         XCTAssertEqual(ListColumnWidth.clamp(500, windowWidth: 600), 280)
         XCTAssertEqual(ListColumnWidth.clamp(100, windowWidth: 600), 280)
         XCTAssertEqual(ListColumnWidth.shown(remembered: 500, windowWidth: 600, textSize: .default), 280)
@@ -128,9 +128,9 @@ final class ListColumnWidthTests: XCTestCase {
         drag.update(dragDelta: -100, windowWidth: 1400)
         XCTAssertEqual(drag.width, 320, "after overshooting, the boundary follows the pointer again")
         drag.update(dragDelta: 2000, windowWidth: 1400)
-        XCTAssertEqual(drag.width, 940, "window width minus the right column minimum")
-        drag.update(dragDelta: 520, windowWidth: 1400)
-        XCTAssertEqual(drag.width, 940, "exactly the maximum")
+        XCTAssertEqual(drag.width, 1040, "window width minus the right column minimum")
+        drag.update(dragDelta: 620, windowWidth: 1400)
+        XCTAssertEqual(drag.width, 1040, "exactly the maximum")
         drag.update(dragDelta: 400, windowWidth: 1400)
         XCTAssertEqual(drag.width, 820, "after overshooting, the boundary follows the pointer again")
     }
@@ -139,21 +139,21 @@ final class ListColumnWidthTests: XCTestCase {
         var drag = ListColumnWidthDrag(startWidth: 420)
         drag.update(dragDelta: 300, windowWidth: 1400)
         XCTAssertEqual(drag.width, 720)
-        drag.update(dragDelta: 300, windowWidth: 1100)
+        drag.update(dragDelta: 300, windowWidth: 1000)
         XCTAssertEqual(drag.width, 640)
     }
 
     func testDragStartingFromAClampedShownWidth() {
-        // Remembered 700 in a 1000pt window shows 540; the drag starts there,
+        // Remembered 700 in a 900pt window shows 540; the drag starts there,
         // not at the remembered value.
-        let shown = ListColumnWidth.shown(remembered: 700, windowWidth: 1000, textSize: .default)
+        let shown = ListColumnWidth.shown(remembered: 700, windowWidth: 900, textSize: .default)
         var drag = ListColumnWidthDrag(startWidth: shown)
         XCTAssertEqual(drag.width, 540)
         XCTAssertNil(drag.widthToPersist, "a click on a clamped column does not store the clamped value")
-        drag.update(dragDelta: -40, windowWidth: 1000)
+        drag.update(dragDelta: -40, windowWidth: 900)
         XCTAssertEqual(drag.width, 500)
         XCTAssertEqual(drag.widthToPersist, 500)
-        drag.update(dragDelta: 10, windowWidth: 1000)
+        drag.update(dragDelta: 10, windowWidth: 900)
         XCTAssertEqual(drag.width, 540, "held at the maximum")
         XCTAssertNil(drag.widthToPersist, "ending where it began stores nothing")
     }
@@ -189,11 +189,11 @@ final class ListColumnWidthTests: XCTestCase {
         XCTAssertNil(tiny.widthToPersist)
 
         // The start compares after rounding too: a clamped fractional shown
-        // width (window 1000.4 gives a maximum of 540.4) ending 0.2pt lower.
+        // width (window 900.4 gives a maximum of 540.4) ending 0.2pt lower.
         var clamped = ListColumnWidthDrag(startWidth: 540.4)
-        clamped.update(dragDelta: -0.2, windowWidth: 1000.4)
+        clamped.update(dragDelta: -0.2, windowWidth: 900.4)
         XCTAssertNil(clamped.widthToPersist)
-        clamped.update(dragDelta: -1, windowWidth: 1000.4)
+        clamped.update(dragDelta: -1, windowWidth: 900.4)
         XCTAssertEqual(clamped.widthToPersist, 539)
     }
 }

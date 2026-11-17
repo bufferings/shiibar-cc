@@ -1,6 +1,6 @@
 // The list page (DESIGN.md §4.5 "header row" / "the list has two sections"
-// / "Running rows" / "the row's `>` button" / "row selection" / "row click"
-// / "fixed footer" / "key hints", §4.6 "History section" / "stars" /
+// / "Running rows" / "row selection" / "row click" / "fixed footer" / "key
+// hints", §4.6 "History section" / "stars" /
 // "bottom panel"; visual spec: docs/window-design.html "list page", "row
 // parts", "fixed footer"). Presentation only: every text, state and enabled
 // flag comes from `MainSurfaceModel.list` (Core).
@@ -17,10 +17,14 @@ import SwiftUI
 struct ListPageView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
+    /// One column with the detail page open: the page stays mounted
+    /// underneath it, and its views are no Tab / Shift-Tab targets (§4.5
+    /// "key operations").
+    let isCoveredByDetailPage: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderRowView(model: model, surface: surface)
+            HeaderRowView(model: model, surface: surface, isCoveredByDetailPage: isCoveredByDetailPage)
             ListBodyView(model: model, surface: surface)
             if let panel = model.list.listBottomPanel {
                 PanelStatusLinesView(model: model)
@@ -38,6 +42,8 @@ struct ListPageView: View {
 struct HeaderRowView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
+    /// The list page is under the one-column detail page (`ListPageView`).
+    let isCoveredByDetailPage: Bool
     @State private var menuAnchor: NSView?
     @Environment(\.surfaceScale) private var scale
 
@@ -51,6 +57,7 @@ struct HeaderRowView: View {
                 text: $model.query,
                 isEnabled: !model.list.isFullBuild,
                 focusToken: model.searchFocusRequests[surface] ?? 0,
+                isKeyViewLoopMember: !isCoveredByDetailPage,
                 scale: scale
             )
             // window-design.html `.search`: 24pt tall at 13, level with the
@@ -167,7 +174,6 @@ struct ListBodyView: View {
                             row: row,
                             isSelected: list.selection?.key == row.id,
                             isSelectionActive: list.isSelectionActive,
-                            showsOpenButton: list.showsRowOpenButton,
                             spinning: model.isSpinnerActive,
                             model: model
                         )
@@ -425,17 +431,18 @@ struct SectionHeaderView: View {
     }
 }
 
-/// One card (§4.5 / §4.6): leading slot, three lines, and in one column the
-/// `>` button at the right end. A click elsewhere on the card selects it;
-/// whether the click is part of a double-click (Jump / Resume) is decided in
-/// Core from the press the mouse-down monitor reported (§4.5).
+/// One card (§4.5 "the list has two sections" / §4.6): three lines on the
+/// left, starting at the card's left padding, and the symbol-and-time column
+/// on the right. A click anywhere on the card but the star selects it;
+/// whether the click is part of a double-click (Jump / Resume, or Branch
+/// with ⌘) is decided in Core from the press the mouse-down monitor
+/// reported (§4.5).
 struct RowCardView: View {
     let row: UnifiedListRow
     let isSelected: Bool
     /// The surface is key and the list has focus: the selected card is
     /// accent; otherwise gray (§4.5 "row selection").
     let isSelectionActive: Bool
-    let showsOpenButton: Bool
     let spinning: Bool
     let model: MainSurfaceModel
     @State private var hovering = false
@@ -456,28 +463,27 @@ struct RowCardView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 9) {
-            leadingSlot
-                .frame(width: scale.rowLeadingSlot, height: scale.rowLeadingSlot)
-                .padding(.top, scale.rowLeadingSlotTop)
-                .frame(maxHeight: .infinity, alignment: .top)
-            VStack(alignment: .leading, spacing: scale.rowLineSpacing) {
-                Text(row.line1)
-                    .font(.system(size: scale.rowLine1Font, weight: row.isLine1Bold ? .semibold : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(height: scale.rowLine1Height)
-                Text(row.line2)
-                    .font(.system(size: scale.rowLine2Font))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(row.labelLine)
+                    .font(.system(size: scale.rowLabelFont))
                     .foregroundStyle(SurfaceColors.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(height: scale.rowLine2Height)
+                    .frame(height: scale.rowLabelHeight)
+                // §4.5: the title is bold on every row; unreviewed is shown
+                // only by the badge on the status symbol.
+                Text(row.title)
+                    .font(.system(size: scale.rowTitleFont, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(height: scale.rowTitleHeight)
+                    .padding(.top, scale.rowLabelTitleSpacing)
                 promptLine
+                    .padding(.top, scale.rowTitlePromptSpacing)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if showsOpenButton {
-                RowOpenButton { model.rowOpenClicked(row.id) }
-            }
+            symbolTimeColumn
+                .layoutPriority(1)
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.leading, 11)
@@ -498,47 +504,64 @@ struct RowCardView: View {
         .onTapGesture { model.rowClicked(row.id) }
     }
 
+    /// The bottom line: the last prompt, or an empty line that keeps the row height
+    /// equal (§4.5 / §4.6).
     private var promptLine: some View {
-        HStack(spacing: 5) {
-            if let prompt = row.lastPrompt {
-                Text(UnifiedListRow.promptMarker)
-                    .font(.system(size: scale.rowPromptFont, design: .monospaced))
-                    .opacity(0.8)
-                Text(prompt)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            } else {
-                // Keep the row height equal (§4.5 / §4.6).
-                Text(" ")
-            }
+        Text(row.lastPrompt ?? " ")
+            .font(.system(size: scale.rowPromptFont))
+            .foregroundStyle(SurfaceColors.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(height: scale.rowPromptHeight)
+    }
+
+    /// The symbol-and-time column (§4.5 "the list has two sections", §9):
+    /// the symbol at the top, level with the label line, and the elapsed time
+    /// at the bottom, level with the last prompt, both centered in the column.
+    /// The elapsed time takes the label's size and color (§4.5) and is never
+    /// truncated: when it is wider than the column, the column
+    /// widens to fit it and the three lines end earlier.
+    private var symbolTimeColumn: some View {
+        VStack(spacing: 0) {
+            columnSymbol
+                .frame(width: scale.rowSymbol, height: scale.rowSymbol)
+                .padding(.top, scale.rowSymbolTop)
+            Spacer(minLength: 0)
+            Text(row.elapsedText)
+                .font(.system(size: scale.rowLabelFont))
+                .foregroundStyle(SurfaceColors.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(height: scale.rowPromptHeight)
         }
-        .font(.system(size: scale.rowPromptFont))
-        .foregroundStyle(SurfaceColors.secondary)
-        .frame(height: scale.rowPromptHeight)
+        .frame(minWidth: scale.rowSymbolColumn, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private var leadingSlot: some View {
-        switch row.leading {
+    private var columnSymbol: some View {
+        switch row.symbol {
         case .status(let kind, let unreviewed):
             RowSymbolView(kind: kind, unreviewed: unreviewed, spinning: spinning && kind == .working,
-                          size: scale.rowLeadingSlot)
+                          size: scale.rowSymbol)
         case .star(let isStarred):
-            // §4.6: the slot click toggles the star and never selects.
+            // §4.6: a click on the star toggles it and never selects the row
+            // (nor counts toward a double-click). The star is drawn centered
+            // in the symbol box, and the whole box reacts to the click (the
+            // status symbol's size, §4.6 "stars").
             Button { model.starClicked(sessionID: row.sessionID) } label: {
                 StarView(isStarred: isStarred)
                     .opacity(isStarred || hovering ? 1 : 0)
-                    .frame(width: scale.rowLeadingSlot, height: scale.rowLeadingSlot)
+                    .frame(width: scale.rowSymbol, height: scale.rowSymbol)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(row.leading.tooltip ?? "")
+            .help(row.symbol.tooltip ?? "")
         }
     }
 }
 
-/// The History star (window-design.html: 16px at text size 13; outline in
-/// the secondary color on hover, yellow fill when starred).
+/// The History star, smaller than the status symbol (§4.6 "stars", §9;
+/// outline in the secondary color on hover, yellow fill when starred).
 struct StarView: View {
     let isStarred: Bool
     @Environment(\.surfaceScale) private var scale
@@ -553,24 +576,6 @@ struct StarView: View {
             }
         }
         .frame(width: scale.star, height: scale.star)
-    }
-}
-
-/// The row's `>` button (§4.5; window-design.html `.ib`: 28×26, radius 6,
-/// a 15pt chevron in the secondary color at text size 13; gray ground on
-/// hover / press). Selects the row and opens the detail page.
-struct RowOpenButton: View {
-    let action: () -> Void
-    @Environment(\.surfaceScale) private var scale
-
-    var body: some View {
-        Button(action: action) {
-            SurfaceIconView(icon: .chevronRight, size: scale.rowOpenIcon, lineWidth: scale.rowOpenIconLine)
-                .frame(width: scale.rowOpenButtonWidth, height: scale.rowOpenButtonHeight)
-        }
-        .buttonStyle(HoverChipButtonStyle(cornerRadius: 6))
-        .foregroundStyle(SurfaceColors.secondary)
-        .help(UnifiedListRow.openTooltip)
     }
 }
 

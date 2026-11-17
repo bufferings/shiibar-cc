@@ -310,27 +310,27 @@ final class UnifiedListKeysTests: XCTestCase {
 
     // MARK: - Key hints (§4.5 "key hints", §4.6 "bottom panel")
 
+    /// §4.5 "key hints": the list's hints depend on the focus only — the
+    /// same in one column and two, with or without a selection (the state
+    /// tests cover those combinations). → is not a hint; it is shown inside
+    /// the View button.
     func testFooterHints() {
-        let cases: [(String, ColumnMode, Bool, Bool, [KeyHint])] = [
-            // (name, columns, hasSelection, listFocused, hints)
-            ("one column, no selection, list focus", .one, false, true, [.move]),
-            ("one column, no selection, search field focus", .one, false, false, [.list]),
-            ("one column, selection, list focus", .one, true, true, [.move, .open]),
-            ("one column, selection, search field focus", .one, true, false, [.list]),
-            ("two columns, no selection, list focus", .two, false, true, [.move]),
-            ("two columns, no selection, search field focus", .two, false, false, [.list]),
-            ("two columns, selection, list focus", .two, true, true, [.move]),
-            ("two columns, selection, search field focus", .two, true, false, [.list]),
-        ]
-        for (name, columns, hasSelection, listFocused, hints) in cases {
-            XCTAssertEqual(KeyHints.footer(columns: columns, hasSelection: hasSelection, listFocused: listFocused), hints, name)
-        }
+        XCTAssertEqual(KeyHints.footer(listFocused: true), [.move])
+        XCTAssertEqual(KeyHints.footer(listFocused: false), [.list])
+    }
+
+    /// §4.6 "bottom panel": `View →`, the key in the same style as the other
+    /// buttons' shortcuts.
+    func testViewButtonLabel() {
+        XCTAssertEqual(BottomPanelModel.viewTitle, "View")
+        XCTAssertEqual(BottomPanelModel.viewShortcut, "→")
+        XCTAssertEqual(BottomPanelModel.slots(showsViewButton: true), [.view, .branch, .primary])
+        XCTAssertEqual(BottomPanelModel.slots(showsViewButton: false), [.branch, .primary])
     }
 
     func testHintStrings() {
         XCTAssertEqual(KeyHint.list, KeyHint(key: "↩", label: "List"))
         XCTAssertEqual(KeyHint.move, KeyHint(key: "↑↓", label: "Move"))
-        XCTAssertEqual(KeyHint.open, KeyHint(key: "→", label: "Open"))
         XCTAssertEqual(KeyHint.prevNext, KeyHint(key: "⌥↑↓", label: "Prev / Next"))
         XCTAssertEqual(KeyHint.back, KeyHint(key: "←", label: "Back"))
         XCTAssertEqual(KeyHints.bottomPanel(columns: .one), [.prevNext, .back])

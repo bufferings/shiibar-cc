@@ -1,4 +1,5 @@
-// Running row leading status symbol (DESIGN.md §4.5 "Running rows",
+// Running row status symbol, at the top of the row's symbol-and-time column
+// (DESIGN.md §4.5 "Running rows",
 // window-design.html): dim static ✻ = idle / outlined speech bubble + bold
 // "!" = waiting / glyph-cycle spinner = working. The actual drawing lives in
 // the app layer (`RowSymbolView`); this is just the pure

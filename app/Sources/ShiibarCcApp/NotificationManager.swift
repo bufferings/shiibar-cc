@@ -172,7 +172,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// scheduling time.
     var currentAgentsProvider: () -> [Agent] = { [] }
 
-    /// `$HOME`, used to render the same cwd label a list row's second line
+    /// `$HOME`, used to render the same cwd label a list row's label line
     /// uses (§4.5/§3.6).
     var homeProvider: () -> String? = { nil }
 

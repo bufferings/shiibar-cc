@@ -57,7 +57,7 @@ public enum ColumnMode: Equatable, Sendable {
     case two
 
     /// The column mode for a window content width (§4.5/§9: two columns at
-    /// the default list column width + 460pt or wider — 880pt at text size
+    /// the default list column width + 360pt or wider — 780pt at text size
     /// 13 — one column below; a remembered width does not move it). The popover never calls this — it is always `.one`.
     public static func forWindowWidth(_ width: Double, textSize: TextSize) -> ColumnMode {
         width >= textSize.twoColumnMinimumWidth ? .two : .one

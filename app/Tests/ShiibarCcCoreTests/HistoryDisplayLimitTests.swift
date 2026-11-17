@@ -158,7 +158,7 @@ final class HistoryDisplayLimitTests: XCTestCase {
 
     func testPositionTextCountsShownRowsOnly() {
         var s = state(results: results(250), agents: [UL.agent("t1", session: "c0")])
-        s.handle(.rowOpenClicked(.history(sessionID: "c100")))
+        s.openDetailPage(.history(sessionID: "c100"))
         guard case .conversation(let pane) = s.paneContent else {
             return XCTFail("expected the detail page")
         }
@@ -213,7 +213,7 @@ final class HistoryDisplayLimitTests: XCTestCase {
         var all = results(250)
         all[200] = UL.summary("c200", title: "Deep title", updatedAt: all[200].updatedAt)
         let s = state(results: all, agents: [UL.agent("t1", session: "c200")])
-        XCTAssertEqual(s.runningRows.first?.line1, "Deep title")
+        XCTAssertEqual(s.runningRows.first?.title, "Deep title")
         XCTAssertEqual(s.historyRows.count, 100)
         XCTAssertEqual(s.hiddenHistoryCount, 149)
     }

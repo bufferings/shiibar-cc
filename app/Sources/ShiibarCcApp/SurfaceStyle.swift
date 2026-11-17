@@ -136,31 +136,40 @@ struct SurfaceScale: Equatable {
 
     // MARK: Row card
 
-    /// The leading slot (status symbol or star), 20×20.
-    var rowLeadingSlot: CGFloat { scaled(20) }
-    /// The slot sits 1pt below the card's text top.
-    var rowLeadingSlotTop: CGFloat { scaled(1) }
-    /// The History star and its strokes.
+    /// The symbol-and-time column's width (§9: 28pt at 13). The elapsed
+    /// time widens it when it does not fit (§4.5).
+    var rowSymbolColumn: CGFloat { scaled(28) }
+    /// The column's symbol box, 20×20 (§9): the status symbol's size, and the
+    /// star's click area (§4.6 "stars").
+    var rowSymbol: CGFloat { scaled(20) }
+    /// The symbol sits 1pt below the card's text top, level with the label
+    /// line (the card's top line).
+    var rowSymbolTop: CGFloat { scaled(1) }
+    /// The History star (§9: 16pt at 13, smaller than the status symbol and
+    /// centered in the symbol box) and its strokes.
     var star: CGFloat { scaled(16) }
     var starFilledLine: CGFloat { scaled(0.7) }
     var starOutlineLine: CGFloat { scaled(1.1) }
-    var rowLine1Font: CGFloat { scaled(13) }
-    var rowLine2Font: CGFloat { scaled(11) }
+    /// The card's three lines (§4.5): the label and the last prompt in the
+    /// small size, the bold title in the body size. The elapsed time in the
+    /// symbol-and-time column uses the label's size.
+    var rowTitleFont: CGFloat { scaled(13) }
+    var rowLabelFont: CGFloat { scaled(11) }
     var rowPromptFont: CGFloat { scaled(11) }
-    var rowLineSpacing: CGFloat { scaled(1) }
-    /// Line boxes of the card lines: line 1 inherits `.app` (13px,
-    /// line-height 1.35); lines 2 and 3 are `.sub` / `.t3` (11px,
-    /// line-height 1.45). Text is vertically centered in its box.
-    var rowLine1Height: CGFloat { scaled(17.55) }
-    var rowLine2Height: CGFloat { scaled(15.95) }
+    /// Between the label and the title (§9: 1pt at 13).
+    var rowLabelTitleSpacing: CGFloat { scaled(1) }
+    /// Between the title and the last prompt (§9: 4pt at 13), wider than
+    /// the label-title gap so the label and the title read as one pair,
+    /// apart from the last prompt (§8.59).
+    var rowTitlePromptSpacing: CGFloat { scaled(4) }
+    /// Line boxes of the card lines: the title inherits `.app` (13px,
+    /// line-height 1.35); the label and the last prompt are `.sub` / `.t3`
+    /// (11px, line-height 1.45). Text is vertically centered in its box.
+    var rowTitleHeight: CGFloat { scaled(17.55) }
+    var rowLabelHeight: CGFloat { scaled(15.95) }
     var rowPromptHeight: CGFloat { scaled(15.95) }
     var rowCardTop: CGFloat { scaled(8) }
     var rowCardBottom: CGFloat { scaled(9) }
-    /// `.ib` (the row's `>` button): 28×26 with a 15pt chevron.
-    var rowOpenButtonWidth: CGFloat { scaled(28) }
-    var rowOpenButtonHeight: CGFloat { scaled(26) }
-    var rowOpenIcon: CGFloat { scaled(15) }
-    var rowOpenIconLine: CGFloat { scaled(1.4) }
 
     // MARK: Footer, status lines, key hints
 
@@ -191,14 +200,14 @@ struct SurfaceScale: Equatable {
     /// `.hdr .ht`: 13.5 on the detail page, 15 in two columns.
     var paneTitleDetailFont: CGFloat { scaled(13.5) }
     var paneTitleColumnFont: CGFloat { scaled(15) }
-    var paneSubtitleFont: CGFloat { scaled(11) }
+    var paneLabelFont: CGFloat { scaled(11) }
     var panePositionFont: CGFloat { scaled(11) }
     var paneTitleSpacing: CGFloat { scaled(1) }
     /// `.hdr` top padding 9 (`.hdr.pad` 11 in two columns), bottom 8.
     var paneHeaderTopDetail: CGFloat { scaled(9) }
     var paneHeaderTopColumn: CGFloat { scaled(11) }
     var paneHeaderBottom: CGFloat { scaled(8) }
-    /// The title block (title + subtitle) is about 32pt tall at 13.
+    /// The title block (the label line + the title) is about 32pt tall at 13.
     var paneTitleBlockHeight: CGFloat { scaled(32) }
     /// The previous / next conversation control: 26×22 segments with 13pt
     /// chevrons.
@@ -243,7 +252,7 @@ extension EnvironmentValues {
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)
 
 enum SurfaceIcon {
-    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, star
+    case search, refresh, pin, chevronDown, chevronUp, back, window, star
 
     /// The icon's outline on a 16-unit box, y down.
     func path(in rect: CGRect) -> Path {
@@ -290,8 +299,6 @@ enum SurfaceIcon {
             polyline(&path, [(4, 6), (8, 10), (12, 6)])
         case .chevronUp:
             polyline(&path, [(4, 10), (8, 6), (12, 10)])
-        case .chevronRight:
-            polyline(&path, [(6, 3.5), (10.5, 8), (6, 12.5)])
         case .back:
             polyline(&path, [(10, 3.5), (5.5, 8), (10, 12.5)])
         case .window:
@@ -329,7 +336,7 @@ struct IconShape: Shape {
 
 // MARK: - Button styles
 
-/// `.hb` / `.ib`: no ground at rest, 16% gray on hover, 24% while pressed
+/// `.hb`: no ground at rest, 16% gray on hover, 24% while pressed
 /// (window-design.html). `restingOpacity` gives the ⌄ chip its 10% ground.
 /// `onTint` is the ground of a button that is ON (`.hb.on`: the pin while
 /// Keep on Top is ON — DESIGN.md §4.5 "pin"): the tint at 16%, 24% while

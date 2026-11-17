@@ -1,8 +1,8 @@
 // The single state shared by the popover and the window (DESIGN.md §4.5
 // "the popover and the window share one state" / "switching by width" /
-// "row selection" / "row click" / "row double-click" / "the row's `>`
-// button" / "key operations", §4.6 "display state rules" / "History refetch triggers" /
-// "bottom panel", §8.49). A value type driven by explicit events; each
+// "row selection" / "row click" / "row double-click" / "opening the detail
+// page" / "key operations", §4.6 "display state rules" / "History refetch
+// triggers" / "bottom panel", §8.49, §8.59). A value type driven by explicit events; each
 // event returns the side effects the app must perform. The app holds ONE
 // instance (e.g. in an ObservableObject), feeds it daemon updates, search
 // results, clock ticks and user input, and renders from its derived
@@ -39,11 +39,15 @@ public struct PointerPress: Equatable, Sendable {
     /// The press's own time (`NSEvent.timestamp`, system uptime seconds);
     /// nil when unknown.
     public let pressedAt: TimeInterval?
+    /// ⌘ was held at the press. On the second click of a double-click it
+    /// runs Branch instead of Jump / Resume (§4.5 "row double-click").
+    public let commandKey: Bool
 
-    public init(selectionActive: Bool, clickCount: Int, pressedAt: TimeInterval?) {
+    public init(selectionActive: Bool, clickCount: Int, pressedAt: TimeInterval?, commandKey: Bool = false) {
         self.selectionActive = selectionActive
         self.clickCount = clickCount
         self.pressedAt = pressedAt
+        self.commandKey = commandKey
     }
 }
 
@@ -70,8 +74,7 @@ public enum UnifiedListEvent: Equatable, Sendable {
     case fullBuildChanged(Bool)
     /// Re-take the elapsed-time base (on show, then every 60s — §4.5/§9).
     case clockTicked(now: Int64)
-    /// A click on a row outside its `>` button and star slot (§4.5 "row
-    /// click"): selects the row, in one column and in two, and moves focus
+    /// A click on a row outside its star (§4.5 "row click"): selects the row, in one column and in two, and moves focus
     /// to the list. A click on the selected row deselects it only when the
     /// selection was shown active (accent) as the mouse button went down
     /// (`.pointerDown`); a click on a gray selected row keeps it and only
@@ -80,17 +83,14 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// The press's click count tells the clicks of a double-click apart
     /// (§4.5 "row double-click"): the second click on the same row selects
     /// it, moves focus to the list and runs the primary button (Jump /
-    /// Resume) like Enter with list focus; further clicks of the same
-    /// sequence do not run it again. Because a double-click never deselects,
+    /// Resume) like Enter with list focus — or Branch like ⌘Enter when ⌘ is
+    /// held at that second press; further clicks of the same sequence do
+    /// not run either again. Because a double-click never deselects,
     /// the deselect of a single click on an accent row waits until no
     /// second click can follow (`.scheduleDeferredDeselect`). Without a
     /// press (no `.pointerDown`) no second click can follow, so it
     /// deselects at once.
     case rowClicked(UnifiedRowKey)
-    /// The row's `>` button (§4.5 "the row's `>` button"): one column only —
-    /// selects the row, opens the detail page, and moves focus to the list.
-    /// Ignored in two columns, where the button is not shown.
-    case rowOpenClicked(UnifiedRowKey)
     /// ↑ on the list: the previous row.
     case moveUp
     /// ↓ on the list: the next row.
@@ -103,7 +103,8 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// Enter in the search field (§4.5 "key operations"): focus moves to the
     /// list; with no selection the first row is selected (no rows: nothing).
     case enterFromSearchField
-    /// → with list focus: the one-column list page opens the detail page of
+    /// → with list focus, and the bottom panel's View button (§4.5 "opening
+    /// the detail page"): the one-column list page opens the detail page of
     /// the selected row.
     case openDetail
     /// The detail page's back button and ← with list focus.
@@ -129,9 +130,12 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// the row click that follows decides from this snapshot (§4.5 "row
     /// click": only a row shown in accent deselects).
     ///
-    /// `clickCount` is the system's click count of the press and
-    /// `pressedAt` its own time (`NSEvent.timestamp`); see `PointerPress`.
-    case pointerDown(surfaceKey: Bool, searchFieldFocused: Bool, clickCount: Int = 1, pressedAt: TimeInterval? = nil)
+    /// `clickCount` is the system's click count of the press, `pressedAt`
+    /// its own time (`NSEvent.timestamp`) and `commandKey` whether ⌘ was
+    /// held; see `PointerPress`.
+    case pointerDown(
+        surfaceKey: Bool, searchFieldFocused: Bool, clickCount: Int = 1, pressedAt: TimeInterval? = nil,
+        commandKey: Bool = false)
     /// The system double-click interval since the press of a deferred
     /// deselect has passed (`.scheduleDeferredDeselect`): no second click
     /// came, so the row deselects — unless the deselect was cancelled
@@ -143,7 +147,7 @@ public enum UnifiedListEvent: Equatable, Sendable {
     case surfaceHidden
     /// The column mode of the visible surface changed.
     case columnsChanged(ColumnMode)
-    /// A click on a History row's star slot (never selects — §4.6).
+    /// A click on a History row's star (never selects — §4.6).
     case starToggled(sessionID: String)
 }
 
@@ -202,6 +206,15 @@ public enum ConversationPaneContent: Equatable, Sendable {
     public static let noSelectionText = "No conversation selected"
 }
 
+/// One button position of the bottom panel's right side (§4.6 "bottom
+/// panel"), left to right: View (one-column list page only), Branch, then
+/// the primary button at the right end.
+public enum BottomPanelSlot: Equatable, Sendable {
+    case view
+    case branch
+    case primary
+}
+
 /// The bottom panel (§4.6 "bottom panel"): the key hints on the left (one
 /// column only) and the selected row's action buttons on the right (§4.5
 /// "action buttons"). Shown at the bottom of the one-column list page and of
@@ -213,11 +226,27 @@ public struct BottomPanelModel: Equatable, Sendable {
     /// Right side; nil while the buttons are not shown (`showsButtons`). The
     /// panel keeps its height either way (§4.6).
     public let buttons: BottomPanelButtons?
+    /// The panel's button positions, left to right. The same whether or not
+    /// the buttons are shown, so the hidden buttons keep the layout.
+    public let slots: [BottomPanelSlot]
 
-    public init(hints: [KeyHint], buttons: BottomPanelButtons?) {
+    public init(hints: [KeyHint], buttons: BottomPanelButtons?, showsViewButton: Bool) {
         self.hints = hints
         self.buttons = buttons
+        self.slots = BottomPanelModel.slots(showsViewButton: showsViewButton)
     }
+
+    /// §4.6 "bottom panel" / §8.59: View sits left of Branch on the
+    /// one-column list page only. The detail page and the two-column right
+    /// column already show the conversation, so they have no View.
+    public static func slots(showsViewButton: Bool) -> [BottomPanelSlot] {
+        (showsViewButton ? [.view] : []) + [.branch, .primary]
+    }
+
+    /// The View button's title and its key, shown inside the button like the
+    /// other buttons' shortcuts (§4.6: `View →`). View is never disabled.
+    public static let viewTitle = "View"
+    public static let viewShortcut = "\u{2192}"
 
     /// Whether the panel shows the selected row's buttons (§4.6 "bottom
     /// panel", §8.55): only while a row is selected and the search field
@@ -255,10 +284,10 @@ public struct ConversationPaneModel: Equatable, Sendable {
     /// The row the pane shows (buttons already disabled while awaiting the
     /// refetch after a Running row ended).
     public let row: UnifiedListRow
-    /// Header line 1.
+    /// The header's first line (§4.6): the card's folder label · elapsed ago.
+    public var labelAndElapsed: String { row.headerLabelAndElapsed }
+    /// The header's second line (§4.6): the title.
     public var title: String { row.headerTitle }
-    /// Header line 2: the full home-relative path · elapsed ago.
-    public var subtitle: String { row.headerSubtitle }
     /// false for a row with an empty session_id: show `noMessagesText` in
     /// the message surface instead of running `show` (§4.5).
     public let showsMessages: Bool
@@ -287,7 +316,8 @@ public struct ConversationPaneModel: Equatable, Sendable {
     public var bottomPanel: BottomPanelModel {
         BottomPanelModel(
             hints: hints,
-            buttons: showsButtons ? BottomPanelButtons(primary: primaryButton, branch: branchButton) : nil)
+            buttons: showsButtons ? BottomPanelButtons(primary: primaryButton, branch: branchButton) : nil,
+            showsViewButton: false)
     }
 
     public static let noMessagesText = "No conversation to show"
@@ -444,12 +474,13 @@ public struct UnifiedListState: Equatable, Sendable {
     /// column's footer, and the left side of the one-column list page's
     /// bottom panel. They follow the search field's focus only.
     public var footerHints: [KeyHint] {
-        KeyHints.footer(columns: columns, hasSelection: selection != nil, listFocused: !isSearchFieldFocused)
+        KeyHints.footer(listFocused: !isSearchFieldFocused)
     }
 
     /// The bottom panel of the one-column list page (§4.6 "bottom panel"):
     /// the list's key hints on the left, the selected row's buttons on the
-    /// right (none while nothing is selected or the search field has focus).
+    /// right — View, Branch, the primary button — (none while nothing is
+    /// selected or the search field has focus).
     /// nil in two columns, where the left column's footer shows the key
     /// hints only and the buttons live in the right column's pane (§4.5 "key
     /// hints").
@@ -459,11 +490,9 @@ public struct UnifiedListState: Equatable, Sendable {
         let shows = BottomPanelModel.showsButtons(hasSelection: row != nil, searchFieldFocused: isSearchFieldFocused)
         return BottomPanelModel(
             hints: footerHints,
-            buttons: shows ? row.map(BottomPanelButtons.init(row:)) : nil)
+            buttons: shows ? row.map(BottomPanelButtons.init(row:)) : nil,
+            showsViewButton: true)
     }
-
-    /// Whether every row shows the `>` button (§4.5: one column only).
-    public var showsRowOpenButton: Bool { columns == .one }
 
     /// The pane area's content for the current columns / page / selection.
     public var paneContent: ConversationPaneContent {
@@ -573,7 +602,7 @@ public struct UnifiedListState: Equatable, Sendable {
             // §4.5 "row click": select; the selected row deselects only when
             // it was shown in accent at the press — a gray selected row keeps
             // its selection and only gains focus. The detail page opens with
-            // the `>` button or →.
+            // View or → (§4.5 "opening the detail page").
             let press = pointerPress
             pointerPress = nil
             let wasActive = press?.selectionActive ?? isSelectionActive
@@ -601,14 +630,16 @@ public struct UnifiedListState: Equatable, Sendable {
                 effects.append(.focusList)
             case 2:
                 // §4.5 "row double-click": select, focus the list, then
-                // what Enter with list focus does (nothing more when the
-                // button is disabled). The first click's deselect is off.
+                // what Enter with list focus does — ⌘Enter (Branch) when ⌘
+                // is held at this second press — and nothing more when that
+                // button is disabled. The first click's deselect is off.
                 pendingDeselect = nil
                 if selection?.key != key {
                     select(row)
                 }
                 effects.append(.focusList)
-                if let invocation = selectedRow?.primaryButton.invocation {
+                let button = press?.commandKey == true ? selectedRow?.branchButton : selectedRow?.primaryButton
+                if let invocation = button?.invocation {
                     effects.append(.invoke(invocation))
                 }
             default:
@@ -618,12 +649,6 @@ public struct UnifiedListState: Equatable, Sendable {
                 }
                 effects.append(.focusList)
             }
-
-        case .rowOpenClicked(let key):
-            guard columns == .one, let row = visibleRows.first(where: { $0.id == key }) else { break }
-            select(row)
-            page = .detail
-            effects.append(.focusList)
 
         case .moveUp, .moveDown:
             movedSelection = move(up: event == .moveUp)
@@ -675,7 +700,7 @@ public struct UnifiedListState: Equatable, Sendable {
         case .surfaceKeyChanged(let key):
             isSurfaceKey = key
 
-        case .pointerDown(let surfaceKey, let searchFieldFocused, let clickCount, let pressedAt):
+        case .pointerDown(let surfaceKey, let searchFieldFocused, let clickCount, let pressedAt, let commandKey):
             if pointerPress != nil {
                 // The previous press reached no row (empty space, a button,
                 // the star): a later press of the same system click count
@@ -685,7 +710,8 @@ public struct UnifiedListState: Equatable, Sendable {
             pointerPress = PointerPress(
                 selectionActive: surfaceKey && !searchFieldFocused,
                 clickCount: clickCount,
-                pressedAt: pressedAt)
+                pressedAt: pressedAt,
+                commandKey: commandKey)
 
         case .deferredDeselectDue(let id):
             guard let pending = pendingDeselect, pending.id == id else { break }

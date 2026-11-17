@@ -2,12 +2,12 @@ import XCTest
 
 @testable import ShiibarCcCore
 
-/// Row composition for the unified list (M44 T1; DESIGN.md §4.5 "Running
+/// Row composition for the unified list (DESIGN.md §4.5 "Running
 /// rows" / "action buttons", §4.6 "History section" / "stars" / "search scope").
 final class UnifiedListRowsTests: XCTestCase {
-    // MARK: - Running line 1 fallback order (§4.5)
+    // MARK: - Running card title fallback order (§4.5)
 
-    func testRunningLine1FallbackOrder() {
+    func testRunningCardTitleFallbackOrder() {
         struct Case {
             let name: String
             let agent: Agent
@@ -42,7 +42,7 @@ final class UnifiedListRowsTests: XCTestCase {
         ]
         for c in cases {
             let row = UnifiedListBuilder.runningRow(agent: c.agent, title: c.title, now: UL.now, home: UL.home)
-            XCTAssertEqual(row?.line1, c.expected, c.name)
+            XCTAssertEqual(row?.title, c.expected, c.name)
         }
     }
 
@@ -51,19 +51,19 @@ final class UnifiedListRowsTests: XCTestCase {
         let withTitle = UnifiedListBuilder.runningRows(
             agents: agents, results: [UL.summary("s1", title: "Indexed title")],
             isFiltered: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(withTitle.map(\.line1), ["Indexed title"])
+        XCTAssertEqual(withTitle.map(\.title), ["Indexed title"])
         let nullTitle = UnifiedListBuilder.runningRows(
             agents: agents, results: [UL.summary("s1", title: nil)],
             isFiltered: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(nullTitle.map(\.line1), ["task text"])
+        XCTAssertEqual(nullTitle.map(\.title), ["task text"])
         let noResults = UnifiedListBuilder.runningRows(
             agents: agents, results: nil, isFiltered: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(noResults.map(\.line1), ["task text"])
+        XCTAssertEqual(noResults.map(\.title), ["task text"])
     }
 
-    // MARK: - Line 2 / line 3
+    // MARK: - Label line / last prompt
 
-    func testLine3ReplacesNewlinesAndIsEmptyWithoutTask() {
+    func testLastPromptReplacesNewlinesAndIsEmptyWithoutTask() {
         struct Case {
             let task: String?
             let expected: String?
@@ -78,47 +78,78 @@ final class UnifiedListRowsTests: XCTestCase {
         for c in cases {
             let row = UnifiedListBuilder.runningRow(
                 agent: UL.agent("t", session: "s", task: c.task), title: nil, now: UL.now, home: UL.home)
+            // The whole last-prompt text: no marker in front of the prompt (§4.5).
             XCTAssertEqual(row?.lastPrompt, c.expected, String(describing: c.task))
         }
     }
 
-    func testLine2AndHeader() {
+    /// §4.5 / §4.6: the label line is the label only (plus ` · running` on a
+    /// live History row); the elapsed time goes to the symbol-and-time column.
+    func testLabelLineAndHeader() {
         let running = UnifiedListBuilder.runningRow(
             agent: UL.agent("t", session: "s", since: UL.now - 240), title: "T", now: UL.now, home: UL.home)!
-        XCTAssertEqual(running.line2, "demo/api \u{00B7} 4m")
+        XCTAssertEqual(running.labelLine, "demo/api")
+        XCTAssertEqual(running.elapsedText, "4m")
         XCTAssertFalse(running.showsRunningMark)
-        XCTAssertEqual(running.headerSubtitle, "~/demo/api \u{00B7} 4m ago")
+        XCTAssertEqual(running.headerLabelAndElapsed, "demo/api \u{00B7} 4m ago")
 
         let live = UnifiedListBuilder.historyRow(
             summary: UL.summary("s", updatedAt: UL.now - 300, live: true), isStarred: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(live.line2, "demo/web \u{00B7} 5m \u{00B7} running")
+        XCTAssertEqual(live.labelLine, "demo/web \u{00B7} running")
+        XCTAssertEqual(live.elapsedText, "5m")
         XCTAssertTrue(live.showsRunningMark)
+        XCTAssertEqual(live.headerLabelAndElapsed, "demo/web \u{00B7} 5m ago", "no running mark in the header (§4.6)")
+
+        let ended = UnifiedListBuilder.historyRow(
+            summary: UL.summary("s", updatedAt: UL.now - 7200, live: false), isStarred: false, now: UL.now, home: UL.home)
+        XCTAssertEqual(ended.labelLine, "demo/web")
+        XCTAssertEqual(ended.elapsedText, "2h")
+        XCTAssertFalse(ended.showsRunningMark)
 
         let noCwd = UnifiedListBuilder.historyRow(
             summary: UL.summary("s", cwd: nil, updatedAt: UL.now - 7200), isStarred: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(noCwd.headerSubtitle, "2h ago")
+        XCTAssertEqual(noCwd.headerLabelAndElapsed, "2h ago")
+    }
+
+    /// §4.6: the pane header's top line is the card's folder label (the last
+    /// two path components — §4.5) and the elapsed time, never the full
+    /// home-relative path, so the header and the card show the same text.
+    func testHeaderTopLineIsTheCardLabelForDeepPaths() {
+        let deepCwd = "/Users/example/work/clients/demo/menubar-app"
+        let running = UnifiedListBuilder.runningRow(
+            agent: UL.agent("t", session: "s", cwd: deepCwd, since: UL.now - 240), title: "T", now: UL.now, home: UL.home)!
+        XCTAssertEqual(running.label, "demo/menubar-app")
+        XCTAssertEqual(running.headerLabelAndElapsed, "demo/menubar-app \u{00B7} 4m ago")
+
+        let history = UnifiedListBuilder.historyRow(
+            summary: UL.summary("s", cwd: deepCwd, updatedAt: UL.now - 7200), isStarred: false, now: UL.now, home: UL.home)
+        XCTAssertEqual(history.headerLabelAndElapsed, "demo/menubar-app \u{00B7} 2h ago")
+
+        let outsideHome = UnifiedListBuilder.historyRow(
+            summary: UL.summary("s", cwd: "/opt/build/demo/api", updatedAt: UL.now - 7200),
+            isStarred: false, now: UL.now, home: UL.home)
+        XCTAssertEqual(outsideHome.headerLabelAndElapsed, "demo/api \u{00B7} 2h ago")
     }
 
     func testHistoryLinesAndTitleFallback() {
         let row = UnifiedListBuilder.historyRow(
             summary: UL.summary("s", title: nil, lastPrompt: "last thing I said"),
             isStarred: false, now: UL.now, home: UL.home)
-        XCTAssertEqual(row.line1, "demo/web")
+        XCTAssertEqual(row.title, "demo/web")
         XCTAssertEqual(row.headerTitle, "demo/web")
         XCTAssertEqual(row.lastPrompt, "last thing I said")
-        XCTAssertEqual(row.leading, .star(isStarred: false))
-        XCTAssertFalse(row.isLine1Bold)
+        XCTAssertEqual(row.symbol, .star(isStarred: false))
 
         let noPrompt = UnifiedListBuilder.historyRow(
             summary: UL.summary("s", lastPrompt: nil), isStarred: true, now: UL.now, home: UL.home)
         XCTAssertNil(noPrompt.lastPrompt)
-        XCTAssertEqual(noPrompt.leading, .star(isStarred: true))
-        XCTAssertEqual(noPrompt.leading.tooltip, "Unstar")
-        XCTAssertEqual(row.leading.tooltip, "Star")
+        XCTAssertEqual(noPrompt.symbol, .star(isStarred: true))
+        XCTAssertEqual(noPrompt.symbol.tooltip, "Unstar")
+        XCTAssertEqual(row.symbol.tooltip, "Star")
     }
 
     func testRunningRowStatusAndUnreviewed() {
-        let cases: [(AgentStatus, Bool, RowLeadingSlot?)] = [
+        let cases: [(AgentStatus, Bool, RowColumnSymbol?)] = [
             (.idle, false, .status(.idle, unreviewed: false)),
             (.working, false, .status(.working, unreviewed: false)),
             (.waiting, true, .status(.waiting, unreviewed: true)),
@@ -128,8 +159,26 @@ final class UnifiedListRowsTests: XCTestCase {
             let row = UnifiedListBuilder.runningRow(
                 agent: UL.agent("t", status: status, session: "s", unreviewed: unreviewed),
                 title: nil, now: UL.now, home: UL.home)
-            XCTAssertEqual(row?.leading, expected, "\(status)")
-            if let row { XCTAssertEqual(row.isLine1Bold, unreviewed) }
+            XCTAssertEqual(row?.symbol, expected, "\(status)")
+        }
+    }
+
+    /// §4.5: unreviewed is shown only by the badge on the status symbol; the
+    /// card's text is the same whether the row is unreviewed or not.
+    func testUnreviewedChangesOnlyTheSymbolBadge() {
+        for status in [AgentStatus.idle, .working, .waiting] {
+            let reviewed = UnifiedListBuilder.runningRow(
+                agent: UL.agent("t", status: status, session: "s", task: "task", message: "Permission",
+                                unreviewed: false),
+                title: "Title", now: UL.now, home: UL.home)!
+            let unreviewed = UnifiedListBuilder.runningRow(
+                agent: UL.agent("t", status: status, session: "s", task: "task", message: "Permission",
+                                unreviewed: true),
+                title: "Title", now: UL.now, home: UL.home)!
+            XCTAssertEqual(unreviewed.title, reviewed.title, "\(status)")
+            XCTAssertEqual(unreviewed.labelLine, reviewed.labelLine, "\(status)")
+            XCTAssertEqual(unreviewed.lastPrompt, reviewed.lastPrompt, "\(status)")
+            XCTAssertNotEqual(unreviewed.symbol, reviewed.symbol, "\(status)")
         }
     }
 
@@ -141,7 +190,7 @@ final class UnifiedListRowsTests: XCTestCase {
         let noSession = UL.agent("t", status: .waiting, session: "", task: "task", message: "Permission")
         XCTAssertEqual(
             UnifiedListBuilder.runningRow(agent: noSession, title: nil, now: UL.now, home: UL.home)?.headerTitle,
-            "Permission", "an empty session_id shows the row's line 1 (§4.5)")
+            "Permission", "an empty session_id shows the row's card title (§4.5)")
     }
 
     // MARK: - Ordering, exclusion, search scope
@@ -225,7 +274,7 @@ final class UnifiedListRowsTests: XCTestCase {
         ]
         let rows = UnifiedListBuilder.historyRows(results: results, agents: [], stars: ["d", "b"], now: UL.now, home: UL.home)
         XCTAssertEqual(rows.map(\.sessionID), ["b", "d", "a", "c"])
-        XCTAssertEqual(rows.map(\.leading), [
+        XCTAssertEqual(rows.map(\.symbol), [
             .star(isStarred: true), .star(isStarred: true), .star(isStarred: false), .star(isStarred: false),
         ])
     }
@@ -235,7 +284,7 @@ final class UnifiedListRowsTests: XCTestCase {
         state.handle(.historyDelivered([UL.summary("h"), UL.summary("s1")], isFiltered: false))
         XCTAssertEqual(state.historyRows.first?.sessionID, "s1")
         state.handle(.agentsUpdated([UL.agent("t1", session: "s1")]))
-        XCTAssertEqual(state.runningRows.first?.leading, .status(.idle, unreviewed: false))
+        XCTAssertEqual(state.runningRows.first?.symbol, .status(.idle, unreviewed: false))
         XCTAssertEqual(state.historyRows.map(\.sessionID), ["h"])
         XCTAssertEqual(state.stars, ["s1"], "the star is kept while running")
         state.handle(.agentsUpdated([]))

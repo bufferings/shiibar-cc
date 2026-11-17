@@ -50,7 +50,8 @@ symbol) and your past Claude Code conversations (**History**). Type to
 filter both at once (the × at the right end of the search field clears
 it). Click a row to select it (click it again to clear the selection);
 the buttons at the bottom act on the selected row, and
-double-clicking a row runs its main button directly. On a running
+double-clicking a row runs its main button directly (⌘-double-click runs
+Branch instead). On a running
 session the main button is **Jump** (it brings up that session's terminal
 tab; clicking a notification does the same), and on a past conversation it is **Resume** (it reopens the
 conversation in a new terminal window). **Branch**, next to it, starts a
@@ -59,8 +60,8 @@ new conversation from a copy of either kind.
 <img src="docs/assets/menubar-dropdown.png" width="500"
      alt="The Shiibar CC popover under the tray icon: a search field, the
           Running section with each session's status symbol, the History
-          section of past conversations, and the Branch ⌘↩ and Jump ↩
-          buttons at the bottom for the selected row">
+          section of past conversations, and the View →, Branch ⌘↩ and
+          Jump ↩ buttons at the bottom for the selected row">
 
 Notifications carry the outcome, not just an alert — which session
 finished, and what its agent last said:
@@ -76,9 +77,9 @@ match. Once the list has focus, ↑ / ↓ select a row, Return jumps or
 resumes, ⌘Return branches, and → opens the conversation and ← goes back
 to the list (in the popover or a narrow window). ⌘F (or a click) takes you
 back to the search field, and Esc closes the popover. The hint at the
-bottom left shows the keys that work right now. The Jump / Resume and
-Branch buttons, with their keys (↩ and ⌘↩), show while the list has focus
-and hide while you type in the search field. ⌘R (or the ⟳ button next to
+bottom left shows the keys that work right now. The buttons at the
+bottom, with their keys (→ for View, ↩ for Jump / Resume, ⌘↩ for Branch),
+show while the list has focus and hide while you type in the search field. ⌘R (or the ⟳ button next to
 the search field) refreshes the whole list: the running sessions and the
 past conversations. The popover is as tall as
 you drag its bottom edge, and stays that way. ⌘= and ⌘− make the text
@@ -110,10 +111,10 @@ shortcut brings the window to the front instead, with the same focus.
 
 Alongside the live status view, Shiibar CC keeps a searchable index of your
 Claude Code conversation history across every folder; that index is what
-fills the History section. Press the **>** button at the right end of a row
-(or select the row and press →) to **read** the conversation from the
+fills the History section. Select a row and press the **View** button at
+the bottom (or →) to **read** the conversation from the
 bottom (latest) up: in the popover, and in a narrow window, it slides in as
-a page of its own; in a wide window there is no **>** button, and the
+a page of its own; in a wide window there is no **View** button, and the
 selected row's conversation shows next to the list. Search is incremental; each word of
 two or more characters matches as a case-insensitive substring ("auth" finds
 "authentication"), multiple words are AND-ed, and the matches are

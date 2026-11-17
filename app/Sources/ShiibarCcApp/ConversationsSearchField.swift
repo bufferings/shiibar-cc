@@ -22,6 +22,10 @@ struct ConversationsSearchField: NSViewRepresentable {
     /// Changes when a focus request fires; the field takes first responder
     /// on change if its window is on screen.
     let focusToken: Int
+    /// false while the list page is under the one-column detail page: Tab
+    /// and Shift-Tab skip the field, which stays mounted there (§4.5 "key
+    /// operations"). Focus requests and clicks are not affected.
+    var isKeyViewLoopMember = true
     /// The text size's scale (§4.5 "text size"): the field's height, text,
     /// magnifier and clear button follow it.
     var scale: SurfaceScale = .base
@@ -54,6 +58,7 @@ struct ConversationsSearchField: NSViewRepresentable {
         context.coordinator.textBinding = $text
         view.scale = scale
         field.isEnabled = isEnabled
+        field.isKeyViewLoopMember = isKeyViewLoopMember
         // Never clobber an active composition from the binding side.
         if field.stringValue != text, !context.coordinator.isComposing(field) {
             field.stringValue = text
@@ -112,8 +117,21 @@ struct ConversationsSearchField: NSViewRepresentable {
 
 /// The search field's text field: borderless, no ground, no focus ring. A
 /// class of its own so the key monitor can tell "the search field has
-/// focus" (it, or its field editor, is the first responder — §4.5).
-final class SearchTextField: NSTextField {}
+/// focus" (it, or its field editor, is the first responder — §4.5), and so
+/// the field can leave the key view loop while it is not shown.
+final class SearchTextField: NSTextField {
+    /// false: the window's Tab / Shift-Tab traversal skips the field. AppKit
+    /// takes a view that other views cover (not hidden) as a key view, both
+    /// for `selectNextKeyView` / `selectPreviousKeyView` and for a Tab typed
+    /// in the conversation pane's web view (checked on macOS 27.2.1,
+    /// 2026-11-18). The field still accepts first responder for a focus
+    /// request or a click.
+    var isKeyViewLoopMember = true
+
+    override var canBecomeKeyView: Bool {
+        isKeyViewLoopMember && super.canBecomeKeyView
+    }
+}
 
 /// The drawn search field (window-design.html `.search`): at text size 13,
 /// 24pt tall, the 13pt magnifier, the 12pt text and the 12pt clear button;

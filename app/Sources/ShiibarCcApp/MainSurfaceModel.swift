@@ -387,12 +387,15 @@ final class MainSurfaceModel: ObservableObject {
     // MARK: - User input
 
     func rowClicked(_ key: UnifiedRowKey) { send(.rowClicked(key)) }
-    /// The row's `>` button (one column — §4.5).
-    func rowOpenClicked(_ key: UnifiedRowKey) { send(.rowOpenClicked(key)) }
     func starClicked(sessionID: String) { send(.starToggled(sessionID: sessionID)) }
     func backClicked() { send(.back) }
     func previousConversationClicked() { send(.previousConversation) }
     func nextConversationClicked() { send(.nextConversation) }
+
+    /// The bottom panel's View button (one-column list page): the same as →
+    /// with list focus — the selected row's detail page opens (§4.5 "opening
+    /// the detail page", §4.6 "bottom panel").
+    func viewClicked() { send(.openDetail) }
 
     /// A bottom-panel button (acts on the selected row — §4.5 "action
     /// buttons").
@@ -476,18 +479,20 @@ final class MainSurfaceModel: ObservableObject {
     /// status and the search field's focus at that moment decide what a
     /// click on the selected row does (§4.5 "row click"); the system click
     /// count and the press time tell a double-click apart and time the
-    /// deferred deselect (§4.5 "row double-click"). Presses on a surface
-    /// that is not on screen are ignored.
+    /// deferred deselect, and ⌘ at the second press makes a double-click run
+    /// Branch (§4.5 "row double-click"). Presses on a surface that is not on
+    /// screen are ignored.
     func pointerDown(
         surface: MainSurface,
         surfaceWasKey: Bool,
         searchFieldFocused: Bool,
         clickCount: Int = 1,
-        pressedAt: TimeInterval? = nil
+        pressedAt: TimeInterval? = nil,
+        commandKey: Bool = false
     ) {
         guard visibleSurface == surface else { return }
         send(.pointerDown(surfaceKey: surfaceWasKey, searchFieldFocused: searchFieldFocused,
-                          clickCount: clickCount, pressedAt: pressedAt))
+                          clickCount: clickCount, pressedAt: pressedAt, commandKey: commandKey))
     }
 
     /// Focus requests issued by the AppKit layer when a surface opens

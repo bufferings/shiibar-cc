@@ -91,11 +91,11 @@ final class ListColumnWidthStoreTests: XCTestCase {
         model.windowWidthChanged(1400)
         store.beginDrag(windowWidth: 1400, textSize: model.textSize.size)
         store.updateDrag(delta: 60, windowWidth: 1400)
-        // A 900pt window is two columns at 13 (threshold 880) and one at 14
-        // (threshold 912): ⌘= ends the drag.
-        model.windowWidthChanged(900)
+        // An 800pt window is two columns at 13 (threshold 780) and one at 14
+        // (threshold 812): ⌘= ends the drag.
+        model.windowWidthChanged(800)
         model.textSize.increase()
-        XCTAssertEqual(ColumnMode.forWindowWidth(900, textSize: model.textSize.size), .one)
+        XCTAssertEqual(ColumnMode.forWindowWidth(800, textSize: model.textSize.size), .one)
         XCTAssertNil(store.drag, "the drag ends")
         store.endDrag()
         XCTAssertNil(stored, "nothing is remembered")
@@ -122,7 +122,7 @@ final class ListColumnWidthStoreTests: XCTestCase {
         XCTAssertEqual(store.shownWidth(windowWidth: 1400, textSize: .default), 820)
         // The window narrows with no pointer move: the right column keeps
         // its minimum.
-        XCTAssertEqual(store.shownWidth(windowWidth: 1000, textSize: .default), 540)
+        XCTAssertEqual(store.shownWidth(windowWidth: 1000, textSize: .default), 640)
     }
 
     // MARK: - Double click

@@ -2,8 +2,8 @@
 // (DESIGN.md §4.5 "the list has two sections" / "Running rows" / "action
 // buttons", §4.6 "History section" / "stars" / "search scope", §8.49).
 // Everything a row view draws is precomputed here: three text lines, the
-// leading slot (status symbol or star) and the unreviewed emphasis. Each row
-// also carries the two action buttons the bottom panel shows while it is
+// symbol-and-time column (status symbol or star with the unreviewed badge,
+// and the elapsed time). Each row also carries the two action buttons the bottom panel shows while it is
 // selected (enabled state, tooltip and the CLI call they make); the row card
 // itself shows none of them (§4.5 "action buttons"). The view layer only
 // lays these out.
@@ -93,17 +93,19 @@ public struct RowButton: Equatable, Sendable {
     }
 }
 
-/// The row's leading slot (§4.5/§4.6): the status symbol on Running rows,
-/// the star on History rows.
-public enum RowLeadingSlot: Equatable, Sendable {
+/// The symbol at the top of the row's symbol-and-time column (§4.5 "the
+/// list has two sections", §4.6 "stars"): the status symbol on Running rows,
+/// the star on History rows. The star is smaller than the status symbol and
+/// centered in the same box (§9).
+public enum RowColumnSymbol: Equatable, Sendable {
     /// Running row: status symbol, plus the red badge when unreviewed.
     case status(RowSymbolKind, unreviewed: Bool)
     /// History row: a filled yellow star when starred (always visible); when
     /// not starred, an outline star shown only while the row is hovered.
-    /// Clicking the slot toggles the star and never selects the row (§4.6).
+    /// Clicking the star toggles it and never selects the row (§4.6).
     case star(isStarred: Bool)
 
-    /// Tooltip of the star slot (§4.6: `Star` / `Unstar`), nil for status.
+    /// Tooltip of the star (§4.6: `Star` / `Unstar`), nil for status.
     public var tooltip: String? {
         switch self {
         case .status: return nil
@@ -120,85 +122,86 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
     public let sessionID: String
     /// Raw cwd (nil or empty when unknown).
     public let cwd: String?
-    /// Line 1.
-    public let line1: String
-    /// §4.5: unreviewed = line 1 in bold (plus the badge in `leading`).
-    public let isLine1Bold: Bool
+    /// The card's bold middle line (§4.5): the conversation title, or the
+    /// `message` on a waiting Running row. Unreviewed is shown only by the
+    /// badge in `symbol`, never by this line's weight.
+    public let title: String
     /// The two-component folder label (§4.5 "display label").
     public let label: String
     public let elapsedSeconds: Int64
-    /// Line 2: `label · elapsed`, plus ` · running` on a live History row.
-    public let line2: String
-    /// Whether line 2 ends with the faint `running` mark (§4.6) — lets the
-    /// view style that trailing word; it is already part of `line2`.
+    /// The elapsed time at the bottom of the symbol-and-time column (§4.5),
+    /// never truncated.
+    public let elapsedText: String
+    /// The card's top line: the label, plus ` · running` on a live History
+    /// row (§4.5 / §4.6; the elapsed time is in the symbol-and-time column
+    /// instead).
+    public let labelLine: String
+    /// Whether `labelLine` ends with the faint `running` mark (§4.6) — lets
+    /// the view style that trailing word; it is already part of `labelLine`.
     public let showsRunningMark: Bool
-    /// Line 3 without the `❯` marker, newlines already replaced by spaces.
-    /// nil = draw an empty line (no marker) so row heights stay equal.
+    /// The card's bottom line: the last prompt, newlines already replaced by
+    /// spaces. nil = draw an empty line so row heights stay equal.
     public let lastPrompt: String?
-    public let leading: RowLeadingSlot
+    public let symbol: RowColumnSymbol
     /// The bottom panel's primary button while this row is selected: Jump
     /// (Running, or disabled Jump for a live History row) or Resume.
     public let primaryButton: RowButton
     /// The bottom panel's Branch button while this row is selected.
     public let branchButton: RowButton
-    /// Conversation pane header line 1 (§4.6): the conversation title. For a
-    /// row with an empty session_id it is the row's line 1 (§4.5).
+    /// The conversation pane header's title (§4.6, below the label line):
+    /// the conversation title. For a row with an empty session_id it is the
+    /// row's `title` (§4.5).
     public let headerTitle: String
-    /// Conversation pane header line 2 (§4.6): the full home-relative path
-    /// plus `· <elapsed> ago`.
-    public let headerSubtitle: String
-
-    /// §4.5/§4.6: the marker drawn before line 3 when `lastPrompt` is set.
-    public static let promptMarker = "\u{276F}"
-
-    /// §4.5 "the row's `>` button": its tooltip (one column only).
-    public static let openTooltip = "Open"
+    /// The conversation pane header's top line (§4.6, above the title): the
+    /// card's folder label (`label`, without the `running` mark) plus
+    /// `· <elapsed> ago`, so the header shows the card's text in the card's
+    /// order.
+    public let headerLabelAndElapsed: String
 
     public init(
         id: UnifiedRowKey,
         section: UnifiedListSection,
         sessionID: String,
         cwd: String?,
-        line1: String,
-        isLine1Bold: Bool,
+        title: String,
         label: String,
         elapsedSeconds: Int64,
-        line2: String,
+        labelLine: String,
         showsRunningMark: Bool,
         lastPrompt: String?,
-        leading: RowLeadingSlot,
+        symbol: RowColumnSymbol,
         primaryButton: RowButton,
         branchButton: RowButton,
         headerTitle: String,
-        headerSubtitle: String
+        headerLabelAndElapsed: String
     ) {
         self.id = id
         self.section = section
         self.sessionID = sessionID
         self.cwd = cwd
-        self.line1 = line1
-        self.isLine1Bold = isLine1Bold
+        self.title = title
         self.label = label
         self.elapsedSeconds = elapsedSeconds
-        self.line2 = line2
+        self.elapsedText = ElapsedTime.format(seconds: elapsedSeconds)
+        self.labelLine = labelLine
         self.showsRunningMark = showsRunningMark
         self.lastPrompt = lastPrompt
-        self.leading = leading
+        self.symbol = symbol
         self.primaryButton = primaryButton
         self.branchButton = branchButton
         self.headerTitle = headerTitle
-        self.headerSubtitle = headerSubtitle
+        self.headerLabelAndElapsed = headerLabelAndElapsed
     }
 
     /// The same row with both buttons disabled (used while a selected
     /// Running row that just ended awaits the History refetch — §4.5).
     func withButtonsDisabled() -> UnifiedListRow {
         UnifiedListRow(
-            id: id, section: section, sessionID: sessionID, cwd: cwd, line1: line1,
-            isLine1Bold: isLine1Bold, label: label, elapsedSeconds: elapsedSeconds, line2: line2,
-            showsRunningMark: showsRunningMark, lastPrompt: lastPrompt, leading: leading,
+            id: id, section: section, sessionID: sessionID, cwd: cwd, title: title,
+            label: label, elapsedSeconds: elapsedSeconds, labelLine: labelLine,
+            showsRunningMark: showsRunningMark, lastPrompt: lastPrompt, symbol: symbol,
             primaryButton: primaryButton.disabled(), branchButton: branchButton.disabled(),
-            headerTitle: headerTitle, headerSubtitle: headerSubtitle
+            headerTitle: headerTitle, headerLabelAndElapsed: headerLabelAndElapsed
         )
     }
 }
@@ -274,15 +277,15 @@ public enum UnifiedListBuilder {
         String(text.map { $0.isNewline ? " " : $0 })
     }
 
-    /// Line 1 of a Running row (§4.5): `message` while waiting; otherwise
+    /// The card title of a Running row (§4.5): `message` while waiting; otherwise
     /// the conversation title (from the search result with the same
     /// session_id); while no title is available, `task`; failing that, the
     /// label (§3.6).
     ///
     /// Assumption (spec silent): a waiting row with no `message` falls back
     /// through the same title -> task -> label chain. `task` used as a
-    /// fallback is made single-line like line 3.
-    public static func runningLine1(agent: Agent, title: String?, label: String) -> String {
+    /// fallback is made single-line like the last prompt.
+    public static func runningCardTitle(agent: Agent, title: String?, label: String) -> String {
         if agent.status == .waiting, let message = agent.message, !message.isEmpty {
             return singleLine(message)
         }
@@ -290,8 +293,8 @@ public enum UnifiedListBuilder {
     }
 
     /// The conversation title of a Running row without the waiting override:
-    /// title -> task -> label. Used for the pane header (§4.6: header line 1
-    /// is the title).
+    /// title -> task -> label. Used for the pane header (§4.6: the header's
+    /// second line is the title).
     static func runningTitle(agent: Agent, title: String?, label: String) -> String {
         if let title, !title.isEmpty {
             return singleLine(title)
@@ -302,22 +305,25 @@ public enum UnifiedListBuilder {
         return label
     }
 
-    /// `label · elapsed` (§4.5 line 2).
-    static func line2(label: String, elapsedSeconds: Int64, runningMark: Bool) -> String {
-        var text = "\(label) \u{00B7} \(ElapsedTime.format(seconds: elapsedSeconds))"
+    /// The label line (§4.5 / §4.6): the label, followed by ` · running` on a
+    /// live History row. The elapsed time is not part of it (it is shown in
+    /// the symbol-and-time column).
+    static func labelLine(label: String, runningMark: Bool) -> String {
+        var text = label
         if runningMark {
             text += " \u{00B7} running"
         }
         return text
     }
 
-    /// Pane header line 2 (§4.6; window-design.html shows
-    /// `~/work/demo/menubar-app · 3h ago`). Assumption: with no cwd only the
-    /// elapsed part is shown.
-    static func headerSubtitle(cwd: String?, home: String?, elapsedSeconds: Int64) -> String {
+    /// The pane header's top line (§4.6): the card's folder label, then the
+    /// elapsed time (`demo/menubar-app · 3h ago`). The `running` mark is not
+    /// part of it. Assumption: with an empty label (no cwd) only the elapsed
+    /// part is shown.
+    static func headerLabelAndElapsed(label: String, elapsedSeconds: Int64) -> String {
         let elapsed = "\(ElapsedTime.format(seconds: elapsedSeconds)) ago"
-        guard let cwd, !cwd.isEmpty else { return elapsed }
-        return "\(HomeRelativePath.format(cwd, home: home)) \u{00B7} \(elapsed)"
+        guard !label.isEmpty else { return elapsed }
+        return "\(label) \u{00B7} \(elapsed)"
     }
 
     /// Build one Running row (§4.5). `title` is the matched search result's
@@ -327,7 +333,7 @@ public enum UnifiedListBuilder {
         guard let symbol = RowSymbol.kind(for: agent.status) else { return nil }
         let label = CwdLabel.format(cwd: agent.cwd, home: home)
         let elapsed = max(0, now - agent.since)
-        let line1 = runningLine1(agent: agent, title: title, label: label)
+        let cardTitle = runningCardTitle(agent: agent, title: title, label: label)
         let prompt = agent.task.flatMap { $0.isEmpty ? nil : singleLine($0) }
         let primary = ConversationAction.derive(forRunningAgent: agent)
             .button(sessionID: agent.sessionId, cwd: agent.cwd)
@@ -337,18 +343,17 @@ public enum UnifiedListBuilder {
             section: .running,
             sessionID: agent.sessionId,
             cwd: agent.cwd,
-            line1: line1,
-            isLine1Bold: agent.unreviewed,
+            title: cardTitle,
             label: label,
             elapsedSeconds: elapsed,
-            line2: line2(label: label, elapsedSeconds: elapsed, runningMark: false),
+            labelLine: labelLine(label: label, runningMark: false),
             showsRunningMark: false,
             lastPrompt: prompt,
-            leading: .status(symbol, unreviewed: agent.unreviewed),
+            symbol: .status(symbol, unreviewed: agent.unreviewed),
             primaryButton: primary,
             branchButton: branch,
-            headerTitle: agent.sessionId.isEmpty ? line1 : runningTitle(agent: agent, title: title, label: label),
-            headerSubtitle: headerSubtitle(cwd: agent.cwd, home: home, elapsedSeconds: elapsed)
+            headerTitle: agent.sessionId.isEmpty ? cardTitle : runningTitle(agent: agent, title: title, label: label),
+            headerLabelAndElapsed: headerLabelAndElapsed(label: label, elapsedSeconds: elapsed)
         )
     }
 
@@ -356,7 +361,7 @@ public enum UnifiedListBuilder {
     /// Running row (those are excluded before this), so a `live` summary is
     /// a conversation running in a terminal this app cannot drive.
     ///
-    /// Assumption (spec silent): with no title and no cwd, line 1 is empty.
+    /// Assumption (spec silent): with no title and no cwd, the title is empty.
     public static func historyRow(
         summary: ConversationSummary,
         isStarred: Bool,
@@ -383,18 +388,17 @@ public enum UnifiedListBuilder {
             section: .history,
             sessionID: summary.sessionID,
             cwd: summary.cwd,
-            line1: title,
-            isLine1Bold: false,
+            title: title,
             label: label,
             elapsedSeconds: elapsed,
-            line2: line2(label: label, elapsedSeconds: elapsed, runningMark: summary.live),
+            labelLine: labelLine(label: label, runningMark: summary.live),
             showsRunningMark: summary.live,
             lastPrompt: prompt,
-            leading: .star(isStarred: isStarred),
+            symbol: .star(isStarred: isStarred),
             primaryButton: primary,
             branchButton: branch,
             headerTitle: title,
-            headerSubtitle: headerSubtitle(cwd: summary.cwd, home: home, elapsedSeconds: elapsed)
+            headerLabelAndElapsed: headerLabelAndElapsed(label: label, elapsedSeconds: elapsed)
         )
     }
 

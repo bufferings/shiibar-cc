@@ -283,8 +283,9 @@ public enum UnifiedListKeys {
 
 /// One key hint in the footer or the bottom panel (§4.5 "key hints", §4.6
 /// "bottom panel"): a key chip followed by an action name. The hints show
-/// the movement keys only; the action keys are shown inside the bottom
-/// panel's buttons (`RowButtonKind.shortcut`) while the list has focus.
+/// the movement keys only; the action keys and → are shown inside the
+/// bottom panel's buttons (`RowButtonKind.shortcut`,
+/// `BottomPanelModel.viewShortcut`) while the list has focus.
 public struct KeyHint: Equatable, Sendable {
     public let key: String
     public let label: String
@@ -297,7 +298,6 @@ public struct KeyHint: Equatable, Sendable {
     /// Enter in the search field: focus moves to the list.
     public static let list = KeyHint(key: "\u{21A9}", label: "List")
     public static let move = KeyHint(key: "\u{2191}\u{2193}", label: "Move")
-    public static let open = KeyHint(key: "\u{2192}", label: "Open")
     public static let prevNext = KeyHint(key: "\u{2325}\u{2191}\u{2193}", label: "Prev / Next")
     public static let back = KeyHint(key: "\u{2190}", label: "Back")
 }
@@ -307,15 +307,10 @@ public enum KeyHints {
     /// one-column list page's bottom panel, and the left column's footer in
     /// two columns:
     /// - the search field has focus: `↩ List` only (one and two columns);
-    /// - the list has focus: `↑↓ Move`, then — one column only, and only
-    ///   while a row is selected — `→ Open`.
-    public static func footer(columns: ColumnMode, hasSelection: Bool, listFocused: Bool) -> [KeyHint] {
-        guard listFocused else { return [.list] }
-        var hints: [KeyHint] = [.move]
-        if columns == .one && hasSelection {
-            hints.append(.open)
-        }
-        return hints
+    /// - the list has focus: `↑↓ Move` only (one and two columns). → is
+    ///   shown inside the bottom panel's View button instead.
+    public static func footer(listFocused: Bool) -> [KeyHint] {
+        listFocused ? [.move] : [.list]
     }
 
     /// The conversation pane's bottom panel, left side (§4.6): `⌥↑↓ Prev /

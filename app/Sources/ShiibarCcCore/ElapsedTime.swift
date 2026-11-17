@@ -1,5 +1,6 @@
-// Elapsed-time formatting for a list row's second line ("label · elapsed",
-// window-design.html). DESIGN.md does not pin an exact format (only the
+// Elapsed-time formatting for the bottom of a list row's symbol-and-time
+// column (DESIGN.md §4.5) and the pane header's `<elapsed> ago`
+// (window-design.html). DESIGN.md does not pin an exact format (only the
 // mockup's example values like "2m" / "1h"); this picks the coarsest unit
 // that keeps at least one digit of precision, which matches every example
 // in the mockup.

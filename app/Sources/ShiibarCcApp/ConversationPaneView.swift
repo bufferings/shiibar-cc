@@ -57,17 +57,19 @@ struct ConversationPaneView: View {
                 .foregroundStyle(SurfaceColors.secondary)
                 .help(ConversationPaneModel.backTooltip)
             }
+            // §4.6: the label line above the title, in the order of the list
+            // card's label and title (§4.5).
             VStack(alignment: .leading, spacing: scale.paneTitleSpacing) {
+                Text(pane.labelAndElapsed)
+                    .font(.system(size: scale.paneLabelFont))
+                    .foregroundStyle(SurfaceColors.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Text(pane.title)
                     .font(.system(size: isDetailPage ? scale.paneTitleDetailFont : scale.paneTitleColumnFont,
                                   weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(pane.subtitle)
-                    .font(.system(size: scale.paneSubtitleFont))
-                    .foregroundStyle(SurfaceColors.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if pane.showsBackButton {
@@ -187,9 +189,10 @@ struct PanelStatusLinesView: View {
 }
 
 /// The bottom panel (window-design.html `.actions`): key hints on the left,
-/// Branch and the primary button on the right. One view for the one-column
-/// list page, the detail page and the two-column right column, so the
-/// buttons sit at the same position and size everywhere (§4.6). While the
+/// the buttons on the right — View (one-column list page only), Branch and
+/// the primary button, in `panel.slots` order. One view for the one-column
+/// list page, the detail page and the two-column right column, so Branch and
+/// the primary button sit at the same position and size everywhere (§4.6). While the
 /// buttons are not shown (no selection, or the search field has focus) they
 /// are replaced by invisible placeholders of the same size: the panel height
 /// and the hints' width do not change. When the width
@@ -212,19 +215,11 @@ struct BottomPanelView: View {
                 }
                 Group {
                     if let buttons = panel.buttons {
-                        PanelBranchButton(button: buttons.branch) {
-                            model.buttonClicked(buttons.branch)
-                        }
-                        PanelPrimaryButton(button: buttons.primary) {
-                            model.buttonClicked(buttons.primary)
-                        }
+                        slotButtons(buttons)
                     } else {
-                        Group {
-                            PanelBranchButton(button: Self.placeholderBranch) {}
-                            PanelPrimaryButton(button: Self.placeholderPrimary) {}
-                        }
-                        .hidden()
-                        .accessibilityHidden(true)
+                        slotButtons(Self.placeholders)
+                            .hidden()
+                            .accessibilityHidden(true)
                     }
                 }
                 .fixedSize()
@@ -236,8 +231,31 @@ struct BottomPanelView: View {
         }
     }
 
-    private static let placeholderBranch = RowButton(kind: .branch, invocation: nil, tooltip: "")
-    private static let placeholderPrimary = RowButton(kind: .resume, invocation: nil, tooltip: "")
+    @ViewBuilder
+    private func slotButtons(_ buttons: BottomPanelButtons) -> some View {
+        ForEach(panel.slots, id: \.self) { slot in
+            switch slot {
+            case .view:
+                PanelSecondaryButton(
+                    title: BottomPanelModel.viewTitle, shortcut: BottomPanelModel.viewShortcut,
+                    isEnabled: true, tooltip: nil
+                ) { model.viewClicked() }
+            case .branch:
+                PanelSecondaryButton(
+                    title: buttons.branch.kind.title, shortcut: buttons.branch.kind.shortcut,
+                    isEnabled: buttons.branch.isEnabled, tooltip: buttons.branch.tooltip
+                ) { model.buttonClicked(buttons.branch) }
+            case .primary:
+                PanelPrimaryButton(button: buttons.primary) {
+                    model.buttonClicked(buttons.primary)
+                }
+            }
+        }
+    }
+
+    private static let placeholders = BottomPanelButtons(
+        primary: RowButton(kind: .resume, invocation: nil, tooltip: ""),
+        branch: RowButton(kind: .branch, invocation: nil, tooltip: ""))
 }
 
 /// The detail header's previous / next conversation control (window-design
@@ -315,12 +333,22 @@ private struct FindNavigationControl: NSViewRepresentable {
 /// than the title and shown also while disabled (§4.6 "bottom panel";
 /// window-design.html `.btn .kc`).
 private struct PanelButtonLabel: View {
-    let kind: RowButtonKind
+    let title: String
+    let shortcut: String
+
+    init(title: String, shortcut: String) {
+        self.title = title
+        self.shortcut = shortcut
+    }
+
+    init(kind: RowButtonKind) {
+        self.init(title: kind.title, shortcut: kind.shortcut)
+    }
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(kind.title)
-            Text(kind.shortcut)
+            Text(title)
+            Text(shortcut)
                 .fontWeight(.regular)
                 .opacity(0.6)
         }
@@ -363,27 +391,36 @@ private struct PanelPrimaryButton: View {
     private static let horizontalPadding: CGFloat = 14
 }
 
-/// Branch (`.btn.sec`: outline only, content-sized, regular weight).
-private struct PanelBranchButton: View {
-    let button: RowButton
+/// A secondary panel button — View and Branch (`.btn.sec`: outline only,
+/// content-sized, regular weight).
+private struct PanelSecondaryButton: View {
+    let title: String
+    let shortcut: String
+    let isEnabled: Bool
+    /// nil = no tooltip (View: §4.6 names none).
+    let tooltip: String?
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.surfaceScale) private var scale
 
     var body: some View {
-        Button(action: action) {
-            PanelButtonLabel(kind: button.kind)
+        let button = Button(action: action) {
+            PanelButtonLabel(title: title, shortcut: shortcut)
                 .font(.system(size: scale.panelButtonFont))
                 .padding(.horizontal, 14)
                 .padding(.vertical, scale.branchButtonVertical)
-                .foregroundStyle(button.isEnabled ? Color.primary : Color.gray.opacity(0.75))
-                .background(RoundedRectangle(cornerRadius: 6).fill(hovering && button.isEnabled ? Color.gray.opacity(0.12) : Color.clear))
+                .foregroundStyle(isEnabled ? Color.primary : Color.gray.opacity(0.75))
+                .background(RoundedRectangle(cornerRadius: 6).fill(hovering && isEnabled ? Color.gray.opacity(0.12) : Color.clear))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(SurfaceColors.line, lineWidth: 1))
         }
         .buttonStyle(PressDimButtonStyle(hovering: false))
         .onHover { hovering = $0 }
-        .disabled(!button.isEnabled)
-        .help(button.tooltip)
+        .disabled(!isEnabled)
+        if let tooltip {
+            button.help(tooltip)
+        } else {
+            button
+        }
     }
 }
 

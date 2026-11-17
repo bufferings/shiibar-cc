@@ -29,7 +29,7 @@ final class MainSurfaceTests: XCTestCase {
     }
 
     func testColumnModeThreshold() {
-        let cases: [(Double, ColumnMode)] = [(360, .one), (879.5, .one), (880, .two), (1400, .two)]
+        let cases: [(Double, ColumnMode)] = [(360, .one), (779.5, .one), (780, .two), (1400, .two)]
         for (width, mode) in cases {
             XCTAssertEqual(ColumnMode.forWindowWidth(width, textSize: .default), mode, "\(width)")
         }

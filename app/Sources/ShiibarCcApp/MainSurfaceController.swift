@@ -518,7 +518,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             surfaceWasKey: wasKey,
             searchFieldFocused: Self.isSearchFieldFocused(in: eventWindow),
             clickCount: event.clickCount,
-            pressedAt: event.timestamp)
+            pressedAt: event.timestamp,
+            commandKey: event.modifierFlags.contains(.command))
     }
 
     private func surfaceWindow(_ surface: MainSurface) -> NSWindow? {

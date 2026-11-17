@@ -1,4 +1,5 @@
-// Running row leading status symbol (window-design.html "row parts",
+// Running row status symbol, at the top of the row's symbol-and-time column
+// (window-design.html "row parts",
 // DESIGN.md §3.1/§4.5): dim static ✻ = idle / glyph-cycle spinner at full
 // opacity = working (the Claude Code TUI's own · ✢ ✳ ✶ ✻ ✽ cycle — the
 // "blinking Claude" counterpart of the still, dim idle ✻) / outlined speech
