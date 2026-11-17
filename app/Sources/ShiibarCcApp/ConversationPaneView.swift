@@ -189,9 +189,10 @@ struct PanelStatusLinesView: View {
 /// The bottom panel (window-design.html `.actions`): key hints on the left,
 /// Branch and the primary button on the right. One view for the one-column
 /// list page, the detail page and the two-column right column, so the
-/// buttons sit at the same position and size everywhere (§4.6). Without a
-/// selection the buttons are replaced by invisible placeholders of the same
-/// size: the panel height and the hints' width do not change. When the width
+/// buttons sit at the same position and size everywhere (§4.6). While the
+/// buttons are not shown (no selection, or the search field has focus) they
+/// are replaced by invisible placeholders of the same size: the panel height
+/// and the hints' width do not change. When the width
 /// runs short the buttons keep their size and the hints take what is left
 /// (§4.5 "text size").
 struct BottomPanelView: View {
@@ -211,10 +212,10 @@ struct BottomPanelView: View {
                 }
                 Group {
                     if let buttons = panel.buttons {
-                        PanelBranchButton(button: buttons.branch, showsShortcut: panel.showsShortcuts) {
+                        PanelBranchButton(button: buttons.branch) {
                             model.buttonClicked(buttons.branch)
                         }
-                        PanelPrimaryButton(button: buttons.primary, showsShortcut: panel.showsShortcuts) {
+                        PanelPrimaryButton(button: buttons.primary) {
                             model.buttonClicked(buttons.primary)
                         }
                     } else {
@@ -312,20 +313,16 @@ private struct FindNavigationControl: NSViewRepresentable {
 
 /// A panel button's label: the title, then its shortcut glyph, dimmer
 /// than the title and shown also while disabled (§4.6 "bottom panel";
-/// window-design.html `.btn .kc`). While the search field has focus the
-/// glyph is not drawn but keeps its space, so the button's width and
-/// position do not change.
+/// window-design.html `.btn .kc`).
 private struct PanelButtonLabel: View {
     let kind: RowButtonKind
-    var showsShortcut = true
 
     var body: some View {
         HStack(spacing: 5) {
             Text(kind.title)
             Text(kind.shortcut)
                 .fontWeight(.regular)
-                .opacity(showsShortcut ? 0.6 : 0)
-                .accessibilityHidden(!showsShortcut)
+                .opacity(0.6)
         }
     }
 }
@@ -335,7 +332,6 @@ private struct PanelButtonLabel: View {
 /// §4.6 / §8.48). Disabled = the standard gray container (§8.42).
 private struct PanelPrimaryButton: View {
     let button: RowButton
-    var showsShortcut = true
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.surfaceScale) private var scale
@@ -345,7 +341,7 @@ private struct PanelPrimaryButton: View {
             ZStack {
                 // The wider label reserves the width (Resume and Jump share it).
                 PanelButtonLabel(kind: .resume).hidden()
-                PanelButtonLabel(kind: button.kind, showsShortcut: showsShortcut)
+                PanelButtonLabel(kind: button.kind)
             }
             .font(.system(size: scale.panelButtonFont, weight: .semibold))
             .frame(minWidth: scale.primaryButtonMinWidth - 2 * Self.horizontalPadding)
@@ -370,14 +366,13 @@ private struct PanelPrimaryButton: View {
 /// Branch (`.btn.sec`: outline only, content-sized, regular weight).
 private struct PanelBranchButton: View {
     let button: RowButton
-    var showsShortcut = true
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.surfaceScale) private var scale
 
     var body: some View {
         Button(action: action) {
-            PanelButtonLabel(kind: button.kind, showsShortcut: showsShortcut)
+            PanelButtonLabel(kind: button.kind)
                 .font(.system(size: scale.panelButtonFont))
                 .padding(.horizontal, 14)
                 .padding(.vertical, scale.branchButtonVertical)

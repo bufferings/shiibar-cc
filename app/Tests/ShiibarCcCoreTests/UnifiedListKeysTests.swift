@@ -35,6 +35,7 @@ final class UnifiedListKeysTests: XCTestCase {
         KeyCase(name: "⌘G", key: .other(charactersIgnoringModifiers: "g"), modifiers: [.command]),
         KeyCase(name: "⇧⌘G", key: .other(charactersIgnoringModifiers: "G"), modifiers: [.command, .shift]),
         KeyCase(name: "⌘F", key: .other(charactersIgnoringModifiers: "f"), modifiers: [.command]),
+        KeyCase(name: "⌘R", key: .other(charactersIgnoringModifiers: "r"), modifiers: [.command]),
         KeyCase(name: "Esc", key: .escape, modifiers: []),
         KeyCase(name: "⌘+", key: .other(charactersIgnoringModifiers: "+"), modifiers: [.command, .shift]),
         KeyCase(name: "⌘=", key: .other(charactersIgnoringModifiers: "="), modifiers: [.command]),
@@ -93,6 +94,8 @@ final class UnifiedListKeysTests: XCTestCase {
         case "⌘G": return c.conversationPaneVisible ? .perform(.nextMatch) : .ignore
         case "⇧⌘G": return c.conversationPaneVisible ? .perform(.previousMatch) : .ignore
         case "⌘F": return field ? .ignore : .perform(.focusSearch)
+        // Refresh with either focus and on every page (§4.6).
+        case "⌘R": return .perform(.refresh)
         case "Esc": return c.isPopover ? .perform(.closePopover) : .ignore
         case "⌘+", "⌘=": return .perform(.increaseTextSize)
         case "⌘−": return .perform(.decreaseTextSize)
@@ -191,6 +194,10 @@ final class UnifiedListKeysTests: XCTestCase {
             ("⌥⌘G", .other(charactersIgnoringModifiers: "g"), [.command, .option]),
             ("⌥⌘F", .other(charactersIgnoringModifiers: "f"), [.command, .option]),
             ("⇧⌘F", .other(charactersIgnoringModifiers: "F"), [.command, .shift]),
+            ("⇧⌘R", .other(charactersIgnoringModifiers: "R"), [.command, .shift]),
+            ("⌥⌘R", .other(charactersIgnoringModifiers: "r"), [.command, .option]),
+            ("⌃⌘R", .other(charactersIgnoringModifiers: "r"), [.command, .control]),
+            ("r", .other(charactersIgnoringModifiers: "r"), []),
         ]
         for searchFieldFocused in [false, true] {
             for (columns, page) in [(ColumnMode.one, ListPage.list), (.one, .detail), (.two, .list)] {
@@ -204,6 +211,46 @@ final class UnifiedListKeysTests: XCTestCase {
                                    "\(name), search field focused: \(searchFieldFocused), \(columns) \(page)")
                 }
             }
+        }
+    }
+
+    /// §4.5 "key operations": ⌘R runs Refresh while the search field has
+    /// focus, while the list has focus and on the one-column detail page,
+    /// in the popover and in the window; while an input method has
+    /// uncommitted text it goes to the input method, like every other key.
+    func testCommandRRefreshesInEveryFocusAndPage() {
+        struct Case {
+            let name: String
+            let columns: ColumnMode
+            let page: ListPage
+            let searchFieldFocused: Bool
+            let hasMarkedText: Bool
+            let isPopover: Bool
+            let expected: ListKeyDecision
+        }
+        let cases = [
+            Case(name: "popover list page, search field", columns: .one, page: .list, searchFieldFocused: true,
+                 hasMarkedText: false, isPopover: true, expected: .perform(.refresh)),
+            Case(name: "popover list page, list", columns: .one, page: .list, searchFieldFocused: false,
+                 hasMarkedText: false, isPopover: true, expected: .perform(.refresh)),
+            Case(name: "popover detail page", columns: .one, page: .detail, searchFieldFocused: false,
+                 hasMarkedText: false, isPopover: true, expected: .perform(.refresh)),
+            Case(name: "window two columns, search field", columns: .two, page: .list, searchFieldFocused: true,
+                 hasMarkedText: false, isPopover: false, expected: .perform(.refresh)),
+            Case(name: "window two columns, list", columns: .two, page: .list, searchFieldFocused: false,
+                 hasMarkedText: false, isPopover: false, expected: .perform(.refresh)),
+            Case(name: "window one-column detail page", columns: .one, page: .detail, searchFieldFocused: false,
+                 hasMarkedText: false, isPopover: false, expected: .perform(.refresh)),
+            Case(name: "marked text in the search field", columns: .one, page: .list, searchFieldFocused: true,
+                 hasMarkedText: true, isPopover: true, expected: .passThrough),
+        ]
+        for c in cases {
+            let context = ListKeyContext(
+                columns: c.columns, page: c.page, searchFieldFocused: c.searchFieldFocused, hasRows: true,
+                hasSelection: c.page == .detail, primaryEnabled: c.page == .detail, branchEnabled: c.page == .detail,
+                conversationPaneVisible: c.page == .detail, isPopover: c.isPopover, hasMarkedText: c.hasMarkedText)
+            XCTAssertEqual(UnifiedListKeys.decide(key: .other(charactersIgnoringModifiers: "r"), modifiers: [.command],
+                                                  context: context), c.expected, c.name)
         }
     }
 

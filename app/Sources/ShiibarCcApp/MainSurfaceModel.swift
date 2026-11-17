@@ -4,7 +4,8 @@
 // results, clock ticks, user input), executes the effects it returns, and
 // runs the subprocess pipelines around it: `conversations index --json` on
 // open, the debounced `conversations search`, `conversations show` for the
-// conversation pane, and the row verbs (focus / resume / resume --fork).
+// conversation pane, the row verbs (focus / resume / resume --fork), and
+// Refresh (the search plus `shiibar-cc reconcile` — §4.6).
 // Both surfaces' views render from this object only; decisions live in Core.
 //
 // Every outward action is injectable (subprocess launchers, the row-verb
@@ -113,12 +114,13 @@ final class MainSurfaceModel: ObservableObject {
         )
     }
 
-    // MARK: - ⟳ (§4.6 / §8.44)
+    // MARK: - Refresh: ⟳ and ⌘R (§4.6 / §8.44 / §8.54)
 
     @Published private(set) var isRefreshing = false
     /// Non-nil exactly while the ⟳ glyph spins (phase anchor, §8.44).
     @Published private(set) var refreshStartedAt: Date?
-    /// When the ⟳ run's result landed (nil while in flight).
+    /// When both the search and the reconcile of the Refresh had finished
+    /// (nil while either is in flight).
     @Published private(set) var refreshRunEndedAt: Date?
 
     // MARK: - Conversation pane
@@ -185,12 +187,14 @@ final class MainSurfaceModel: ObservableObject {
     // MARK: - Injected dependencies
 
     var launchers: ConversationsLaunchers
-    /// Run a row verb's `shiibar-cc` arguments; the completion receives the
-    /// exit code on the main actor.
+    /// Run `shiibar-cc` with these arguments (the row verbs, and `reconcile`
+    /// for Refresh); the completion receives the exit code on the main
+    /// actor.
     var runCommand: (_ arguments: [String], _ completion: @escaping @MainActor (Int32) -> Void) -> Void
     /// The `--terminal` value for Resume / Branch (§4.6, `ResumeTerminal`).
     var resumeTerminal: () -> String
-    /// Exit 3 from a row verb (§4.5: the shared TCC warning row).
+    /// Exit 3 from a row verb or from Refresh's reconcile (§4.5: the shared
+    /// TCC warning row).
     var onPermissionDenied: () -> Void = {}
     var helpersDirectory: URL?
     private let defaults: UserDefaults
@@ -231,6 +235,12 @@ final class MainSurfaceModel: ObservableObject {
     private var transientGeneration = 0
     private var delayedRefetchGeneration = 0
     private var refreshCompletionTask: Task<Void, Never>?
+    /// The current Refresh's search result (true = success); nil until it
+    /// lands.
+    private var refreshSearchSucceeded: Bool?
+    /// The current Refresh's reconcile exit code; nil until it lands.
+    private var refreshReconcileExitCode: Int32?
+    private var refreshGeneration = 0
     private var clockTimer: Timer?
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -311,16 +321,6 @@ final class MainSurfaceModel: ObservableObject {
 
     func setWarnings(_ warnings: [SurfaceWarning]) {
         if warnings != self.warnings { self.warnings = warnings }
-    }
-
-    /// Manual Rescan feedback (§4.5): shares the message line's transient
-    /// tier with the ⟳ transients (a newer one replaces an older one).
-    func showRescanFeedback(_ feedback: RescanFeedback?) {
-        guard let feedback else {
-            if case .rescan = transient { setTransient(nil) }
-            return
-        }
-        setTransient(.rescan(feedback), autoClear: feedback != .running)
     }
 
     // MARK: - Surfaces
@@ -508,18 +508,28 @@ final class MainSurfaceModel: ObservableObject {
         send(.openedByHotKey)
     }
 
-    // MARK: - ⟳
+    // MARK: - Refresh
 
-    /// ⟳ (§4.6): re-run the same query now. Presses during a run are
-    /// ignored (§8.38(8)).
-    func refreshClicked() {
+    /// Refresh (§4.6 / §8.54), from ⟳ and from ⌘R: re-run the search with
+    /// the same query (History) and run `shiibar-cc reconcile` (Running),
+    /// then wait for both. A Refresh while one is in flight does nothing.
+    func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
         refreshStartedAt = clock()
         refreshRunEndedAt = nil
+        refreshSearchSucceeded = nil
+        refreshReconcileExitCode = nil
+        refreshGeneration += 1
+        let generation = refreshGeneration
         setTransient(.refreshing, autoClear: false)
         debounceTask?.cancel()
         performSearch()
+        runCommand(CLIRunner.reconcileArguments) { [weak self] exitCode in
+            guard let self, generation == self.refreshGeneration, self.isRefreshing else { return }
+            self.refreshReconcileExitCode = exitCode
+            self.settleRefreshIfFinished()
+        }
     }
 
     // MARK: - Hit navigation (§4.6)
@@ -585,6 +595,8 @@ final class MainSurfaceModel: ObservableObject {
                 }
             case .closePopover:
                 onClosePopover()
+            case .refresh:
+                refresh()
             case .nextMatch:
                 navigateToNewerHit()
             case .previousMatch:
@@ -735,27 +747,40 @@ final class MainSurfaceModel: ObservableObject {
     }
 
     private func handleSearchResult(_ result: CLIRunResult, filtered: Bool) {
-        let finishedRefresh = isRefreshing
         guard result.exitCode == 0, let decoded = ConversationSearchResult.decode(result.stdout) else {
             // §4.6: keep the previous result, show the error.
             messageError = .searchFailed
             send(.historyFetchFailed)
-            if finishedRefresh { settleRefreshAtWholeTurn(successCount: nil) }
+            noteRefreshSearchFinished(succeeded: false)
             return
         }
         // §4.6: an error clears on the next successful fetch.
         messageError = nil
         send(.historyDelivered(decoded.conversations, isFiltered: filtered))
-        if finishedRefresh {
-            settleRefreshAtWholeTurn(successCount: list.searchResultCount)
-        }
+        noteRefreshSearchFinished(succeeded: true)
     }
 
-    /// §8.44: the ⟳ in-flight look lasts until the rotation reaches its next
-    /// whole-turn boundary at or after max(run end, one turn), then the
-    /// `Updated · N conversations` transient (success) takes over.
-    private func settleRefreshAtWholeTurn(successCount: Int?) {
-        guard let startedAt = refreshStartedAt else { return }
+    /// The first search result to land during a Refresh is the Refresh's
+    /// search (a newer search trigger replaces the Refresh's own run, and
+    /// its result stands for it).
+    private func noteRefreshSearchFinished(succeeded: Bool) {
+        guard isRefreshing, refreshRunEndedAt == nil, refreshSearchSucceeded == nil else { return }
+        refreshSearchSucceeded = succeeded
+        settleRefreshIfFinished()
+    }
+
+    /// §4.6 / §8.44: once both the search and the reconcile have finished,
+    /// the ⟳ in-flight look lasts until the rotation reaches its next
+    /// whole-turn boundary at or after max(both finished, one turn); then
+    /// the outcome of §4.6's table replaces `Refreshing…`.
+    private func settleRefreshIfFinished() {
+        guard let startedAt = refreshStartedAt, refreshRunEndedAt == nil,
+              let searchSucceeded = refreshSearchSucceeded,
+              let reconcileExitCode = refreshReconcileExitCode else { return }
+        let outcome = RefreshOutcome.decide(searchSucceeded: searchSucceeded, reconcileExitCode: reconcileExitCode)
+        if outcome.raisesAutomationWarning {
+            onPermissionDenied()
+        }
         let now = clock()
         refreshRunEndedAt = now
         let runEndElapsed = now.timeIntervalSince(startedAt)
@@ -771,8 +796,8 @@ final class MainSurfaceModel: ObservableObject {
             self.isRefreshing = false
             self.refreshStartedAt = nil
             self.refreshRunEndedAt = nil
-            if let count = successCount {
-                self.setTransient(.updated(count: count), autoClear: true)
+            if let transient = outcome.transient {
+                self.setTransient(transient, autoClear: true)
             } else if self.transient == .refreshing {
                 self.setTransient(nil)
             }

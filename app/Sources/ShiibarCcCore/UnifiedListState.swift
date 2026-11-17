@@ -180,6 +180,9 @@ public enum UnifiedListEffect: Equatable, Sendable {
     /// ignores the answer, so the timer itself never needs cancelling.
     case scheduleDeferredDeselect(id: Int, pressedAt: TimeInterval?)
     case closePopover
+    /// Run Refresh (§4.6: the search and `shiibar-cc reconcile`), the same
+    /// as the header row's ⟳.
+    case refresh
     case nextMatch
     case previousMatch
     case increaseTextSize
@@ -207,19 +210,22 @@ public enum ConversationPaneContent: Equatable, Sendable {
 public struct BottomPanelModel: Equatable, Sendable {
     /// Left side; empty in the two-column right column.
     public let hints: [KeyHint]
-    /// Right side; nil while no row is selected (one-column list page only).
-    /// The panel keeps its height either way (§4.6).
+    /// Right side; nil while the buttons are not shown (`showsButtons`). The
+    /// panel keeps its height either way (§4.6).
     public let buttons: BottomPanelButtons?
-    /// The shortcut glyphs inside the buttons (`↩`, `⌘↩`) are drawn: false
-    /// while the search field has focus, where Enter moves focus to the list
-    /// and ⌘Enter does nothing (§4.6). The glyph keeps its space either way,
-    /// so the buttons' widths and positions do not change.
-    public let showsShortcuts: Bool
 
-    public init(hints: [KeyHint], buttons: BottomPanelButtons?, showsShortcuts: Bool) {
+    public init(hints: [KeyHint], buttons: BottomPanelButtons?) {
         self.hints = hints
         self.buttons = buttons
-        self.showsShortcuts = showsShortcuts
+    }
+
+    /// Whether the panel shows the selected row's buttons (§4.6 "bottom
+    /// panel", §8.55): only while a row is selected and the search field
+    /// does not have focus — there, Enter moves focus to the list and
+    /// ⌘Enter does nothing, so every button on screen is one the keys run.
+    /// The same rule in one column and in two.
+    public static func showsButtons(hasSelection: Bool, searchFieldFocused: Bool) -> Bool {
+        hasSelection && !searchFieldFocused
     }
 }
 
@@ -272,17 +278,16 @@ public struct ConversationPaneModel: Equatable, Sendable {
     public let branchButton: RowButton
     /// Bottom panel, left side (one column only).
     public let hints: [KeyHint]
-    /// Bottom panel: the buttons' shortcut glyphs are drawn (false while the
-    /// search field has focus — §4.6).
-    public let showsShortcuts: Bool
+    /// Bottom panel: the buttons are shown (`BottomPanelModel.showsButtons`;
+    /// false while the search field has focus).
+    public let showsButtons: Bool
 
-    /// The pane's bottom panel: always with buttons (the pane shows a
-    /// selected row).
+    /// The pane's bottom panel: the shown row's buttons unless the search
+    /// field has focus.
     public var bottomPanel: BottomPanelModel {
         BottomPanelModel(
             hints: hints,
-            buttons: BottomPanelButtons(primary: primaryButton, branch: branchButton),
-            showsShortcuts: showsShortcuts)
+            buttons: showsButtons ? BottomPanelButtons(primary: primaryButton, branch: branchButton) : nil)
     }
 
     public static let noMessagesText = "No conversation to show"
@@ -386,7 +391,8 @@ public struct UnifiedListState: Equatable, Sendable {
             result.append(UnifiedListSectionModel(section: .running, rows: runningRows))
         }
         if !historyRows.isEmpty {
-            result.append(UnifiedListSectionModel(section: .history, rows: historyRows))
+            result.append(UnifiedListSectionModel(section: .history, rows: historyRows,
+                                                  hiddenCount: hiddenHistoryCount))
         }
         return result
     }
@@ -429,10 +435,6 @@ public struct UnifiedListState: Equatable, Sendable {
         return "\(hiddenHistoryCount) more \u{2014} \(hint)"
     }
 
-    /// N for `Updated · N conversations` (§4.6: the search result size,
-    /// Running rows included).
-    public var searchResultCount: Int { history?.count ?? 0 }
-
     /// The selected card's look (§4.5 "row selection"): accent while the
     /// keys act on the list — the surface is key and the list has focus —
     /// and gray while the search field has focus or the surface is not key.
@@ -447,15 +449,17 @@ public struct UnifiedListState: Equatable, Sendable {
 
     /// The bottom panel of the one-column list page (§4.6 "bottom panel"):
     /// the list's key hints on the left, the selected row's buttons on the
-    /// right (none while nothing is selected). nil in two columns, where the
-    /// left column's footer shows the key hints only and the buttons live in
-    /// the right column's pane (§4.5 "key hints").
+    /// right (none while nothing is selected or the search field has focus).
+    /// nil in two columns, where the left column's footer shows the key
+    /// hints only and the buttons live in the right column's pane (§4.5 "key
+    /// hints").
     public var listBottomPanel: BottomPanelModel? {
         guard columns == .one else { return nil }
+        let row = selectedRow
+        let shows = BottomPanelModel.showsButtons(hasSelection: row != nil, searchFieldFocused: isSearchFieldFocused)
         return BottomPanelModel(
             hints: footerHints,
-            buttons: selectedRow.map(BottomPanelButtons.init(row:)),
-            showsShortcuts: !isSearchFieldFocused)
+            buttons: shows ? row.map(BottomPanelButtons.init(row:)) : nil)
     }
 
     /// Whether every row shows the `>` button (§4.5: one column only).
@@ -483,7 +487,7 @@ public struct UnifiedListState: Equatable, Sendable {
             primaryButton: row.primaryButton,
             branchButton: row.branchButton,
             hints: KeyHints.bottomPanel(columns: columns),
-            showsShortcuts: !isSearchFieldFocused
+            showsButtons: BottomPanelModel.showsButtons(hasSelection: true, searchFieldFocused: isSearchFieldFocused)
         ))
     }
 
@@ -760,6 +764,7 @@ public struct UnifiedListState: Equatable, Sendable {
         case .nextMatch: return [.nextMatch]
         case .previousMatch: return [.previousMatch]
         case .closePopover: return [.closePopover]
+        case .refresh: return [.refresh]
         case .increaseTextSize: return [.increaseTextSize]
         case .decreaseTextSize: return [.decreaseTextSize]
         case .resetTextSize: return [.resetTextSize]

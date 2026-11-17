@@ -122,15 +122,50 @@ final class MainSurfaceTests: XCTestCase {
         let cases: [(String, (done: Int, total: Int)?, MessageLineError?, MessageTransient?, String?)] = [
             ("nothing -> hidden", nil, nil, nil, nil),
             ("progress beats everything", progress, .searchFailed, .refreshing, "Indexing 340 of 4,200…"),
-            ("error beats transient", nil, .indexFailed, .updated(count: 3), "Indexing failed"),
-            ("transient alone", nil, nil, .updated(count: 12), "Updated · 12 conversations"),
+            ("error beats transient", nil, .indexFailed, .refreshDone, "Indexing failed"),
+            ("search error beats refresh failed", nil, .searchFailed, .refreshFailed, "Search failed"),
             ("refreshing", nil, nil, .refreshing, "Refreshing…"),
-            ("rescan running", nil, nil, .rescan(.running), "Rescanning…"),
-            ("rescan done", nil, nil, .rescan(.success), "✓ Rescan done"),
-            ("rescan failed", nil, nil, .rescan(.failure), "Rescan failed"),
+            ("refresh done", nil, nil, .refreshDone, "✓ Refresh done"),
+            ("refresh failed", nil, nil, .refreshFailed, "Refresh failed"),
         ]
         for (name, progress, error, transient, expected) in cases {
             XCTAssertEqual(MessageLine.text(indexProgress: progress, error: error, transient: transient), expected, name)
+        }
+    }
+
+    // MARK: - Refresh outcome (§4.6 "search field" table)
+
+    /// Every row of the §4.6 table: search success or failure × reconcile
+    /// exit 0, exit 3 (TCC) and other failures.
+    func testRefreshOutcomeTable() {
+        struct Case {
+            let name: String
+            let searchSucceeded: Bool
+            let reconcileExitCode: Int32
+            let transient: MessageTransient?
+            let warning: Bool
+        }
+        let cases = [
+            Case(name: "search ok, reconcile ok", searchSucceeded: true, reconcileExitCode: 0,
+                 transient: .refreshDone, warning: false),
+            Case(name: "search ok, reconcile TCC", searchSucceeded: true, reconcileExitCode: 3,
+                 transient: nil, warning: true),
+            Case(name: "search ok, reconcile exit 1", searchSucceeded: true, reconcileExitCode: 1,
+                 transient: .refreshFailed, warning: false),
+            Case(name: "search ok, reconcile exit 2", searchSucceeded: true, reconcileExitCode: 2,
+                 transient: .refreshFailed, warning: false),
+            Case(name: "search ok, reconcile killed", searchSucceeded: true, reconcileExitCode: -1,
+                 transient: .refreshFailed, warning: false),
+            Case(name: "search failed, reconcile ok", searchSucceeded: false, reconcileExitCode: 0,
+                 transient: nil, warning: false),
+            Case(name: "search failed, reconcile TCC", searchSucceeded: false, reconcileExitCode: 3,
+                 transient: nil, warning: true),
+            Case(name: "search failed, reconcile exit 1", searchSucceeded: false, reconcileExitCode: 1,
+                 transient: nil, warning: false),
+        ]
+        for c in cases {
+            let outcome = RefreshOutcome.decide(searchSucceeded: c.searchSucceeded, reconcileExitCode: c.reconcileExitCode)
+            XCTAssertEqual(outcome, RefreshOutcome(transient: c.transient, raisesAutomationWarning: c.warning), c.name)
         }
     }
 

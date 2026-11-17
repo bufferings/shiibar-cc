@@ -143,12 +143,14 @@ enum CLIRunner {
         run(["focus", target], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
     }
 
-    /// `shiibar-cc reconcile` (startup / reconnect / ⌄ menu "Rescan",
+    /// `shiibar-cc reconcile` (startup / reconnect / periodic / Refresh,
     /// §3.5/§4.5). Only 0 is expected: any failure (1 = daemon/gather
     /// error, 3 = TCC) silently loses the backstop and must error-log.
     static func reconcile(helpersDirectory: URL?) -> CLIRunResult {
-        run(["reconcile"], helpersDirectory: helpersDirectory)
+        run(reconcileArguments, helpersDirectory: helpersDirectory)
     }
+
+    static let reconcileArguments = ["reconcile"]
 
     /// `shiibar-cc seen <target>` (⌄ menu "Clear badges", §4.4/§4.5/§8.24):
     /// clears one target's unreviewed flag. Exit 2 ("no match") is an

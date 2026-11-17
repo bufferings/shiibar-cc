@@ -209,11 +209,27 @@ public struct UnifiedListSectionModel: Equatable, Identifiable, Sendable {
     public var id: UnifiedListSection { section }
     public let section: UnifiedListSection
     public let rows: [UnifiedListRow]
+    /// How many rows the display cap leaves out of this section (History
+    /// only — §4.6 "History section"; 0 when none).
+    public let hiddenCount: Int
+
+    public init(section: UnifiedListSection, rows: [UnifiedListRow], hiddenCount: Int = 0) {
+        self.section = section
+        self.rows = rows
+        self.hiddenCount = hiddenCount
+    }
 
     public var title: String { section.title }
     /// The heading's row count: the number of rows shown, which is the
     /// filtered count while searching (§4.6 "search scope").
     public var count: Int { rows.count }
+    /// The text after the bold section name (§4.5 "the list has two
+    /// sections", §4.6 "History section", §8.56): the row count, or `first
+    /// 100` (the §9 cap) while the cap leaves rows out — the shown rows are
+    /// the head of the order, not every conversation.
+    public var countText: String {
+        hiddenCount > 0 ? "first \(HistoryDisplayLimit.maxRows)" : "\(count)"
+    }
 }
 
 /// Star set rules (§4.6 "stars"). Stars are an app display setting: a set of

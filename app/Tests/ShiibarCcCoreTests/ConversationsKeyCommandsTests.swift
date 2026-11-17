@@ -41,6 +41,14 @@ final class ConversationsKeyCommandsTests: XCTestCase {
         XCTAssertNil(command("f", command: false))
     }
 
+    func testRefreshCommand() {
+        // §4.5 "key operations": ⌘R runs Refresh; ⇧⌘R stays unclaimed.
+        XCTAssertEqual(command("r"), .refresh)
+        XCTAssertNil(command("R", shift: true))
+        XCTAssertNil(command("r", command: false))
+        XCTAssertNil(command("r", other: true))
+    }
+
     func testPassThroughs() {
         // ⌘C / ⇧⌘C belong to the message pane — never consumed here.
         XCTAssertNil(command("c"))

@@ -189,7 +189,7 @@ final class UnifiedListRowsTests: XCTestCase {
         // Browse: every Running row, including the empty session_id one.
         state.handle(.historyDelivered(results, isFiltered: false))
         XCTAssertEqual(state.sections.map(\.count), [3, 2])
-        XCTAssertEqual(state.searchResultCount, 3)
+        XCTAssertEqual(state.sections.map(\.countText), ["3", "2"])
 
         // A section with no rows is hidden, heading included.
         state.handle(.historyDelivered([UL.summary("s1")], isFiltered: true))

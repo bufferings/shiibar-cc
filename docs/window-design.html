@@ -85,7 +85,8 @@
   .search.dis { opacity:.5; }
   .caret { display:inline-block; width:1px; height:12px; background:var(--text); margin-left:1px; vertical-align:-2px; }
   .hb { width:24px; height:24px; flex:none; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--menu-text2); }
-  .hb.on { color:var(--sel); }
+  .hb.on { color:var(--sel); background:color-mix(in srgb, var(--sel) 16%, transparent); }
+  .hb.on.prs { background:color-mix(in srgb, var(--sel) 24%, transparent); }
   .hb.on .ic { fill:currentColor; }
   .hb.chip { background:rgba(127,127,127,.10); }
   .hb.chip.hov, .hb.hov { background:rgba(127,127,127,.16); }
@@ -198,8 +199,6 @@
   .btn.sec { background:transparent; color:var(--text); border:1px solid var(--line); min-width:0; padding:4px 14px; font-weight:400; }
   /* ボタンの中のショートカット: ラベルに続けて、ラベルより淡く表示する(disabled の間も表示する) */
   .btn .kc { font-weight:400; opacity:.6; margin-left:5px; }
-  /* 検索欄にフォーカスがある間: 記号を表示しない(場所は残すので、ボタンの幅と位置は変わらない) */
-  .actions.sf .kc { visibility:hidden; }
   .note { font-size:11px; color:var(--menu-text2); }
 
   .strip { background:var(--panebg); border-radius:9px; box-shadow:0 0 0 .5px rgba(127,127,127,.5);
@@ -216,7 +215,7 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 L14 14"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 3v3h-3"/></symbol>
-  <symbol id="i-pin" viewBox="0 0 16 16"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6z"/><path d="M8 8.5V14"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16"><path stroke-width="1.2" d="M9.5 1.5l5 5-1.4 1.4-.7-.7-3 3 .4 2.6-1.2 1.2L5.7 11 2.5 14.2 1.3 13l3.2-3.2L1.6 6.9l1.2-1.2 2.6.4 3-3-.7-.7z"/></symbol>
   <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
   <symbol id="i-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>
   <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
@@ -259,7 +258,7 @@
       (<code>Resume ↩</code> / <code>Jump ↩</code> / <code>Branch ⌘↩</code>)。移動のキーは、キーの案内に表示する
       (1 列では下部パネルの左側、2 列では左の列のフッター)。同じキーを 2 か所に表示しない。
       表示するキーはフォーカスの位置で変わる — 検索欄にフォーカスがある間は、キーの案内に <code>↩ List</code> だけを表示し、
-      ボタンの中の記号を表示しない</li>
+      下部パネルのボタンを表示しない</li>
     <li><strong>会話ペインは長い文章の閲覧を主目的として構成する</strong>: 主な内容は「自分の短い依頼 →
       Claude の長い発言」の繰り返しである。どの発言にも <code>You</code> / <code>Claude</code> のラベルを付け、
       自分の発言には<strong>全幅の帯の地</strong>を付ける。Claude の発言は
@@ -286,13 +285,15 @@
       フォーカスリング・最近の検索のメニューは表示しない。文字がある間だけ、右端に消去のボタン
       (12px の塗りつぶした円に ×)を表示する(DESIGN.md §4.6「検索欄」)。
       地のどこをクリックしても、入力欄にフォーカスが移る</li>
-    <li><strong>⟳</strong>(ツールチップ <code>Refresh</code>): 静止時は背景なし。ホバーでグレーの背景を表示し、
+    <li><strong>⟳</strong>(ツールチップ <code>Refresh (⌘R)</code>): Refresh を実行する(DESIGN.md §4.6)。静止時は背景なし。ホバーでグレーの背景を表示し、
       押下で一段濃くする。実行中は矢印グリフが回転する(回転の規律は DESIGN.md §4.6 / §9。
       working のグリフ循環スピナー <code>✻</code> とは別の文法)</li>
     <li><strong>Open in window</strong>(ツールチップ <code>Open in window</code>): ウィンドウの枠のアイコン。
       背景の表示は ⟳ と同じ</li>
-    <li><strong>ピン</strong>(ツールチップ <code>Keep on top</code>): <strong>OFF = 輪郭だけ・二次色 /
-      ON = アクセントカラーの塗り</strong>(DESIGN.md §4.5「ピン」)</li>
+    <li><strong>ピン</strong>(ツールチップ <code>Keep on top</code>): 斜めに傾いた画びょう(16 の格子・線の太さ 1.2)。
+      <strong>OFF = 輪郭だけ・二次色 /
+      ON = アクセントカラーの塗り + ボタンの背景(アクセントカラーの 16%。押している間は 24%。ホバーでは変更しない)</strong>
+      (DESIGN.md §4.5「ピン」)</li>
     <li><strong>⌄</strong>: 常に表示するチップ(正方形 24×24・角丸 7px)を背景に持つ。
       前景色ベースで 通常 10% / ホバー 16% / プレス 24%。グリフの色は変更しない。
       メニューの内容(ネイティブメニュー項目)は OS 標準のハイライトのまま</li>
@@ -321,12 +322,13 @@
       <div class="app strip side" style="width:auto"><div class="hrow" style="padding:10px">
         <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
         <span class="hb on"><svg class="ic"><use href="#i-pin"/></svg></span>
+        <span class="hb on prs"><svg class="ic"><use href="#i-pin"/></svg></span>
         <span style="width:20px"></span>
         <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         <span class="hb chip hov"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         <span class="hb chip prs"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
       </div></div>
-      <figcaption>ピンの 2 状態(左 = OFF: 輪郭 / 右 = ON: アクセントカラーの塗り)と ⌄ のチップ(通常 / ホバー / プレス)</figcaption>
+      <figcaption>ピン(左から OFF: 輪郭 / ON: アクセントカラーの塗りと背景 / ON を押している間)と ⌄ のチップ(通常 / ホバー / プレス)</figcaption>
     </figure>
     <figure>
       <div class="app strip" style="width:240px; gap:4px">
@@ -335,7 +337,6 @@
         <span>Settings…</span>
         <span>Setup Check…</span>
         <span class="note">───</span>
-        <span>Rescan</span>
         <span>Clear badges</span>
         <span class="note">───</span>
         <span>Quit</span>
@@ -348,6 +349,7 @@
   <ul>
     <li>区画は上が <strong>Running</strong>、下が <strong>History</strong>。見出しは
       <strong>太字の区画名 + 行数</strong>(行数は二次色)。検索中の行数は、表示している行の数である。
+      History の行が上限を超えている間は、行数の位置に <code>first 100</code> を表示する(DESIGN.md §4.6「History の区画」)。
       行が 1 つも無い区画は見出しごと表示しない(DESIGN.md §4.5「一覧は 2 つの区画」)</li>
     <li><strong>行は 1 枚ずつのカード</strong>(角丸 10px・1px の枠・カード間 6px)。構成は両区画で共通:
       <strong>行頭スロット(20px)/ 3 行の文字 / 右端の <code>&gt;</code> ボタン</strong>(1 列だけ)。
@@ -431,12 +433,12 @@
           <div class="row"><span class="sym"></span><span class="rt"><span class="t1">CI がタグ push で起動しない件</span><span class="sub">demo/api-server · 2d</span><span class="t3"><span class="g">❯</span>workflow の on: の部分を見せて</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
           <div class="row"><span class="sym"></span><span class="rt"><span class="t1">Docker image naming</span><span class="sub">example/infra · 1w</span><span class="t3"><span class="g">❯</span>Keep the registry prefix as it is</span></span><span class="ib"><svg class="ic"><use href="#i-fwd"/></svg></span></div>
         </div>
-        <div class="actions sf"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
       </div></div>
       <figcaption>ポップオーバー · 検索中(「tag」)。行の形は検索していないときと同じで、ヒットの抜粋も件数も
         表示しない。3 行目は最後の発話のままである。区画の見出しの行数は、表示している行の数になる。
-        History の行を選択しているので、下部パネルの主ボタンは Resume。検索欄にフォーカスがあるので、
-        選択中のカードは灰色で、キーの案内は <code>↩ List</code> だけで、ボタンの中に <code>↩</code> / <code>⌘↩</code> を表示しない</figcaption>
+        History の行を選択している。検索欄にフォーカスがあるので、
+        選択中のカードは灰色で、キーの案内は <code>↩ List</code> だけで、下部パネルのボタンを表示しない</figcaption>
     </figure>
   </div>
 
@@ -507,9 +509,9 @@
     <li><strong>メッセージ行</strong>(二次色 11px・クリック不可): 表示する内容があるときだけ、
       キーの案内の上に 1 行で表示する(内容と優先順位は DESIGN.md §4.6「メッセージ行」)。
       <ul>
-        <li>Rescan: 実行中 <code>Rescanning…</code> / 正常終了後 <code>✓ Rescan done</code> /
-          失敗(TCC 以外)<code>Rescan failed</code>。件数は表示しない。TCC エラーは警告行で表示する</li>
-        <li>⟳: 実行中 <code>Refreshing…</code> / 完了後 <code>Updated · N conversations</code></li>
+        <li>Refresh(⟳ / ⌘R): 実行中 <code>Refreshing…</code> / 正常終了後 <code>✓ Refresh done</code> /
+          reconcile の失敗(TCC 以外)<code>Refresh failed</code>。件数は表示しない。TCC エラーは警告行で表示する
+          (結果の組み合わせは DESIGN.md §4.6「検索欄」の表)</li>
         <li>全構築中: <code>Indexing 340 of 4,200…</code>。全構築中は<strong>検索欄を無効</strong>の表示にする。
           History は完了後に一度に表示する(徐々に行が増える表示にしない)。Running の区画は構築を待たずに
           表示する。回転する <code>✻</code> は使用しない — グリフ循環スピナーは working を意味する</li>
@@ -529,7 +531,8 @@
       </ul></li>
     <li><strong>表示していない会話の数</strong>: History の行が上限(DESIGN.md §9)を超えたときは、
       最後のカードの下に 1 行(二次色 12px・中央寄せ)— <code>242 more — search to narrow down</code>
-      (検索中は <code>242 more — refine your search</code>)。カードにはしない</li>
+      (検索中は <code>242 more — refine your search</code>)。カードにはしない。
+      この間、区画の見出しは <code>History first 100</code> である(<code>first 100</code> は、行数と同じ二次色)</li>
     <li><strong>空状態</strong>: Running と History の両方に行が無いときだけ、一覧の位置に 1 行
       (二次色 12px)— 空クエリは <code>No conversations</code>、検索中は
       <code>No matching conversations</code>(DESIGN.md §4.6「空状態」)</li>
@@ -538,23 +541,23 @@
     <figure>
       <div class="app strip side">
         <div class="stat"><div class="warn">⚠ Disconnected from daemon — reconnecting…</div>
-          <div class="msgline">✓ Rescan done</div></div>
+          <div class="msgline">✓ Refresh done</div></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
       </div>
-      <figcaption>1 列の一覧のページ: 警告行 + メッセージ行(Rescan の正常終了)+ 下部パネル</figcaption>
+      <figcaption>1 列の一覧のページ: 警告行 + メッセージ行(Refresh の正常終了)+ 下部パネル</figcaption>
     </figure>
     <figure>
       <div class="app strip side">
         <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span><span><span class="k">→</span>Open</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
-        <div class="actions sf"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
         <div class="foot"><div class="hints"><span><span class="k">↑↓</span>Move</span></div></div>
         <div class="foot"><div class="hints"><span><span class="k">↩</span>List</span></div></div>
       </div>
       <figcaption>キーの案内(上から: 1 列で行を選択していなくて、一覧にフォーカスがある / 1 列で行を選択していて、一覧にフォーカスがある /
-        1 列で行を選択していて、検索欄にフォーカスがある(ボタンの中の記号を表示しない) /
+        1 列で行を選択していて、検索欄にフォーカスがある(ボタンを表示しない) /
         2 列の左の列のフッターで、一覧にフォーカスがある / 同じく検索欄にフォーカスがある)。1 列では下部パネルの左側に配置し、
-        行を選択していない間はボタンを表示しない(パネルの高さは変わらない)</figcaption>
+        行を選択していない間と、検索欄にフォーカスがある間は、ボタンを表示しない(パネルの高さは変わらない)</figcaption>
     </figure>
     <figure>
       <div class="app strip side">
@@ -742,12 +745,12 @@ git push origin main --<span class="hl">tag</span>s</pre>
               <span class="m thumb" style="top:1%; height:98%"></span>
             </div>
           </div>
-          <div class="actions sf"><span class="sp"></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+          <div class="actions"><span class="sp"></span><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
         </div>
       </div>
       <figcaption>ウィンドウ · 2 列 ·「tag」で検索中。行に <code>&gt;</code> ボタンは無い。
         検索欄にフォーカスがあるので、選択中のカードは灰色で、左の列のフッターのキーの案内は <code>↩ List</code> だけで、
-        右の列の下部パネルのボタンの中に記号を表示しない(一覧にフォーカスがある間は <code>↑↓ Move</code> と記号を表示する)。
+        右の列の下部パネルにボタンを表示しない(一覧にフォーカスがある間は、<code>↑↓ Move</code> とボタンを表示する)。
         右の列の検索バー行は、カウンタと ‹ › だけを表示する</figcaption>
     </figure>
   </div>
@@ -762,14 +765,15 @@ git push origin main --<span class="hl">tag</span>s</pre>
       主ボタンは <code>Resume ↩</code> / <code>Jump ↩</code>、Branch は <code>Branch ⌘↩</code>。
       記号はラベルより淡い色(通常のウェイト)で表示し、disabled の間も表示する。
       Enter と ⌘Enter は、一覧にフォーカスがある間だけボタンを実行する(DESIGN.md §4.5「キー操作」)。
-      そのため、<strong>検索欄にフォーカスがある間は記号を表示しない</strong>。記号の場所は残すので、
-      ボタンの幅と位置は変わらない。ボタンのクリックは、フォーカスの位置に関係なく有効である</li>
+      そのため、<strong>検索欄にフォーカスがある間は、行を選択していても、ボタンを表示しない</strong>
+      (1 列でも 2 列でも同じ。パネルの高さは変わらない)</li>
     <li>表示する場所は、1 列の一覧のページの下端・1 列の詳細ページの下端・2 列の右の列の下端である。
       画面に表示する実行のボタンは常に 1 組で、一覧のページと詳細ページで位置と大きさが同じ</li>
     <li>1 列では、左側にキーの案内を配置する(一覧のページは一覧の案内、詳細ページは
       <code>⌥↑↓ Prev / Next</code> / <code>← Back</code>)。2 列の右の列では、左側には何も配置しない</li>
     <li>1 列の一覧のページで行を選択していない間は、ボタンを表示せず、キーの案内だけを表示する
-      (パネルの高さは変わらない)</li>
+      (パネルの高さは変わらない)。検索欄にフォーカスがある間は、1 列ではキーの案内(<code>↩ List</code>)だけを表示し、
+      2 列の右の列では何も表示しない</li>
     <li>disabled の主ボタンは標準の灰色の形にする(DESIGN.md §4.6 / §8.42)。理由はツールチップ
       <code>Running in a terminal Shiibar CC can't drive</code> で示す</li>
   </ul>
@@ -802,11 +806,11 @@ git push origin main --<span class="hl">tag</span>s</pre>
     </figure>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:0">
-        <div class="actions sf" style="border-top:0"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
-        <div class="actions sf"><span class="sp"></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
+        <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
+        <div class="actions"><span class="sp"></span><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
       </div>
       <figcaption>検索欄にフォーカスがある間(上 = 1 列の一覧のページ / 下 = 2 列の右の列)。
-        ボタンの中の記号を表示しない。ボタンの幅と位置は、一覧にフォーカスがある間と同じ</figcaption>
+        ボタンを表示しない。パネルの高さは、一覧にフォーカスがある間と同じ</figcaption>
     </figure>
   </div>
 

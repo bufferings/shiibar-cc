@@ -181,39 +181,156 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["a", "b"])
         XCTAssertEqual(model.messageText, "Search failed")
         // §4.6: the error clears on the next successful fetch.
-        model.refreshClicked()
+        model.refresh()
         waitForSearches(3)
         spy.searches[2].completion(ok(resultJSON(["a"])))
         XCTAssertNil(model.messageError)
     }
 
-    // MARK: - ⟳ (§4.6 / §8.44 / §9)
+    // MARK: - Refresh: ⟳ and ⌘R (§4.6 / §8.44 / §8.54 / §9)
 
-    func testRefreshHoldsTheMinimumTurnThenShowsUpdated() {
-        let model = makeModel()
-        model.refreshClicked()
-        XCTAssertTrue(model.isRefreshing)
-        XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
-        waitForSearches(1)
-        spy.searches[0].completion(ok(resultJSON(["r1"])))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["r1"], "the result applies at once")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        XCTAssertTrue(model.isRefreshing, "the turn is not done at 0.3s")
-        model.refreshClicked()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(spy.searches.count, 1, "a press during the turn is ignored")
-        pump(until: { !model.isRefreshing }, timeout: 1.5)
-        XCTAssertFalse(model.isRefreshing)
-        XCTAssertEqual(model.messageText, "Updated \u{00B7} 1 conversations")
+    /// The `shiibar-cc` runs Refresh started (the row verbs go through the
+    /// same runner).
+    private var reconciles: [(arguments: [String], completion: @MainActor (Int32) -> Void)] {
+        spy.commands.filter { $0.arguments == ["reconcile"] }
     }
 
-    func testRefreshFailureSettlesWithTheError() {
+    func testRefreshStartsTheSearchAndTheReconcile() {
         let model = makeModel()
-        model.refreshClicked()
-        waitForSearches(1)
-        spy.searches[0].completion(CLIRunResult(exitCode: 1, stdout: "", stderr: ""))
+        model.refresh()
+        XCTAssertTrue(model.isRefreshing)
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
+        XCTAssertEqual(spy.searches.map(\.arguments), [["conversations", "search", "--json"]],
+                       "the search runs at once, without the debounce")
+        XCTAssertEqual(spy.commands.map(\.arguments), [["reconcile"]])
+    }
+
+    func testRefreshWaitsForBothAndShowsDone() {
+        let model = makeModel()
+        model.refresh()
+        spy.searches[0].completion(ok(resultJSON(["r1"])))
+        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["r1"], "the result applies at once")
+        // Only the search has finished: still in flight.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        XCTAssertTrue(model.isRefreshing, "the reconcile has not finished")
+        XCTAssertNil(model.refreshRunEndedAt)
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
+        reconciles[0].completion(0)
+        XCTAssertNotNil(model.refreshRunEndedAt, "both finished")
         pump(until: { !model.isRefreshing }, timeout: 1.5)
-        XCTAssertEqual(model.messageText, "Search failed")
+        XCTAssertFalse(model.isRefreshing)
+        XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
+    }
+
+    func testRefreshWithOnlyTheReconcileFinishedStaysInFlight() {
+        let model = makeModel()
+        model.refresh()
+        reconciles[0].completion(0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        XCTAssertTrue(model.isRefreshing, "the search has not finished")
+        XCTAssertNil(model.refreshRunEndedAt)
+        spy.searches[0].completion(ok(resultJSON(["r1"])))
+        pump(until: { !model.isRefreshing }, timeout: 1.5)
+        XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
+    }
+
+    /// §4.6 / §8.44: the rotation lasts at least one turn even when both
+    /// runs end at once; a Refresh during the run starts nothing.
+    func testRefreshHoldsTheMinimumTurnAndIgnoresARefreshInFlight() {
+        let model = makeModel()
+        model.refresh()
+        spy.searches[0].completion(ok(resultJSON(["r1"])))
+        reconciles[0].completion(0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertTrue(model.isRefreshing, "the turn is not done at 0.3s")
+        model.refresh()
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command]), .consumed)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(spy.searches.count, 1, "a Refresh during the run starts no search")
+        XCTAssertEqual(spy.commands.count, 1, "a Refresh during the run starts no reconcile")
+        pump(until: { !model.isRefreshing }, timeout: 1.5)
+        XCTAssertFalse(model.isRefreshing)
+    }
+
+    /// §4.6 table, as the model applies it: the transient, the TCC warning
+    /// row, and `Search failed` from the search pipeline.
+    func testRefreshOutcomes() {
+        struct Case {
+            let name: String
+            let searchExit: Int32
+            let reconcileExit: Int32
+            let message: String?
+            let permissionDenied: Int
+        }
+        let cases = [
+            Case(name: "both succeed", searchExit: 0, reconcileExit: 0, message: "\u{2713} Refresh done", permissionDenied: 0),
+            Case(name: "reconcile TCC", searchExit: 0, reconcileExit: 3, message: nil, permissionDenied: 1),
+            Case(name: "reconcile fails", searchExit: 0, reconcileExit: 1, message: "Refresh failed", permissionDenied: 0),
+            Case(name: "search fails", searchExit: 1, reconcileExit: 0, message: "Search failed", permissionDenied: 0),
+            Case(name: "search fails, reconcile TCC", searchExit: 1, reconcileExit: 3, message: "Search failed",
+                 permissionDenied: 1),
+            Case(name: "search fails, reconcile fails", searchExit: 1, reconcileExit: 1, message: "Search failed",
+                 permissionDenied: 0),
+        ]
+        for c in cases {
+            let model = makeModel()
+            model.refresh()
+            let result = c.searchExit == 0 ? ok(resultJSON(["r1"])) : CLIRunResult(exitCode: c.searchExit, stdout: "", stderr: "")
+            spy.searches[0].completion(result)
+            reconciles[0].completion(c.reconcileExit)
+            XCTAssertEqual(spy.permissionDeniedCount, c.permissionDenied, c.name)
+            pump(until: { !model.isRefreshing }, timeout: 1.5)
+            XCTAssertFalse(model.isRefreshing, c.name)
+            XCTAssertEqual(model.messageText, c.message, c.name)
+        }
+    }
+
+    /// §4.5 "key operations": ⌘R runs the same Refresh as ⟳ — with the
+    /// search field focused, with the list focused, on the detail page, and
+    /// in the window.
+    func testCommandRRunsTheSameRefreshAsTheButton() {
+        struct Case {
+            let name: String
+            let surface: MainSurface
+            let searchFieldFocused: Bool
+            let detailPage: Bool
+        }
+        let cases = [
+            Case(name: "popover, search field", surface: .popover, searchFieldFocused: true, detailPage: false),
+            Case(name: "popover, list", surface: .popover, searchFieldFocused: false, detailPage: false),
+            Case(name: "popover, detail page", surface: .popover, searchFieldFocused: false, detailPage: true),
+            Case(name: "window, search field", surface: .window, searchFieldFocused: true, detailPage: false),
+        ]
+        for c in cases {
+            let model = makeModel()
+            if c.surface == .popover {
+                openPopover(model, delivering: ["a"])
+            } else {
+                model.windowWidthChanged(900)
+                model.windowDidBecomeKey()
+                spy.indexCompletions.last?(0)
+                spy.searches.last?.completion(ok(resultJSON(["a"])))
+            }
+            if c.detailPage { model.rowOpenClicked(.history(sessionID: "a")) }
+            let searchesBefore = spy.searches.count
+            XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command], surface: c.surface,
+                               searchFieldFocused: c.searchFieldFocused), .consumed, c.name)
+            XCTAssertTrue(model.isRefreshing, c.name)
+            XCTAssertNotNil(model.refreshStartedAt, "\(c.name): ⟳ spins as for a click")
+            XCTAssertEqual(model.messageText, "Refreshing\u{2026}", c.name)
+            XCTAssertEqual(spy.searches.count, searchesBefore + 1, c.name)
+            XCTAssertEqual(reconciles.count, 1, c.name)
+            XCTAssertEqual(model.list.page, c.detailPage ? .detail : .list, "\(c.name): the page stays")
+        }
+    }
+
+    func testRefreshRunsNothingWhileAnInputMethodComposes() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a"])
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command], marked: true,
+                           searchFieldFocused: true), .passThrough)
+        XCTAssertFalse(model.isRefreshing)
+        XCTAssertTrue(reconciles.isEmpty)
     }
 
     // MARK: - Opening a surface (§4.5 / §4.6)
@@ -469,7 +586,7 @@ final class MainSurfaceModelTests: XCTestCase {
     func testRowClickSelectsAndTheOpenButtonOpensTheDetailPage() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsShortcuts: true))
+        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil))
         model.rowClicked(.history(sessionID: "a"))
         XCTAssertEqual(model.list.page, .list)
         XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
@@ -778,37 +895,41 @@ final class MainSurfaceModelTests: XCTestCase {
     }
 
     /// The focus location reported by the AppKit layer drives the key hints
-    /// and the buttons' shortcut glyphs; a report from the surface that is
-    /// not on screen is ignored.
-    func testSearchFieldFocusReportsDriveHintsAndGlyphs() {
+    /// and the bottom panel's buttons; a report from the surface that is not
+    /// on screen is ignored.
+    func testSearchFieldFocusReportsDriveHintsAndButtons() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
         model.rowClicked(.history(sessionID: "a"))
         XCTAssertEqual(model.list.footerHints, [.move, .open])
-        XCTAssertEqual(model.list.listBottomPanel?.showsShortcuts, true)
+        XCTAssertNotNil(model.list.listBottomPanel?.buttons)
         model.searchFieldFocusChanged(surface: .popover, focused: true)
         XCTAssertEqual(model.list.footerHints, [.list])
-        XCTAssertEqual(model.list.listBottomPanel?.showsShortcuts, false)
-        XCTAssertNotNil(model.list.listBottomPanel?.buttons, "the buttons stay")
+        XCTAssertNil(model.list.listBottomPanel?.buttons, "no buttons while the search field has focus")
+        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "the selection stays")
         model.searchFieldFocusChanged(surface: .window, focused: false)
         XCTAssertEqual(model.list.footerHints, [.list], "the hidden window's report is ignored")
         // A key event carries the live focus location too.
         XCTAssertEqual(key(model, .escape, surface: .window, searchFieldFocused: false), .consumed)
         XCTAssertFalse(model.list.isSearchFieldFocused)
         XCTAssertEqual(model.list.footerHints, [.move, .open])
-        XCTAssertEqual(model.list.listBottomPanel?.showsShortcuts, true)
+        XCTAssertNotNil(model.list.listBottomPanel?.buttons)
     }
 
-    /// §4.6: the buttons stay clickable while the search field has focus.
-    func testButtonClickWorksWithSearchFieldFocus() {
+    /// §4.6 "bottom panel" / §8.55: Enter in the search field moves focus to
+    /// the list, and the selected row's buttons come back.
+    func testEnterFromTheSearchFieldShowsTheButtonsAgain() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
         model.rowClicked(.history(sessionID: "a"))
         model.searchFieldFocusChanged(surface: .popover, focused: true)
-        guard let buttons = model.list.listBottomPanel?.buttons else { return XCTFail("expected buttons") }
-        model.buttonClicked(buttons.primary)
-        XCTAssertEqual(spy.commands.map(\.arguments),
-                       [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "a"]])
+        XCTAssertNil(model.list.listBottomPanel?.buttons)
+        XCTAssertEqual(key(model, .returnKey, searchFieldFocused: true), .consumed)
+        XCTAssertEqual(spy.focusListSurfaces.last, .popover, "Enter moves focus to the list")
+        // The AppKit layer reports the focus change that follows.
+        model.searchFieldFocusChanged(surface: .popover, focused: false)
+        XCTAssertNotNil(model.list.listBottomPanel?.buttons)
+        XCTAssertTrue(spy.commands.isEmpty, "Enter in the search field runs no button")
     }
 
     /// §4.5 "row click": clicking the selected row deselects it.
@@ -819,7 +940,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
         model.rowClicked(.history(sessionID: "a"))
         XCTAssertNil(model.list.selection)
-        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsShortcuts: true))
+        XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil))
         XCTAssertEqual(spy.focusListSurfaces, [.popover, .popover], "each click moves focus to the list")
     }
 
@@ -996,7 +1117,7 @@ final class MainSurfaceModelTests: XCTestCase {
 
     /// Key-status reports and presses from the surface that is not on
     /// screen are ignored; the key status leaves the key hints and the
-    /// buttons' shortcut glyphs alone.
+    /// bottom panel's buttons alone.
     func testKeyStatusAndPressReportsFollowTheVisibleSurface() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
@@ -1008,7 +1129,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.surfaceKeyChanged(surface: .popover, isKey: false)
         XCTAssertFalse(model.list.isSelectionActive)
         XCTAssertEqual(model.list.footerHints, [.move, .open], "hints follow the search field only")
-        XCTAssertEqual(model.list.listBottomPanel?.showsShortcuts, true)
+        XCTAssertNotNil(model.list.listBottomPanel?.buttons, "the buttons follow the search field only")
         // A key event comes from the key window only.
         XCTAssertEqual(key(model, .escape, surface: .popover, searchFieldFocused: false), .consumed)
         XCTAssertTrue(model.list.isSurfaceKey)
@@ -1061,16 +1182,6 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.windowKeepOnTop) as? Bool, true)
         XCTAssertEqual(spy.keepOnTopChanges, [true])
         XCTAssertTrue(makeModel().keepOnTop)
-    }
-
-    func testRescanFeedbackUsesTheMessageLine() {
-        let model = makeModel()
-        model.showRescanFeedback(.running)
-        XCTAssertEqual(model.messageText, "Rescanning\u{2026}")
-        model.showRescanFeedback(.success)
-        XCTAssertEqual(model.messageText, "\u{2713} Rescan done")
-        model.showRescanFeedback(nil)
-        XCTAssertNil(model.messageText)
     }
 
     func testWarningsAreStoredForTheFooter() {

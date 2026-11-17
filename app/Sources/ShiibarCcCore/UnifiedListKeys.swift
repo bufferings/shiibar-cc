@@ -17,7 +17,7 @@
 // The table has two columns: "the search field has focus" and "the list has
 // focus" (= the search field does not have focus, including the detail page
 // and the conversation pane having focus). The existing
-// `ConversationsKeyCommands` grammar (text size, ⌘G / ⇧⌘G, ⌘F) is folded in
+// `ConversationsKeyCommands` grammar (text size, ⌘G / ⇧⌘G, ⌘F, ⌘R) is folded in
 // here.
 
 import Foundation
@@ -135,6 +135,8 @@ public enum ListKeyCommand: Equatable, Sendable {
     /// ⌘F with list focus: focus the search field (one-column detail page:
     /// back to the list page first).
     case focusSearch
+    /// ⌘R: Refresh (§4.6), with either focus and on every page.
+    case refresh
     /// Esc in the popover.
     case closePopover
     case increaseTextSize
@@ -183,7 +185,7 @@ public enum UnifiedListKeys {
     /// - ⌘G / ⇧⌘G: only while the conversation pane is visible (consumed
     ///   otherwise);
     /// - ⌘F: with list focus only (consumed with no effect in the search
-    ///   field); ⌘+ / ⌘− / ⌘0: always;
+    ///   field); ⌘R / ⌘+ / ⌘− / ⌘0: always;
     /// - any other key or modifier combination passes through.
     public static func decide(key: ListKey, modifiers: ListKeyModifiers, context: ListKeyContext) -> ListKeyDecision {
         if context.hasMarkedText {
@@ -239,6 +241,7 @@ public enum UnifiedListKeys {
                 case .decreaseTextSize: return .perform(.decreaseTextSize)
                 case .resetTextSize: return .perform(.resetTextSize)
                 case .focusSearch: return inSearchField ? .ignore : .perform(.focusSearch)
+                case .refresh: return .perform(.refresh)
                 case .nextMatch:
                     return context.conversationPaneVisible ? .perform(.nextMatch) : .ignore
                 case .previousMatch:

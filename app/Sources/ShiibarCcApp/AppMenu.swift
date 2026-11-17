@@ -1,10 +1,10 @@
 // App menu (DESIGN.md §4.5 "the menu bar shows the app menu and Edit" /
 // §8.30): while the window is open the app is a regular app and shows the
 // app menu and the Edit menu at the top of the screen. App menu: About
-// Shiibar CC / - / Settings… (⌘,) / Setup Check… / - / Rescan (⌘R) /
-// Clear badges (disabled when nothing is unreviewed) / - / Close Window
-// (⌘W; closes the popover while it is key) / - / Quit Shiibar CC (⌘Q).
-// Every item except Close Window behaves exactly like its ⌄-menu namesake.
+// Shiibar CC / - / Settings… (⌘,) / - / Close Window (⌘W; closes the
+// popover while it is key) / - / Quit Shiibar CC (⌘Q) — only the items a
+// macOS app keeps in its standard places (§4.5, §8.54). Every item except
+// Close Window behaves exactly like its ⌄-menu namesake.
 // The same menu object also exists while only the popover shows (the app
 // stays accessory, so the menu bar is not drawn), which keeps the Edit and
 // app-menu shortcuts working there (§4.5 "popover").
@@ -29,17 +29,15 @@ import Combine
 import ShiibarCcCore
 import SwiftUI
 
-/// The menu-facing slice of `AppState`, re-published ONLY when a value the
-/// menu actually renders genuinely changes (M29 bugfix, measured
-/// on-device): with the Commands observing `AppState` directly, EVERY
-/// `@Published` change — notably the `agents` array churning on each hook
-/// report — invalidated the commands content, and a commands invalidation
-/// landing while a submenu was open closed it on the spot. The menu renders
-/// exactly two values — Clear badges' enabled state and Close Window's —
-/// so only genuine changes to those may invalidate it.
+/// The menu-facing state, re-published ONLY when a value the menu actually
+/// renders genuinely changes: with the Commands observing `AppState`
+/// directly, EVERY `@Published` change — notably the `agents` array
+/// churning on each hook report — invalidates the commands content, and a
+/// commands invalidation landing while a submenu is open closes it on the
+/// spot. The menu renders exactly one value — Close Window's enabled
+/// state — so only genuine changes to it may invalidate it.
 @MainActor
 final class AppMenuModel: ObservableObject {
-    @Published private(set) var hasUnreviewed: Bool
     /// Whether ⌘W currently has something to close (§4.5/§8.40: Close
     /// Window is disabled when there is no closable window — e.g. every
     /// window minimized while the app stays regular). The popover's window
@@ -63,23 +61,13 @@ final class AppMenuModel: ObservableObject {
     /// `NSApplication.shared` lazily and safely. Injectable for the
     /// launch-safety regression test.
     init(
-        state: AppState,
         keyWindowProvider: @escaping () -> Bool = {
             // Only ever called from NSWindow notifications delivered on the
             // main thread (post-launch); assumeIsolated makes that explicit.
             MainActor.assumeIsolated { NSApplication.shared.keyWindow != nil }
         }
     ) {
-        hasUnreviewed = state.hasUnreviewed
         hasClosableWindow = false
-        // `$agents` emits the NEW array (willSet timing), so deriving from
-        // the emitted value — not from `state.hasUnreviewed`, which still
-        // reads the old array at that instant — is load-bearing.
-        state.$agents
-            .map { agents in agents.contains { $0.unreviewed } }
-            .removeDuplicates()
-            .sink { [weak self] in self?.hasUnreviewed = $0 }
-            .store(in: &subscriptions)
         let center = NotificationCenter.default
         Publishers.MergeMany(
             center.publisher(for: NSWindow.didBecomeKeyNotification),
@@ -134,18 +122,8 @@ struct AppMenuCommands: Commands {
                 openWindow(id: SettingsWindow.id)
             }
             .keyboardShortcut(",")
-            Button("Setup Check…") {
-                state.willOpenAuxiliaryWindow()
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: SetupCheckWindow.id)
-            }
         }
         CommandGroup(after: .appSettings) {
-            Divider()
-            Button("Rescan") { state.runReconcile(showFeedback: true) }
-                .keyboardShortcut("r")
-            Button("Clear badges") { state.clearBadges() }
-                .disabled(!menuModel.hasUnreviewed) // §4.5/§8.24, same as ⌄
             Divider()
             // §4.5: closes the key window (standard behavior; no File menu
             // to host ⌘W) — or the popover while it is key; disabled when

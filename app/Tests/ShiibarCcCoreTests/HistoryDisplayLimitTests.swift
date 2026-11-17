@@ -66,7 +66,45 @@ final class HistoryDisplayLimitTests: XCTestCase {
             XCTAssertEqual(historySection?.count, c.expectedRows, "\(c.name): heading counts shown rows")
             XCTAssertEqual(s.visibleRows.count, c.runningSessions.count + c.expectedRows, c.name)
             XCTAssertEqual(s.runningRows.count, c.runningSessions.count, "\(c.name): Running is never capped")
-            XCTAssertEqual(s.searchResultCount, c.resultCount, "\(c.name): result count is the full result")
+        }
+    }
+
+    /// §4.6 "History section" / §8.56: while the cap leaves conversations
+    /// out, the History heading shows `first 100` (from the §9 cap) in place
+    /// of the row count, browsing or searching; at or under the cap it shows
+    /// the row count. Running's heading always shows its row count.
+    func testHistoryHeadingText() {
+        struct Case {
+            let name: String
+            let resultCount: Int
+            let isFiltered: Bool
+            let runningSessions: [String]
+            let expectedHistoryText: String
+        }
+        let cases = [
+            Case(name: "under the cap", resultCount: 42, isFiltered: false, runningSessions: [],
+                 expectedHistoryText: "42"),
+            Case(name: "exactly the cap", resultCount: 100, isFiltered: false, runningSessions: [],
+                 expectedHistoryText: "100"),
+            Case(name: "over the cap, browsing", resultCount: 101, isFiltered: false, runningSessions: [],
+                 expectedHistoryText: "first 100"),
+            Case(name: "over the cap, searching", resultCount: 250, isFiltered: true, runningSessions: [],
+                 expectedHistoryText: "first 100"),
+            Case(name: "searching, narrowed under the cap", resultCount: 7, isFiltered: true, runningSessions: [],
+                 expectedHistoryText: "7"),
+            Case(name: "101 with 1 running: nothing left out", resultCount: 101, isFiltered: false,
+                 runningSessions: ["c50"], expectedHistoryText: "100"),
+            Case(name: "102 with 1 running", resultCount: 102, isFiltered: false,
+                 runningSessions: ["c0"], expectedHistoryText: "first 100"),
+        ]
+        for c in cases {
+            let agents = c.runningSessions.enumerated().map { UL.agent("t\($0.offset)", session: $0.element) }
+            let s = state(results: results(c.resultCount), isFiltered: c.isFiltered, agents: agents)
+            XCTAssertEqual(s.sections.first { $0.section == .history }?.countText, c.expectedHistoryText, c.name)
+            if !c.runningSessions.isEmpty {
+                XCTAssertEqual(s.sections.first { $0.section == .running }?.countText,
+                               "\(c.runningSessions.count)", "\(c.name): Running shows its row count")
+            }
         }
     }
 

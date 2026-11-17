@@ -83,9 +83,8 @@ enum SettingsWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state: AppState
-    /// The deduped slice of `state` the app menu observes (M29 bugfix —
-    /// see `AppMenuModel` in AppMenu.swift): agent churn must not
-    /// invalidate an open menu.
+    /// The deduped state the app menu observes (see `AppMenuModel` in
+    /// AppMenu.swift): agent churn must not invalidate an open menu.
     let appMenuModel: AppMenuModel
     /// Keeps the menu bar down to the app menu and Edit while the app is
     /// regular (§4.5/§8.30) — see AppMenu.swift.
@@ -100,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ? bundleURL.appendingPathComponent("Contents/Helpers")
             : nil
         state = AppState(helpersDirectory: helpersDirectory)
-        appMenuModel = AppMenuModel(state: state)
+        appMenuModel = AppMenuModel()
         super.init()
     }
 

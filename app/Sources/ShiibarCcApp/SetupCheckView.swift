@@ -124,8 +124,8 @@ final class SetupCheckViewModel: ObservableObject {
 
     /// Runs every check (CLI + the two app-side ones) and republishes
     /// `cliRows`/`appRows` when all of it lands. A run already in flight is left alone
-    /// (Re-run while running is a no-op, same overlap guard as manual
-    /// Rescan, `AppState.runReconcile`).
+    /// (Re-run while running is a no-op, the same overlap rule as Refresh,
+    /// `MainSurfaceModel.refresh`).
     func runChecks() {
         guard !isRunning else { return }
         isRunning = true

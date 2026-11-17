@@ -51,28 +51,25 @@ struct RowSymbolView: View {
                     .foregroundStyle(Color.primary)
             }
         case .working:
-            // Glyph-cycle spinner at full opacity, same frame size as the
-            // idle ✻. Clock-driven frames (TimelineView) instead of a
-            // repeat-forever animation or a Timer: SwiftUI cancels
-            // in-flight implicit animations when the row's frame changes
-            // (e.g. a list update moves the row), which froze the
-            // old arc spinner. Deriving the frame from wall-clock time has
-            // no animation state to cancel — and all rows stay in phase
-            // with each other for free, since every row reads
-            // `GlyphCycleSpinner` off the same reference clock. (The tray
-            // shows a static working image, not this cycle.)
-            TimelineView(.animation(minimumInterval: GlyphCycleSpinner.tickIntervalSeconds, paused: !spinning)) { context in
-                statusGlyph(GlyphCycleSpinner.glyph(atReferenceTime: context.date.timeIntervalSinceReferenceDate))
-                    .foregroundStyle(Color.primary)
-            }
+            // Glyph-cycle spinner at full opacity, same frame size and
+            // glyph size as the idle ✻. It is a Core Animation keyframe
+            // animation on a layer (`WorkingSpinnerView`) rather than a
+            // clock-driven SwiftUI redraw: the render server switches the
+            // frames, so a visible working row costs no main-thread work
+            // per frame (DESIGN.md §4.5 "updates while visible", §8.57),
+            // and a list update that moves the row does not cancel it.
+            // (The tray shows a static working image, not this cycle.)
+            WorkingSpinnerView(glyphFontSize: size * Self.glyphSizeRatio, size: size, spinning: spinning)
+                .frame(width: size, height: size)
         }
     }
 
-    /// One status glyph (the idle ✻ or a working spinner frame) at the
-    /// shared glyph size — idle and working differ only in opacity and
-    /// motion. Every glyph string carries a trailing U+FE0E (VARIATION
-    /// SELECTOR-15) forcing text presentation so it renders as the plain
-    /// glyph instead of a colored emoji — same technique as the tray's ✻
+    /// The idle ✻ at the status glyph size; the working spinner
+    /// (`WorkingSpinnerView`) draws its frames at the same size, so idle
+    /// and working differ only in opacity and motion. Every glyph string
+    /// carries a trailing U+FE0E (VARIATION SELECTOR-15) forcing text
+    /// presentation so it renders as the plain glyph instead of a colored
+    /// emoji — same technique as the tray's ✻
     /// emblem (TrayIconRenderer.emblemText). Verify on-device (T2) that
     /// none of them turn into a color glyph.
     private func statusGlyph(_ glyph: String) -> some View {

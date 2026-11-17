@@ -29,9 +29,8 @@ final class LaunchSafetyTests: XCTestCase {
     }
 
     func testAppMenuModelInitNeverCallsTheKeyWindowProvider() {
-        let state = AppState(helpersDirectory: nil)
         var providerCalls = 0
-        let model = AppMenuModel(state: state, keyWindowProvider: {
+        let model = AppMenuModel(keyWindowProvider: {
             providerCalls += 1
             return true
         })

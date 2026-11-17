@@ -76,8 +76,11 @@ match. Once the list has focus, ↑ / ↓ select a row, Return jumps or
 resumes, ⌘Return branches, and → opens the conversation and ← goes back
 to the list (in the popover or a narrow window). ⌘F (or a click) takes you
 back to the search field, and Esc closes the popover. The hint at the
-bottom left shows the keys that work right now, and while the list has
-focus the buttons show their keys (↩ and ⌘↩). The popover is as tall as
+bottom left shows the keys that work right now. The Jump / Resume and
+Branch buttons, with their keys (↩ and ⌘↩), show while the list has focus
+and hide while you type in the search field. ⌘R (or the ⟳ button next to
+the search field) refreshes the whole list: the running sessions and the
+past conversations. The popover is as tall as
 you drag its bottom edge, and stays that way. ⌘= and ⌘− make the text
 and the rows in the popover and the window larger or smaller, and ⌘0 goes
 back to the default size (the same value is in Settings… → General → **Text size**).
@@ -89,7 +92,7 @@ conversation shows next to the list; drag the line between the two to
 resize the list, and double-click the line to go back to the default
 width. Pin the window (the pin button) to keep it in front of other
 windows. While the window is open the app shows up in the
-Dock with a regular menu bar menu (⌘R rescan, ⌘, settings — where you can
+Dock with a regular menu bar menu (⌘, opens Settings… — where you can
 also switch the appearance between System, Light and Dark).
 
 You can also open the list from the keyboard while another app is in
@@ -290,7 +293,7 @@ flowchart LR
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on
-  demand via Rescan (in the `⌄` menu, or ⌘R).
+  demand via Refresh (the ⟳ button, or ⌘R).
 - All local state — the daemon's socket, its persisted session state, its
   log, and the Conversations search index (the full text of your
   conversations, kept only on your machine) — lives under

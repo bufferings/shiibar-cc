@@ -61,7 +61,7 @@ struct HeaderRowView: View {
             // build disables the field (§4.6).
             .opacity(model.list.isFullBuild ? 0.5 : 1)
             RefreshButton(startTime: model.refreshStartedAt, runEndTime: model.refreshRunEndedAt) {
-                model.refreshClicked()
+                model.refresh()
             }
             switch surface {
             case .popover:
@@ -73,11 +73,15 @@ struct HeaderRowView: View {
                 .foregroundStyle(SurfaceColors.secondary)
                 .help("Open in window")
             case .window:
+                // §4.5 "pin": OFF = the outline in the secondary color with
+                // the other header buttons' hover / press grounds; ON = the
+                // accent fill on an accent ground (window-design.html
+                // `i-pin`, `.hb.on`).
                 Button { model.keepOnTopClicked() } label: {
-                    SurfaceIconView(icon: .pin, filled: model.keepOnTop)
+                    SurfaceIconView(icon: .pin, lineWidth: 1.2, filled: model.keepOnTop)
                         .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
                 }
-                .buttonStyle(HoverChipButtonStyle())
+                .buttonStyle(HoverChipButtonStyle(onTint: model.keepOnTop ? Color.accentColor : nil))
                 .foregroundStyle(model.keepOnTop ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(SurfaceColors.secondary))
                 .help("Keep on top")
             }
@@ -99,9 +103,10 @@ struct HeaderRowView: View {
     }
 }
 
-/// ⟳ (§4.6 / §8.42 / §8.44): no ground at rest, hover raises a gray ground,
-/// press sinks it; in flight the single arrow glyph rotates from upright and
-/// settles at a whole turn, and the button is disabled.
+/// ⟳ (§4.6 / §8.42 / §8.44): runs Refresh (the same as ⌘R). No ground at
+/// rest, hover raises a gray ground, press sinks it; in flight the single
+/// arrow glyph rotates from upright and settles at a whole turn, and the
+/// button is disabled.
 struct RefreshButton: View {
     let startTime: Date?
     let runEndTime: Date?
@@ -129,7 +134,7 @@ struct RefreshButton: View {
         .buttonStyle(HoverChipButtonStyle(isEnabled: startTime == nil))
         .foregroundStyle(SurfaceColors.secondary)
         .disabled(startTime != nil)
-        .help("Refresh")
+        .help("Refresh (\u{2318}R)")
     }
 }
 
@@ -400,7 +405,8 @@ private struct ListScrollProbe: NSViewRepresentable {
     }
 }
 
-/// Bold section name + row count (§4.5).
+/// Bold section name + row count, or `first 100` while the History cap
+/// leaves rows out (§4.5, §4.6 "History section").
 struct SectionHeaderView: View {
     let section: UnifiedListSectionModel
     @Environment(\.surfaceScale) private var scale
@@ -409,7 +415,7 @@ struct SectionHeaderView: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(section.title)
                 .font(.system(size: scale.sectionTitleFont, weight: .bold))
-            Text("\(section.count)")
+            Text(section.countText)
                 .font(.system(size: scale.sectionCountFont))
                 .foregroundStyle(SurfaceColors.secondary)
         }

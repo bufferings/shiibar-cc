@@ -275,7 +275,7 @@ public enum ConversationsWebPayload {
 /// seq); the text is assembled here, never in the page.
 public enum MessageCopy {
     /// §9: the icon shows a check mark for 2 seconds after a copy (the same
-    /// value as the Rescan transient display).
+    /// value as the Refresh result's transient display).
     public static let feedbackSeconds: Double = 2
 
     /// The full text of the message with `seq`, exactly as `conversations

@@ -279,8 +279,13 @@ enum SurfaceIcon {
             }
             polyline(&path, [(13, 3), (13, 6), (10, 6)])
         case .pin:
-            polyline(&path, [(6, 2), (10, 2), (9.5, 6), (12, 8.5), (4, 8.5), (6.5, 6)], close: true)
-            polyline(&path, [(8, 8.5), (8, 14)])
+            // `i-pin`: a push pin tilted 45°, head at the top right, needle
+            // to the bottom left, as one closed outline.
+            polyline(&path, [
+                (9.5, 1.5), (14.5, 6.5), (13.1, 7.9), (12.4, 7.2), (9.4, 10.2), (9.8, 12.8),
+                (8.6, 14), (5.7, 11), (2.5, 14.2), (1.3, 13), (4.5, 9.8), (1.6, 6.9),
+                (2.8, 5.7), (5.4, 6.1), (8.4, 3.1), (7.7, 2.4),
+            ], close: true)
         case .chevronDown:
             polyline(&path, [(4, 6), (8, 10), (12, 6)])
         case .chevronUp:
@@ -326,14 +331,18 @@ struct IconShape: Shape {
 
 /// `.hb` / `.ib`: no ground at rest, 16% gray on hover, 24% while pressed
 /// (window-design.html). `restingOpacity` gives the ⌄ chip its 10% ground.
+/// `onTint` is the ground of a button that is ON (`.hb.on`: the pin while
+/// Keep on Top is ON — DESIGN.md §4.5 "pin"): the tint at 16%, 24% while
+/// pressed, in the same shape as the hover ground.
 struct HoverChipButtonStyle: ButtonStyle {
     var cornerRadius: CGFloat = 7
     var restingOpacity: Double = 0
     var isEnabled = true
+    var onTint: Color?
 
     func makeBody(configuration: Configuration) -> some View {
         HoverChipBody(configuration: configuration, cornerRadius: cornerRadius,
-                      restingOpacity: restingOpacity, isEnabled: isEnabled)
+                      restingOpacity: restingOpacity, isEnabled: isEnabled, onTint: onTint)
     }
 
     private struct HoverChipBody: View {
@@ -341,15 +350,23 @@ struct HoverChipButtonStyle: ButtonStyle {
         let cornerRadius: CGFloat
         let restingOpacity: Double
         let isEnabled: Bool
+        let onTint: Color?
         @State private var hovering = false
 
-        var body: some View {
+        private var ground: Color {
+            if let onTint {
+                return onTint.opacity(configuration.isPressed ? 0.24 : 0.16)
+            }
             let opacity: Double = !isEnabled ? restingOpacity
                 : configuration.isPressed ? 0.24
                 : hovering ? 0.16
                 : restingOpacity
+            return Color.gray.opacity(opacity)
+        }
+
+        var body: some View {
             configuration.label
-                .background(RoundedRectangle(cornerRadius: cornerRadius).fill(Color.gray.opacity(opacity)))
+                .background(RoundedRectangle(cornerRadius: cornerRadius).fill(ground))
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }
         }

@@ -153,15 +153,16 @@ final class UnifiedListStateTests: XCTestCase {
                 XCTAssertEqual(state.handle(.searchFieldFocusChanged(testCase.searchFieldFocused)), [], name)
                 XCTAssertEqual(state.isSurfaceKey, testCase.surfaceKey, name)
                 XCTAssertEqual(state.isSelectionActive, testCase.active, name)
-                // The key hints and the buttons' shortcut glyphs follow the
-                // search field's focus only (§4.5 "key hints", §4.6).
+                // The key hints and the bottom panel's buttons follow the
+                // search field's focus only, not the key status (§4.5 "key
+                // hints", §4.6 "bottom panel").
                 XCTAssertEqual(state.footerHints,
                                testCase.searchFieldFocused ? [.list] : (columns == .one ? [.move, .open] : [.move]), name)
                 if columns == .one {
-                    XCTAssertEqual(state.listBottomPanel?.showsShortcuts, !testCase.searchFieldFocused, name)
+                    XCTAssertEqual(state.listBottomPanel?.buttons != nil, !testCase.searchFieldFocused, name)
                 } else {
                     guard case .conversation(let pane) = state.paneContent else { return XCTFail("expected a pane") }
-                    XCTAssertEqual(pane.showsShortcuts, !testCase.searchFieldFocused, name)
+                    XCTAssertEqual(pane.bottomPanel.buttons != nil, !testCase.searchFieldFocused, name)
                 }
                 // The key status changes no selection and no page.
                 XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"), name)
@@ -833,9 +834,11 @@ final class UnifiedListStateTests: XCTestCase {
 
     /// §4.5 "key hints": `↩ List` alone while the search field has focus;
     /// with list focus `↑↓ Move`, plus `→ Open` on the one-column list page
-    /// while a row is selected. §4.6 "bottom panel": the buttons' shortcut
-    /// glyphs are hidden while the search field has focus.
-    func testHintsAndShortcutGlyphsFollowFocus() {
+    /// while a row is selected. §4.6 "bottom panel": the buttons are shown
+    /// only while a row is selected and the search field does not have
+    /// focus, in one column and in two (the panel keeps its height — the
+    /// view draws placeholders).
+    func testHintsAndBottomPanelButtonsFollowFocus() {
         struct Case {
             let name: String
             let columns: ColumnMode
@@ -869,14 +872,17 @@ final class UnifiedListStateTests: XCTestCase {
             XCTAssertEqual(state.handle(.searchFieldFocusChanged(testCase.searchFieldFocused)), [], testCase.name)
             XCTAssertEqual(state.isSearchFieldFocused, testCase.searchFieldFocused, testCase.name)
             XCTAssertEqual(state.footerHints, testCase.expected, testCase.name)
+            let showsButtons = testCase.select && !testCase.searchFieldFocused
             if testCase.columns == .one {
                 XCTAssertEqual(state.listBottomPanel?.hints, testCase.expected, testCase.name)
-                XCTAssertEqual(state.listBottomPanel?.showsShortcuts, !testCase.searchFieldFocused, testCase.name)
+                XCTAssertEqual(state.listBottomPanel?.buttons != nil, showsButtons, testCase.name)
             } else if testCase.select {
-                // The right column's panel: no hints, glyphs by focus.
+                // The right column's panel: no hints, buttons by focus.
                 guard case .conversation(let pane) = state.paneContent else { return XCTFail("expected a pane") }
                 XCTAssertEqual(pane.bottomPanel.hints, [], testCase.name)
-                XCTAssertEqual(pane.bottomPanel.showsShortcuts, !testCase.searchFieldFocused, testCase.name)
+                XCTAssertEqual(pane.bottomPanel.buttons != nil, showsButtons, testCase.name)
+            } else {
+                XCTAssertEqual(state.paneContent, .noSelection, testCase.name)
             }
             // The focus report changes no selection and no page.
             XCTAssertEqual(state.selection?.key, testCase.select ? .history(sessionID: "h1") : nil, testCase.name)
@@ -1148,7 +1154,7 @@ final class UnifiedListStateTests: XCTestCase {
         XCTAssertTrue(first.canGoNext)
         XCTAssertTrue(first.showsBackButton)
         XCTAssertTrue(first.showsQueryInFindBar)
-        XCTAssertTrue(first.showsShortcuts)
+        XCTAssertTrue(first.showsButtons)
         XCTAssertEqual(first.hints, [.prevNext, .back])
         XCTAssertEqual(first.primaryButton.kind, .jump)
         state.handle(.rowOpenClicked(.history(sessionID: "h3")))
@@ -1189,24 +1195,20 @@ final class UnifiedListStateTests: XCTestCase {
         }
         let cases = [
             Case(name: "one column, no selection", columns: .one, selected: nil, endSelectedRunningRow: false,
-                 expected: BottomPanelModel(hints: [.move], buttons: nil, showsShortcuts: true)),
+                 expected: BottomPanelModel(hints: [.move], buttons: nil)),
             Case(name: "one column, Running row", columns: .one, selected: .running(target: "t2"), endSelectedRunningRow: false,
                  expected: BottomPanelModel(hints: [.move, .open],
-                                            buttons: BottomPanelButtons(primary: jumpT2, branch: branchS2),
-                                            showsShortcuts: true)),
+                                            buttons: BottomPanelButtons(primary: jumpT2, branch: branchS2))),
             Case(name: "one column, History row", columns: .one, selected: .history(sessionID: "h1"), endSelectedRunningRow: false,
                  expected: BottomPanelModel(hints: [.move, .open],
-                                            buttons: BottomPanelButtons(primary: resumeH1, branch: branchH1),
-                                            showsShortcuts: true)),
+                                            buttons: BottomPanelButtons(primary: resumeH1, branch: branchH1))),
             Case(name: "one column, disabled primary (live in History)", columns: .one, selected: .history(sessionID: "live"),
                  endSelectedRunningRow: false,
                  expected: BottomPanelModel(hints: [.move, .open],
-                                            buttons: BottomPanelButtons(primary: liveJump, branch: branchLive),
-                                            showsShortcuts: true)),
+                                            buttons: BottomPanelButtons(primary: liveJump, branch: branchLive))),
             Case(name: "one column, pending refetch", columns: .one, selected: .running(target: "t2"), endSelectedRunningRow: true,
                  expected: BottomPanelModel(hints: [.move, .open],
-                                            buttons: BottomPanelButtons(primary: jumpT2.disabled(), branch: branchS2.disabled()),
-                                            showsShortcuts: true)),
+                                            buttons: BottomPanelButtons(primary: jumpT2.disabled(), branch: branchS2.disabled()))),
             Case(name: "two columns, no selection", columns: .two, selected: nil, endSelectedRunningRow: false, expected: nil),
             Case(name: "two columns, History row", columns: .two, selected: .history(sessionID: "h1"), endSelectedRunningRow: false,
                  expected: nil),
@@ -1230,6 +1232,28 @@ final class UnifiedListStateTests: XCTestCase {
         }
     }
 
+    /// §4.6 "bottom panel" / §8.55: the buttons show only while a row is
+    /// selected and the search field does not have focus.
+    func testBottomPanelShowsButtonsRule() {
+        XCTAssertFalse(BottomPanelModel.showsButtons(hasSelection: false, searchFieldFocused: false))
+        XCTAssertFalse(BottomPanelModel.showsButtons(hasSelection: false, searchFieldFocused: true))
+        XCTAssertTrue(BottomPanelModel.showsButtons(hasSelection: true, searchFieldFocused: false))
+        XCTAssertFalse(BottomPanelModel.showsButtons(hasSelection: true, searchFieldFocused: true))
+    }
+
+    /// The one-column detail page's panel follows the same rule; its key
+    /// hints stay.
+    func testDetailPagePanelHidesTheButtonsWhileTheSearchFieldHasFocus() {
+        var state = populated()
+        state.handle(.rowOpenClicked(.history(sessionID: "h1")))
+        state.handle(.searchFieldFocusChanged(true))
+        guard case .conversation(let focused) = state.paneContent else { return XCTFail("expected the detail page") }
+        XCTAssertEqual(focused.bottomPanel, BottomPanelModel(hints: [.prevNext, .back], buttons: nil))
+        state.handle(.searchFieldFocusChanged(false))
+        guard case .conversation(let listFocused) = state.paneContent else { return XCTFail("expected the detail page") }
+        XCTAssertNotNil(listFocused.bottomPanel.buttons)
+    }
+
     /// The pane's bottom panel uses the same model: the detail page's key
     /// hints, the two-column right column without hints, buttons always.
     func testPaneBottomPanel() {
@@ -1238,8 +1262,7 @@ final class UnifiedListStateTests: XCTestCase {
         guard case .conversation(let detail) = one.paneContent else { return XCTFail("expected the detail page") }
         XCTAssertEqual(detail.bottomPanel, BottomPanelModel(
             hints: [.prevNext, .back],
-            buttons: BottomPanelButtons(primary: detail.primaryButton, branch: detail.branchButton),
-            showsShortcuts: true))
+            buttons: BottomPanelButtons(primary: detail.primaryButton, branch: detail.branchButton)))
         XCTAssertEqual(detail.bottomPanel.buttons?.primary.kind, .resume)
         XCTAssertEqual(one.listBottomPanel?.buttons, detail.bottomPanel.buttons,
                        "the list page and the detail page show the same buttons")

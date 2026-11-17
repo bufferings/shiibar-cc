@@ -1,8 +1,8 @@
 // The command-key grammar of the popover and the window: the text size of
 // the popover and the window (⌘= / ⌘+ / ⌘− / ⌘0, decided by the typed
 // character — DESIGN.md §4.5 "text size"), the conversation pane's find
-// navigation (⌘G = next match / ⇧⌘G = previous match, §4.6 / §8.38(7)) and
-// ⌘F. `UnifiedListKeys.decide` folds this in for the popover and the window
+// navigation (⌘G = next match / ⇧⌘G = previous match, §4.6 / §8.38(7)),
+// ⌘F and ⌘R (Refresh, §4.5 "key operations" / §4.6). `UnifiedListKeys.decide` folds this in for the popover and the window
 // (§4.5 "key operations"); this mapping decides — kept in Core so "what
 // consumes which key" is pinned by tests, including the pass-throughs (⌘C
 // must never be captured here; it belongs to the message pane).
@@ -19,6 +19,9 @@ public enum ConversationsKeyCommand: Equatable {
     case previousMatch
     /// ⌘F — focus the search field (§4.6/§8.41).
     case focusSearch
+    /// ⌘R — Refresh, the same operation as the header row's ⟳ (§4.6 /
+    /// §8.54).
+    case refresh
 }
 
 public enum ConversationsKeyCommands {
@@ -48,6 +51,8 @@ public enum ConversationsKeyCommands {
             return hasShift ? .previousMatch : nil
         case "f":
             return hasShift ? nil : .focusSearch
+        case "r":
+            return hasShift ? nil : .refresh
         default:
             return nil
         }

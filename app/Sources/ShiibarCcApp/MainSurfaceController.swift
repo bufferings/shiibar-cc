@@ -35,7 +35,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private var becameKeyAt: [MainSurface: TimeInterval] = [:]
     /// First-responder observations of the popover's window and the main
     /// window: where the keyboard focus is decides the keys (§4.5 "key
-    /// operations"), the key hints and the buttons' shortcut glyphs.
+    /// operations"), the key hints and the bottom panel's buttons.
     private var popoverFocusObservation: NSKeyValueObservation?
     private var windowFocusObservation: NSKeyValueObservation?
     /// When the popover last closed: the status-item click that caused a
@@ -55,6 +55,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// SwiftUI view — see `SceneOpenerView`).
     var openSceneWindow: ((String) -> Void)?
     private lazy var menuHandler = HeaderMenuHandler(controller: self)
+    /// Closes the popover when the app stops being active (§4.5 "popover",
+    /// §8.58).
+    private var deactivationCloser: PopoverDeactivationCloser?
 
     /// The window's `title` (§4.5: not drawn; Mission Control and the
     /// title filters use it).
@@ -69,6 +72,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     func start() {
         setUpStatusItem()
         setUpPopover()
+        deactivationCloser = PopoverDeactivationCloser(
+            center: .default,
+            isPopoverShown: { [weak self] in self?.popover.isShown ?? false },
+            closePopover: { [weak self] in self?.closePopover() }
+        )
         setUpKeyMonitor()
         setUpMouseDownMonitor()
         model.onClosePopover = { [weak self] in self?.closePopover() }
@@ -655,7 +663,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         menu.addItem(menuHandler.item("Settings\u{2026}", #selector(HeaderMenuHandler.openSettings(_:))))
         menu.addItem(menuHandler.item("Setup Check\u{2026}", #selector(HeaderMenuHandler.openSetupCheck(_:))))
         menu.addItem(.separator())
-        menu.addItem(menuHandler.item("Rescan", #selector(HeaderMenuHandler.rescan(_:))))
         // §4.5 / §8.24: disabled when nothing is unreviewed.
         menu.addItem(menuHandler.item("Clear badges", #selector(HeaderMenuHandler.clearBadges(_:)), enabled: state.hasUnreviewed))
         menu.addItem(.separator())
@@ -692,6 +699,33 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     fileprivate var appState: AppState { state }
 }
 
+/// Closes the popover when the app resigns active (DESIGN.md §4.5 "popover"
+/// close triggers, §8.58): once an `NSMenu` has been opened from inside a
+/// `.transient` popover, AppKit no longer closes the popover when another
+/// app becomes active, but `NSApplication.didResignActiveNotification` is
+/// still posted. The window is never closed here. The notification center
+/// is injected so tests post the notification themselves.
+@MainActor
+final class PopoverDeactivationCloser {
+    private let center: NotificationCenter
+    private var observer: NSObjectProtocol?
+
+    init(center: NotificationCenter, isPopoverShown: @escaping @MainActor () -> Bool, closePopover: @escaping @MainActor () -> Void) {
+        self.center = center
+        // No queue: the block runs synchronously on the posting thread,
+        // which is the main thread for AppKit's activation notifications.
+        observer = center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                if isPopoverShown() { closePopover() }
+            }
+        }
+    }
+
+    deinit {
+        if let observer { center.removeObserver(observer) }
+    }
+}
+
 /// NSMenu action target for the ⌄ menu (NSMenuItem.target is weak).
 @MainActor
 private final class HeaderMenuHandler: NSObject {
@@ -724,7 +758,6 @@ private final class HeaderMenuHandler: NSObject {
         openedWindow = true
         controller?.openScene(SetupCheckWindow.id, title: SetupCheckWindow.title, from: surface)
     }
-    @objc func rescan(_ sender: Any?) { controller?.appState.runReconcile(showFeedback: true) }
     @objc func clearBadges(_ sender: Any?) { controller?.appState.clearBadges() }
     @objc func quit(_ sender: Any?) { controller?.appState.quit() }
 }

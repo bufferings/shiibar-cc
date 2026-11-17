@@ -1,6 +1,6 @@
 // Central app state (DESIGN.md §4.5): owns the agent table (kept in sync via
 // the daemon subscribe stream), drives reconcile at startup/reconnect,
-// dispatches CLI subprocess calls for focus/rescan, wires `agent_removed`
+// dispatches CLI subprocess calls for focus/reconcile, wires `agent_removed`
 // into notification cleanup, and owns the shared model of the popover and
 // the window (`MainSurfaceModel`).
 
@@ -28,19 +28,6 @@ final class AppState: ObservableObject {
     @Published var tccWarning = false {
         didSet { pushWarnings() }
     }
-    /// Transient message-line text for a manually-triggered Rescan (§4.5/§9:
-    /// "Rescanning…" while in flight, then "✓ Rescan done" / "Rescan failed"
-    /// for `RescanFeedback.displaySeconds` before it clears). `nil` = show
-    /// nothing. Only the manual ⌄-menu Rescan drives this — the automatic
-    /// reconcile calls at startup/reconnect stay silent (§4.5).
-    @Published private(set) var rescanFeedback: RescanFeedback? {
-        didSet { surface.showRescanFeedback(rescanFeedback) }
-    }
-    /// Bumped every time `rescanFeedback` is set, so a stale clear-after-2s
-    /// timer from an earlier run can recognize it's no longer current (e.g.
-    /// the user re-ran Rescan while the previous "✓ Rescan done" was still
-    /// fading out) and skip clearing a newer state out from under it.
-    private var rescanFeedbackGeneration = 0
     /// Settings > General "Appearance" (§4.5/§8.30, M27 T5): System /
     /// Light / Dark, persisted in UserDefaults, applied as `NSApp.appearance` the moment it's picked
     /// and re-applied at launch (`start()`). The tray icon is a template
@@ -102,8 +89,12 @@ final class AppState: ObservableObject {
             textSize: textSize,
             runCommand: { arguments, completion in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    // Exit 2 (Jump: no such tab) is an expected outcome.
-                    let result = CLIRunner.run(arguments, helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
+                    // Exit 2 (Jump: no such tab) is an expected outcome of
+                    // the row verbs; any failure of Refresh's reconcile
+                    // silently loses the backstop and must error-log
+                    // (`CLIRunner.reconcile`).
+                    let expected: Set<Int32> = arguments == CLIRunner.reconcileArguments ? [0] : [0, 2]
+                    let result = CLIRunner.run(arguments, helpersDirectory: helpersDirectory, expectedExitCodes: expected)
                     Task { @MainActor in completion(result.exitCode) }
                 }
             }
@@ -221,7 +212,7 @@ final class AppState: ObservableObject {
 
     /// Start the §4.5/§8.22 periodic reconcile: an `NSBackgroundActivityScheduler`
     /// (interval/tolerance from `PeriodicReconcile`, ShiibarCcCore) that calls
-    /// `runReconcile(showFeedback: false)` on the cadence in DESIGN.md §9.
+    /// `runReconcile` on the cadence in DESIGN.md §9.
     /// Started once here at app launch; the OS scheduler owns "don't run
     /// while asleep" (§8.22 — no custom screen-state/sleep detection is
     /// written here; the activity simply doesn't fire during sleep and
@@ -246,7 +237,7 @@ final class AppState: ObservableObject {
                 return
             }
             Task { @MainActor in
-                self.runReconcile(showFeedback: false) {
+                self.runReconcile {
                     completionHandler(.finished)
                 }
             }
@@ -432,66 +423,26 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Reconcile via the CLI (§3.5/§4.5). Reached from all three trigger
-    /// paths — startup, daemon reconnect (`onConnectedChanged`), and the ⌄
-    /// menu's Rescan — so a permission failure surfaces even before the
-    /// user ever clicks anything.
-    ///
-    /// `showFeedback`: only the manual ⌄-menu Rescan passes `true` — §4.5
-    /// scopes the transient feedback to the manual trigger, so the
-    /// automatic startup/reconnect/periodic calls stay silent.
+    /// Reconcile via the CLI (§3.5/§4.5 "running reconcile") for the
+    /// startup, daemon reconnect (`onConnectedChanged`) and periodic
+    /// triggers, so a permission failure surfaces even before the user ever
+    /// clicks anything. These runs show no transient on the message line;
+    /// exit 3 raises the warning row (§4.5). Refresh runs its own reconcile
+    /// through `MainSurfaceModel` (§4.6).
     ///
     /// `completion`: called after the subprocess finishes (any exit code),
     /// on the main actor. Only the periodic reconcile scheduler
     /// (`schedulePeriodicReconcile`) passes this — it needs to know when the
     /// run is done to hand `NSBackgroundActivityScheduler` its completion
-    /// handler. `nil` for every other caller.
-    ///
-    /// Overlapping-run guard: a second manual Rescan while one is already
-    /// running is ignored (simpler than cancelling the in-flight subprocess
-    /// or restarting its feedback timer) — reconcile is idempotent, so a
-    /// duplicate tap during an in-flight run loses nothing but an extra
-    /// subprocess launch; the in-flight run still resyncs state and reports
-    /// its own feedback when it finishes. The same idempotency is why the
-    /// periodic scheduler's own cadence needs no additional serialization
-    /// against these other triggers (§4.5 task brief).
-    func runReconcile(showFeedback: Bool = false, completion: (() -> Void)? = nil) {
-        if showFeedback {
-            guard rescanFeedback != .running else { return }
-            showRescanFeedback(.running)
-        }
+    /// handler. Reconcile is idempotent, so overlapping runs from different
+    /// triggers need no serialization.
+    func runReconcile(completion: (() -> Void)? = nil) {
         DispatchQueue.global(qos: .utility).async { [weak self, helpersDirectory] in
             let result = CLIRunner.reconcile(helpersDirectory: helpersDirectory)
             Task { @MainActor [weak self] in
                 self?.noteExitCode(result.exitCode)
-                if showFeedback {
-                    if let feedback = RescanFeedback.forFinishedExitCode(result.exitCode) {
-                        self?.showRescanFeedback(feedback)
-                    } else {
-                        // Exit 3 (TCC): the warning row is already handling
-                        // it (via `noteExitCode` above) — clear
-                        // "Rescanning…" immediately rather than flashing
-                        // transient text too.
-                        self?.rescanFeedback = nil
-                    }
-                }
                 completion?()
             }
-        }
-    }
-
-    /// Set `rescanFeedback` and, for a terminal state, schedule its
-    /// clear-after-`displaySeconds`. The generation check in the scheduled
-    /// closure keeps a stale timer from an earlier run from clearing a
-    /// feedback state that a newer run has since replaced.
-    private func showRescanFeedback(_ feedback: RescanFeedback) {
-        rescanFeedbackGeneration += 1
-        let generation = rescanFeedbackGeneration
-        rescanFeedback = feedback
-        guard feedback != .running else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + RescanFeedback.displaySeconds) { [weak self] in
-            guard let self, self.rescanFeedbackGeneration == generation else { return }
-            self.rescanFeedback = nil
         }
     }
 

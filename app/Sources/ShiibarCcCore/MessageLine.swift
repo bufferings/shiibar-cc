@@ -6,35 +6,74 @@
 
 import Foundation
 
-/// A transient message (§4.6: `Refreshing…` / `Updated · N conversations` /
-/// the Rescan results). The app holds at most one; a newer transient
-/// replaces an older one (assumption — §4.6 ranks them in one tier).
+/// A transient message of the message line (§4.5 "fixed footer", §4.6
+/// "search field" / "message line"): the Refresh states. The app holds at
+/// most one; a newer transient replaces an older one.
 public enum MessageTransient: Equatable, Sendable {
-    /// ⟳ in flight.
+    /// Refresh in flight (until the ⟳ rotation stops).
     case refreshing
-    /// ⟳ finished; `count` = the search result size, Running rows included.
-    case updated(count: Int)
-    /// Manual Rescan state (§4.5).
-    case rescan(RescanFeedback)
+    /// Refresh finished: the search and the reconcile both succeeded.
+    case refreshDone
+    /// Refresh finished: the search succeeded and the reconcile failed with
+    /// an error other than TCC (exit 3).
+    case refreshFailed
 
     public var text: String {
         switch self {
         case .refreshing:
             return "Refreshing\u{2026}"
-        case .updated(let count):
-            return "Updated \u{00B7} \(count) conversations"
-        case .rescan(.running):
-            return "Rescanning\u{2026}"
-        case .rescan(.success):
-            return "\u{2713} Rescan done"
-        case .rescan(.failure):
-            return "Rescan failed"
+        case .refreshDone:
+            return "\u{2713} Refresh done"
+        case .refreshFailed:
+            return "Refresh failed"
         }
     }
 
-    /// §9: how long a finished transient stays (`.refreshing` and
-    /// `.rescan(.running)` stay until the run ends).
-    public static let displaySeconds: Double = RescanFeedback.displaySeconds
+    /// §9: how long a finished Refresh's transient stays (`.refreshing`
+    /// stays until the run ends).
+    public static let displaySeconds: Double = 2
+}
+
+/// What a finished Refresh shows (DESIGN.md §4.6 "search field" table),
+/// from the results of its search and its `shiibar-cc reconcile`:
+///
+/// | search  | reconcile         | shown                                    |
+/// |---------|-------------------|------------------------------------------|
+/// | success | exit 0            | `✓ Refresh done` (transient)             |
+/// | success | exit 3 (TCC)      | no transient; the TCC warning row        |
+/// | success | any other failure | `Refresh failed` (transient)             |
+/// | failure | any               | no transient (the search pipeline shows  |
+/// |         |                   | `Search failed`); also the TCC warning   |
+/// |         |                   | row when the reconcile exited 3          |
+///
+/// The `Search failed` error itself is set by the search pipeline for every
+/// search trigger (§4.6), so it is not part of this decision.
+public struct RefreshOutcome: Equatable, Sendable {
+    /// The transient that replaces `Refreshing…`; nil = the line clears.
+    public let transient: MessageTransient?
+    /// The reconcile hit the Automation permission error (exit 3): raise the
+    /// shared warning row (§4.5 "making failures visible").
+    public let raisesAutomationWarning: Bool
+
+    public init(transient: MessageTransient?, raisesAutomationWarning: Bool) {
+        self.transient = transient
+        self.raisesAutomationWarning = raisesAutomationWarning
+    }
+
+    public static func decide(searchSucceeded: Bool, reconcileExitCode: Int32) -> RefreshOutcome {
+        let permissionDenied = reconcileExitCode == 3
+        guard searchSucceeded else {
+            return RefreshOutcome(transient: nil, raisesAutomationWarning: permissionDenied)
+        }
+        switch reconcileExitCode {
+        case 0:
+            return RefreshOutcome(transient: .refreshDone, raisesAutomationWarning: false)
+        case 3:
+            return RefreshOutcome(transient: nil, raisesAutomationWarning: true)
+        default:
+            return RefreshOutcome(transient: .refreshFailed, raisesAutomationWarning: false)
+        }
+    }
 }
 
 /// Errors the message line shows. An error clears on the next successful
