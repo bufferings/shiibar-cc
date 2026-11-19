@@ -147,9 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Dock-icon click (and any other reopen event) while the app is
     /// regular brings the window forward (§4.5/§8.30). Reopen can only
-    /// happen while the app is regular, which is exactly while the window is
-    /// open. ⌘Tab needs no code here: activating the app raises its visible
-    /// windows on its own.
+    /// happen while the app is regular: while the window is open, or while
+    /// the popover `Open in popover` opened is shown (no window to raise
+    /// then; the raise does nothing). ⌘Tab needs no code here: activating
+    /// the app raises its visible windows on its own.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         state.raiseMainWindow()
         return false

@@ -1,6 +1,6 @@
-// The AppKit side of the two surfaces (DESIGN.md §4.5 "tray icon click" /
-// "popover" / "window" / "key operations" / "⌄ menu" / "global hotkey",
-// §8.49 / §8.50): the status item (drawn by `TrayIconRenderer`), the
+// The AppKit side of the two surfaces (DESIGN.md §4.5 "surface form" /
+// "tray icon click" / "popover" / "window" / "key operations" / "⌄ menu" /
+// "global hotkey", §8.49 / §8.50 / §8.61): the status item (drawn by `TrayIconRenderer`), the
 // `NSPopover` with its bottom-edge height drag, the single window, the key
 // monitor that runs before the focused view, the ⌄ menu, and the global
 // hotkey's presses (the tray click's branch). The shared layout and state live in
@@ -44,6 +44,12 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private var heightDrag: PopoverHeightDrag?
     /// Set while a just-opened window's first key event is pending.
     private var skipNextWindowKey = false
+    /// The list focus owed to a window the hotkey opened from closed
+    /// (§4.5 "global hotkey"; `HotKeyListFocusPending`).
+    private var hotKeyListFocus = HotKeyListFocusPending()
+    /// Set while `Open in popover` closes the window: the app stays regular
+    /// until the popover it opens closes (`RegularAppHold`).
+    private var closingWindowForPopover = false
     private var subscriptions: Set<AnyCancellable> = []
     /// Redraws the tray when the menu bar's appearance flips (the badge
     /// variant is not a template image and picks its glyph color by hand).
@@ -81,12 +87,15 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         setUpMouseDownMonitor()
         model.onClosePopover = { [weak self] in self?.closePopover() }
         model.onOpenInWindow = { [weak self] in self?.openWindow() }
+        model.onCloseWindowForPopover = { [weak self] in self?.closeWindowForPopover() }
+        model.onShowPopoverFromWindow = { [weak self] in self?.showPopoverFromWindow() }
         model.onPresentMenu = { [weak self] anchor, surface in self?.presentMenu(anchor: anchor, surface: surface) }
         model.onKeepOnTopChanged = { [weak self] _ in self?.applyWindowLevel() }
         model.onFocusList = { [weak self] surface in self?.focusList(on: surface) }
         model.onMakeSurfaceKey = { [weak self] surface in self?.makeKey(surface) }
         state.closeKeySurface = { [weak self] in self?.closeKeySurface() }
         state.willOpenAuxiliaryWindow = { [weak self] in self?.closePopover() }
+        // Dock click / reopen: a raise, which owes the list no focus.
         state.raiseMainWindow = { [weak self] in self?.raiseWindow() }
         state.hotKey.onPressed = { [weak self] in self?.hotKeyPressed() }
         // Redraw the tray on every state change (§4.5): agents and
@@ -134,6 +143,19 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         return window.isVisible || window.isMiniaturized
     }
 
+    /// §4.5 "tray icon click": the window is frontmost when the app is
+    /// active, the window is key, not minimized, and on the current Space —
+    /// read from these four conditions only, at the moment the status
+    /// item's action or the hotkey handler runs.
+    private var isWindowFrontmost: Bool {
+        guard let window else { return false }
+        return WindowFrontmost.isFrontmost(
+            appActive: NSApp.isActive,
+            windowKey: window.isKeyWindow,
+            windowMiniaturized: window.isMiniaturized,
+            windowOnActiveSpace: window.isOnActiveSpace)
+    }
+
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         toggleSurface(from: .trayClick)
     }
@@ -144,26 +166,32 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         toggleSurface(from: .hotKey)
     }
 
-    private enum ToggleSource {
-        case trayClick
-        case hotKey
-    }
-
-    /// §4.5 "tray icon click" / "global hotkey": with the window open
-    /// (minimized included), bring it forward — no popover; otherwise the
-    /// popover opens or closes (`SurfaceToggleAction`).
-    private func toggleSurface(from source: ToggleSource) {
-        switch SurfaceToggleAction.decide(windowOpen: isWindowOpen, popoverShown: popover.isShown) {
-        case .raiseWindow:
-            raiseWindow()
-            if source == .hotKey { focusAfterHotKey() }
+    /// §4.5 "tray icon click" / "global hotkey" (`SurfaceToggleAction`).
+    private func toggleSurface(from source: SurfaceToggleSource) {
+        let action = SurfaceToggleAction.decide(
+            form: model.surfaceForm,
+            popoverShown: popover.isShown,
+            windowOpen: isWindowOpen,
+            windowFrontmost: isWindowFrontmost)
+        let focus = SurfaceToggleFocus.after(action, source: source)
+        switch action {
         case .closePopover:
             popover.performClose(nil)
         case .openPopover:
             // The click that just closed the transient popover (outside
             // click on the icon) must not reopen it.
             if source == .trayClick, Date().timeIntervalSince(lastPopoverClose) < 0.3 { return }
-            showPopover(openedByHotKey: source == .hotKey)
+            showPopover(focus: focus ?? .initial)
+        case .openWindow:
+            openWindow(focus: focus ?? .initial)
+        case .raiseWindow:
+            raiseWindow()
+            if focus == .list { focusAfterHotKey() }
+        case .closeWindow:
+            // The red button's path (§4.5 "window"): `windowWillClose` hides
+            // the surface and returns to the accessory app; nothing here
+            // activates this app or another one.
+            window?.performClose(nil)
         }
     }
 
@@ -259,7 +287,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         }
     }
 
-    func showPopover(openedByHotKey: Bool = false) {
+    func showPopover(focus: SurfaceToggleFocus) {
         guard let button = statusItem?.button else { return }
         // A remembered height above the maximum opens at the maximum; the
         // stored value itself stays (§9).
@@ -280,9 +308,10 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             popoverFocusObservation = observeFocus(of: popoverWindow, surface: .popover)
             observeKeyStatus(ofPopoverWindow: popoverWindow)
         }
-        if openedByHotKey {
+        switch focus {
+        case .list:
             focusAfterHotKey()
-        } else {
+        case .initial:
             model.requestInitialFocus()
         }
     }
@@ -309,6 +338,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         statusItem?.button?.highlight(false)
         removePopoverKeyObservers()
         model.surfaceDidHide(.popover)
+        // The popover `Open in popover` opened returns the app to
+        // accessory now (§4.5).
+        state.notePopoverClosed()
     }
 
     private var popoverWindow: NSWindow? {
@@ -317,17 +349,32 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
 
     // MARK: - Window
 
-    func openWindow() {
+    /// Opens the window (`Open in window`, and the tray click or the hotkey
+    /// in the window form — one path: the regular-app switch, the
+    /// remembered frame, the History refetch). `focus` is where the focus
+    /// goes once it is open (§4.5 "window" / "global hotkey").
+    func openWindow(focus: SurfaceToggleFocus = .initial) {
+        let opening = !isWindowOpen
+        // Before the popover closes: when the popover `Open in popover`
+        // opened is shown, the app stays regular for the window instead of
+        // returning to accessory as the popover closes.
+        if opening {
+            state.noteRegularWindowOpened()
+        }
         closePopover()
         let window = self.window ?? makeWindow()
         self.window = window
         applyWindowLevel()
-        if !isWindowOpen {
-            state.noteRegularWindowOpened()
+        if opening {
             // The open itself is the trigger (§4.6); the key event that
             // follows must not run index -> search a second time.
             skipNextWindowKey = true
             model.surfaceDidShow(.window)
+        }
+        if focus == .list {
+            hotKeyListFocus.openedByHotKey(at: ProcessInfo.processInfo.systemUptime)
+        } else {
+            hotKeyListFocus.clear()
         }
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
@@ -335,11 +382,35 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         reportFocus(of: window, surface: .window)
         // Activation can complete later; `windowDidBecomeKey` reports then.
         model.surfaceKeyChanged(surface: .window, isKey: window.isKeyWindow)
-        model.requestInitialFocus()
+        if focus == .initial {
+            model.requestInitialFocus()
+        }
+    }
+
+    /// `Open in popover`, first step (§4.5 "header row"): close the window
+    /// without returning to accessory — that waits for the popover the
+    /// operation opens next to close (`RegularAppHold`).
+    private func closeWindowForPopover() {
+        guard let window, isWindowOpen else { return }
+        closingWindowForPopover = true
+        window.close()
+        closingWindowForPopover = false
+    }
+
+    /// `Open in popover`, last step: show the popover. When it could not be
+    /// shown (no status item button), release the app's regular hold as a
+    /// popover close would, so the app does not stay regular with neither
+    /// surface shown.
+    private func showPopoverFromWindow() {
+        showPopover(focus: .initial)
+        if !popover.isShown {
+            state.notePopoverClosed()
+        }
     }
 
     func raiseWindow() {
         guard let window, isWindowOpen else { return }
+        hotKeyListFocus.clear()
         Self.raise(window)
     }
 
@@ -408,6 +479,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // After the refetch trigger: a window that was not on screen counts
         // as shown there, so this report is not dropped.
         model.surfaceKeyChanged(surface: .window, isKey: true)
+        if hotKeyListFocus.windowBecameKey(at: ProcessInfo.processInfo.systemUptime) {
+            focusAfterHotKey()
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -415,10 +489,14 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         model.surfaceKeyChanged(surface: .window, isKey: false)
     }
 
+    /// Every close of the window comes here (the red button, ⌘W, the tray
+    /// click and the hotkey on a frontmost window, `Open in popover`). The
+    /// surface form stays as it is (§4.5 "surface form").
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === window else { return }
+        hotKeyListFocus.clear()
         model.surfaceDidHide(.window)
-        state.noteRegularWindowClosed()
+        state.noteRegularWindowClosed(forOpenInPopover: closingWindowForPopover)
     }
 
     /// App menu Close Window (§4.5): the popover closes while it is key;
@@ -672,17 +750,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private func presentMenu(anchor: NSView, surface: MainSurface) {
         menuHandler.surface = surface
         menuHandler.openedWindow = false
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(menuHandler.item("About Shiibar CC", #selector(HeaderMenuHandler.showAbout(_:))))
-        menu.addItem(.separator())
-        menu.addItem(menuHandler.item("Settings\u{2026}", #selector(HeaderMenuHandler.openSettings(_:))))
-        menu.addItem(menuHandler.item("Setup Check\u{2026}", #selector(HeaderMenuHandler.openSetupCheck(_:))))
-        menu.addItem(.separator())
-        // §4.5 / §8.24: disabled when nothing is unreviewed.
-        menu.addItem(menuHandler.item("Clear badges", #selector(HeaderMenuHandler.clearBadges(_:)), enabled: state.hasUnreviewed))
-        menu.addItem(.separator())
-        menu.addItem(menuHandler.item("Quit", #selector(HeaderMenuHandler.quit(_:))))
+        // The titles and enabled flags are decided now, from the state at
+        // the moment the menu opens, and do not change while it is open
+        // (§4.5 "⌄ menu").
+        let menu = menuHandler.menu(for: HeaderMenu.entries(
+            isRefreshing: model.isRefreshing, hasUnreviewed: state.hasUnreviewed))
         guard let hostWindow = anchor.window else { return }
         let screenRect = hostWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
         menu.popUp(positioning: nil, at: NSPoint(x: screenRect.minX, y: screenRect.minY - 4), in: nil)
@@ -713,6 +785,38 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     }
 
     fileprivate var appState: AppState { state }
+    fileprivate var surfaceModel: MainSurfaceModel { model }
+}
+
+/// What started a tray-click branch (§4.5 "tray icon click" / "global
+/// hotkey").
+enum SurfaceToggleSource: Equatable {
+    case trayClick
+    case hotKey
+}
+
+/// Where the keyboard focus goes after a tray click or a hotkey press opens
+/// or raises a surface (§4.5 "popover" / "window" / "global hotkey").
+enum SurfaceToggleFocus: Equatable {
+    /// The focus of a surface opened by a tray click: the search field on
+    /// the one-column list page and in two columns, the conversation pane on
+    /// the one-column detail page (`MainSurfaceModel.requestInitialFocus`).
+    case initial
+    /// The list (`MainSurfaceModel.openedByHotKey`).
+    case list
+
+    /// The focus to request after `action`; nil = leave the focus as it is
+    /// (a window raised by a tray click, or a surface that closes).
+    static func after(_ action: SurfaceToggleAction, source: SurfaceToggleSource) -> SurfaceToggleFocus? {
+        switch action {
+        case .openPopover, .openWindow:
+            return source == .hotKey ? .list : .initial
+        case .raiseWindow:
+            return source == .hotKey ? .list : nil
+        case .closePopover, .closeWindow:
+            return nil
+        }
+    }
 }
 
 /// Closes the popover when the app resigns active (DESIGN.md §4.5 "popover"
@@ -742,24 +846,103 @@ final class PopoverDeactivationCloser {
     }
 }
 
+/// One entry of the ⌄ menu (§4.5 "⌄ menu").
+enum HeaderMenuEntry: Equatable {
+    case item(HeaderMenuItem)
+    case separator
+}
+
+struct HeaderMenuItem: Equatable {
+    enum Command: Equatable {
+        case about
+        case settings
+        case setupCheck
+        case refresh
+        case clearBadges
+        case quit
+    }
+
+    let command: Command
+    let title: String
+    let isEnabled: Bool
+    /// The key shown at the item's right with ⌘ (nil = none).
+    var commandKey: String?
+}
+
+/// The ⌄ menu's entries (§4.5 "⌄ menu"): About Shiibar CC / — / Settings… /
+/// Setup Check… / — / Refresh (⌘R) / Clear badges / — / Quit.
+enum HeaderMenu {
+    static let refreshTitle = "Refresh"
+    static let refreshingTitle = "Refreshing\u{2026}"
+
+    /// `isRefreshing` and `hasUnreviewed` are the state when the menu
+    /// opens: while a Refresh runs, its item reads `Refreshing…` and is
+    /// disabled; Clear badges is disabled when nothing is unreviewed
+    /// (§8.24).
+    static func entries(isRefreshing: Bool, hasUnreviewed: Bool) -> [HeaderMenuEntry] {
+        [
+            .item(HeaderMenuItem(command: .about, title: "About Shiibar CC", isEnabled: true)),
+            .separator,
+            .item(HeaderMenuItem(command: .settings, title: "Settings\u{2026}", isEnabled: true)),
+            .item(HeaderMenuItem(command: .setupCheck, title: "Setup Check\u{2026}", isEnabled: true)),
+            .separator,
+            .item(HeaderMenuItem(
+                command: .refresh,
+                title: isRefreshing ? refreshingTitle : refreshTitle,
+                isEnabled: !isRefreshing,
+                commandKey: "r")),
+            .item(HeaderMenuItem(command: .clearBadges, title: "Clear badges", isEnabled: hasUnreviewed)),
+            .separator,
+            .item(HeaderMenuItem(command: .quit, title: "Quit", isEnabled: true)),
+        ]
+    }
+}
+
 /// NSMenu action target for the ⌄ menu (NSMenuItem.target is weak).
 @MainActor
-private final class HeaderMenuHandler: NSObject {
+final class HeaderMenuHandler: NSObject {
     weak var controller: MainSurfaceController?
     var surface: MainSurface = .popover
     /// Set by the items that open another window (About / Settings / Setup
     /// Check) while the menu is open.
     var openedWindow = false
 
-    init(controller: MainSurfaceController) {
+    init(controller: MainSurfaceController?) {
         self.controller = controller
     }
 
-    func item(_ title: String, _ action: Selector, enabled: Bool = true) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        item.isEnabled = enabled
-        return item
+    /// The menu for `entries`, its items targeting this handler. The
+    /// enabled flags are set by hand (no automatic validation), so they keep
+    /// the values of the moment the menu was built.
+    func menu(for entries: [HeaderMenuEntry]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for entry in entries {
+            switch entry {
+            case .separator:
+                menu.addItem(.separator())
+            case .item(let item):
+                let menuItem = NSMenuItem(title: item.title, action: Self.selector(for: item.command), keyEquivalent: item.commandKey ?? "")
+                if item.commandKey != nil {
+                    menuItem.keyEquivalentModifierMask = [.command]
+                }
+                menuItem.target = self
+                menuItem.isEnabled = item.isEnabled
+                menu.addItem(menuItem)
+            }
+        }
+        return menu
+    }
+
+    private static func selector(for command: HeaderMenuItem.Command) -> Selector {
+        switch command {
+        case .about: return #selector(showAbout(_:))
+        case .settings: return #selector(openSettings(_:))
+        case .setupCheck: return #selector(openSetupCheck(_:))
+        case .refresh: return #selector(refresh(_:))
+        case .clearBadges: return #selector(clearBadges(_:))
+        case .quit: return #selector(quit(_:))
+        }
     }
 
     @objc func showAbout(_ sender: Any?) {
@@ -774,6 +957,8 @@ private final class HeaderMenuHandler: NSObject {
         openedWindow = true
         controller?.openScene(SetupCheckWindow.id, title: SetupCheckWindow.title, from: surface)
     }
+    /// The same Refresh as ⌘R (§4.6).
+    @objc func refresh(_ sender: Any?) { controller?.surfaceModel.refresh() }
     @objc func clearBadges(_ sender: Any?) { controller?.appState.clearBadges() }
     @objc func quit(_ sender: Any?) { controller?.appState.quit() }
 }

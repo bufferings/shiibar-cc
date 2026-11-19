@@ -28,6 +28,34 @@ final class MainSurfaceTests: XCTestCase {
         XCTAssertEqual(MainSurfaceDefaultsKeys.starredSessionList, "cc.shiibar.starredSessionList")
         XCTAssertEqual(MainSurfaceDefaultsKeys.collapsedSections, "cc.shiibar.collapsedSections")
         XCTAssertEqual(MainSurfaceDefaultsKeys.mainWindowFrameAutosaveName, "cc.shiibar.mainWindow")
+        XCTAssertEqual(MainSurfaceDefaultsKeys.surfaceForm, "cc.shiibar.surfaceForm")
+    }
+
+    // MARK: - Surface form (§4.5 "surface form")
+
+    func testSurfaceFormDefaultsToThePopover() {
+        XCTAssertEqual(SurfaceForm.defaultForm, .popover)
+    }
+
+    /// A missing value and an invalid one (not a string, or a string naming
+    /// no form) read as the popover form; the two forms read as themselves.
+    func testSurfaceFormFromStoredValue() {
+        let cases: [(String, Any?, SurfaceForm)] = [
+            ("missing", nil, .popover),
+            ("popover", "popover", .popover),
+            ("window", "window", .window),
+            ("unknown string", "floating", .popover),
+            ("wrong case", "Window", .popover),
+            ("empty string", "", .popover),
+            ("number", 1, .popover),
+            ("boolean", true, .popover),
+            ("array", ["window"], .popover),
+        ]
+        for (name, stored, expected) in cases {
+            XCTAssertEqual(SurfaceForm.fromStored(stored), expected, name)
+        }
+        XCTAssertEqual(SurfaceForm.window.rawValue, "window")
+        XCTAssertEqual(SurfaceForm.popover.rawValue, "popover")
     }
 
     func testColumnModeThreshold() {
@@ -119,12 +147,19 @@ final class MainSurfaceTests: XCTestCase {
 
     // MARK: - Message line (§4.6 priority)
 
+    /// §4.6 "message line": `Refreshing…` (a Refresh in flight) > index
+    /// progress > error > a finished Refresh's transient.
     func testMessageLinePriority() {
         let progress = (done: 340, total: 4200)
         let cases: [(String, (done: Int, total: Int)?, MessageLineError?, MessageTransient?, String?)] = [
             ("nothing -> hidden", nil, nil, nil, nil),
-            ("progress beats everything", progress, .searchFailed, .refreshing, "Indexing 340 of 4,200…"),
-            ("error beats transient", nil, .indexFailed, .refreshDone, "Indexing failed"),
+            ("refreshing beats progress and error", progress, .searchFailed, .refreshing, "Refreshing…"),
+            ("refreshing beats progress", progress, nil, .refreshing, "Refreshing…"),
+            ("refreshing beats error", nil, .indexFailed, .refreshing, "Refreshing…"),
+            ("progress beats error", progress, .searchFailed, nil, "Indexing 340 of 4,200…"),
+            ("progress beats refresh done", progress, nil, .refreshDone, "Indexing 340 of 4,200…"),
+            ("progress beats refresh failed", progress, nil, .refreshFailed, "Indexing 340 of 4,200…"),
+            ("error beats refresh done", nil, .indexFailed, .refreshDone, "Indexing failed"),
             ("search error beats refresh failed", nil, .searchFailed, .refreshFailed, "Search failed"),
             ("refreshing", nil, nil, .refreshing, "Refreshing…"),
             ("refresh done", nil, nil, .refreshDone, "✓ Refresh done"),

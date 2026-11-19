@@ -40,7 +40,36 @@ struct ListPageView: View {
 
 // MARK: - Header row
 
-/// Search field / ⟳ / `Open in window` (popover) or the pin (window) / ⌄.
+/// One button of the header row, right of the search field (§4.5 "header
+/// row").
+enum HeaderRowButton: Equatable, Hashable {
+    case openInWindow
+    case openInPopover
+    case pin
+    case menu
+
+    /// The tooltip; nil = none (the ⌄ chip has none).
+    var tooltip: String? {
+        switch self {
+        case .openInWindow: return "Open in window"
+        case .openInPopover: return "Open in popover"
+        case .pin: return "Keep on top"
+        case .menu: return nil
+        }
+    }
+
+    /// The buttons right of the search field, left to right (§4.5 "header
+    /// row"): popover = `Open in window` / ⌄; window = `Open in popover` /
+    /// pin / ⌄. Refresh is not here — it is the ⌄ menu's item and ⌘R.
+    static func buttons(for surface: MainSurface) -> [HeaderRowButton] {
+        switch surface {
+        case .popover: return [.openInWindow, .menu]
+        case .window: return [.openInPopover, .pin, .menu]
+        }
+    }
+}
+
+/// Search field, then `HeaderRowButton.buttons(for:)`.
 struct HeaderRowView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
@@ -69,31 +98,51 @@ struct HeaderRowView: View {
             // window-design.html `.search.dis`: faded while a full index
             // build disables the field (§4.6).
             .opacity(model.list.isFullBuild ? 0.5 : 1)
-            RefreshButton(startTime: model.refreshStartedAt, runEndTime: model.refreshRunEndedAt) {
-                model.refresh()
+            ForEach(HeaderRowButton.buttons(for: surface), id: \.self) { button in
+                headerButton(button)
             }
-            switch surface {
-            case .popover:
-                Button { model.openInWindowClicked() } label: {
-                    SurfaceIconView(icon: .window)
-                        .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
-                }
-                .buttonStyle(HoverChipButtonStyle())
-                .foregroundStyle(SurfaceColors.secondary)
-                .help("Open in window")
-            case .window:
-                // §4.5 "pin": OFF = the outline in the secondary color with
-                // the other header buttons' hover / press grounds; ON = the
-                // accent fill on an accent ground (window-design.html
-                // `i-pin`, `.hb.on`).
-                Button { model.keepOnTopClicked() } label: {
-                    SurfaceIconView(icon: .pin, lineWidth: 1.2, filled: model.keepOnTop)
-                        .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
-                }
-                .buttonStyle(HoverChipButtonStyle(onTint: model.keepOnTop ? Color.accentColor : nil))
-                .foregroundStyle(model.keepOnTop ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(SurfaceColors.secondary))
-                .help("Keep on top")
+        }
+        .padding(.horizontal, SurfaceMetrics.headerSide)
+        .frame(height: scale.headerRowHeight)
+        .padding(.top, surface == .window ? scale.windowHeaderTop : scale.headerTop)
+        .padding(.bottom, scale.headerBottom)
+        .background(surface == .window ? WindowDragArea() : nil)
+    }
+
+    @ViewBuilder
+    private func headerButton(_ button: HeaderRowButton) -> some View {
+        switch button {
+        case .openInWindow:
+            Button { model.openInWindowClicked() } label: {
+                SurfaceIconView(icon: .window)
+                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
             }
+            .buttonStyle(HoverChipButtonStyle())
+            .foregroundStyle(SurfaceColors.secondary)
+            .help(button.tooltip ?? "")
+        case .openInPopover:
+            // window-design.html `i-popover`: the same size, line width and
+            // grounds as `Open in window`.
+            Button { model.openInPopoverClicked() } label: {
+                SurfaceIconView(icon: .popover)
+                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+            }
+            .buttonStyle(HoverChipButtonStyle())
+            .foregroundStyle(SurfaceColors.secondary)
+            .help(button.tooltip ?? "")
+        case .pin:
+            // §4.5 "pin": OFF = the outline in the secondary color with
+            // the other header buttons' hover / press grounds; ON = the
+            // accent fill on an accent ground (window-design.html
+            // `i-pin`, `.hb.on`).
+            Button { model.keepOnTopClicked() } label: {
+                SurfaceIconView(icon: .pin, lineWidth: 1.2, filled: model.keepOnTop)
+                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+            }
+            .buttonStyle(HoverChipButtonStyle(onTint: model.keepOnTop ? Color.accentColor : nil))
+            .foregroundStyle(model.keepOnTop ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(SurfaceColors.secondary))
+            .help(button.tooltip ?? "")
+        case .menu:
             Button {
                 if let menuAnchor { model.menuClicked(anchor: menuAnchor, surface: surface) }
             } label: {
@@ -104,46 +153,6 @@ struct HeaderRowView: View {
             .foregroundStyle(SurfaceColors.secondary)
             .background(MenuAnchorView { menuAnchor = $0 })
         }
-        .padding(.horizontal, SurfaceMetrics.headerSide)
-        .frame(height: scale.headerRowHeight)
-        .padding(.top, surface == .window ? scale.windowHeaderTop : scale.headerTop)
-        .padding(.bottom, scale.headerBottom)
-        .background(surface == .window ? WindowDragArea() : nil)
-    }
-}
-
-/// ⟳ (§4.6 / §8.42 / §8.44): runs Refresh (the same as ⌘R). No ground at
-/// rest, hover raises a gray ground, press sinks it; in flight the single
-/// arrow glyph rotates from upright and settles at a whole turn, and the
-/// button is disabled.
-struct RefreshButton: View {
-    let startTime: Date?
-    let runEndTime: Date?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Group {
-                if let startTime {
-                    TimelineView(.animation) { context in
-                        let elapsed = context.date.timeIntervalSince(startTime)
-                        let runEnd = runEndTime.map { $0.timeIntervalSince(startTime) }
-                        let angle = ConversationsRefreshSpin.isSpinning(
-                            elapsedSeconds: elapsed, runEndSeconds: runEnd
-                        ) ? ConversationsRefreshSpin.angleDegrees(elapsedSeconds: elapsed) : 0
-                        SurfaceIconView(icon: .refresh, lineWidth: 1.5)
-                            .rotationEffect(.degrees(angle))
-                    }
-                } else {
-                    SurfaceIconView(icon: .refresh, lineWidth: 1.5)
-                }
-            }
-            .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
-        }
-        .buttonStyle(HoverChipButtonStyle(isEnabled: startTime == nil))
-        .foregroundStyle(SurfaceColors.secondary)
-        .disabled(startTime != nil)
-        .help("Refresh (\u{2318}R)")
     }
 }
 

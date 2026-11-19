@@ -10,7 +10,8 @@ import Foundation
 /// "search field" / "message line"): the Refresh states. The app holds at
 /// most one; a newer transient replaces an older one.
 public enum MessageTransient: Equatable, Sendable {
-    /// Refresh in flight (until the ⟳ rotation stops).
+    /// Refresh in flight: from the start until both the search and the
+    /// reconcile have finished (§4.6; no minimum display time).
     case refreshing
     /// Refresh finished: the search and the reconcile both succeeded.
     case refreshDone
@@ -103,9 +104,15 @@ public enum MessageLine {
         "Indexing \(grouped(done)) of \(grouped(total))\u{2026}"
     }
 
-    /// The line to show, or nil to hide the line (§4.6 priority: index
-    /// progress > error > transient).
+    /// The line to show, or nil to hide the line. Priority (§4.6 "message
+    /// line"): `Refreshing…` while a Refresh runs, then index progress, then
+    /// an error, then a finished Refresh's transient. `Refreshing…` wins
+    /// over progress and errors because the message line is the only
+    /// feedback a Refresh gives (§8.61); the finished transients do not.
     public static func text(indexProgress: (done: Int, total: Int)?, error: MessageLineError?, transient: MessageTransient?) -> String? {
+        if transient == .refreshing {
+            return MessageTransient.refreshing.text
+        }
         if let indexProgress {
             return indexProgressText(done: indexProgress.done, total: indexProgress.total)
         }

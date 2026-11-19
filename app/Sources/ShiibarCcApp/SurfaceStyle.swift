@@ -315,7 +315,7 @@ extension EnvironmentValues {
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)
 
 enum SurfaceIcon {
-    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, star
+    case search, pin, chevronDown, chevronUp, chevronRight, back, window, popover, star
 
     /// The icon's outline on a 16-unit box, y down.
     func path(in rect: CGRect) -> Path {
@@ -341,15 +341,6 @@ enum SurfaceIcon {
         case .search:
             circle(&path, 7, 7, 4.5)
             polyline(&path, [(10.5, 10.5), (14, 14)])
-        case .refresh:
-            // Arc around (8,8), r 5, from 0° clockwise to 315° (y down).
-            let steps = 48
-            for i in 0...steps {
-                let angle = (Double(i) / Double(steps)) * 315.0 * Double.pi / 180
-                let point = p(8 + 5 * CGFloat(cos(angle)), 8 + 5 * CGFloat(sin(angle)))
-                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
-            }
-            polyline(&path, [(13, 3), (13, 6), (10, 6)])
         case .pin:
             // `i-pin`: a push pin tilted 45°, head at the top right, needle
             // to the bottom left, as one closed outline.
@@ -369,6 +360,22 @@ enum SurfaceIcon {
         case .window:
             roundedRect(&path, 2, 3, 12, 10, 2)
             polyline(&path, [(2, 6.2), (14, 6.2)])
+        case .popover:
+            // `i-popover`: a rounded rectangle (corner radius 2) with an
+            // arrow notch on its top edge — the popover's outline.
+            path.move(to: p(4, 5))
+            path.addLine(to: p(6.5, 5))
+            path.addLine(to: p(8, 3))
+            path.addLine(to: p(9.5, 5))
+            path.addLine(to: p(12, 5))
+            path.addArc(tangent1End: p(14, 5), tangent2End: p(14, 7), radius: 2 * s)
+            path.addLine(to: p(14, 11.5))
+            path.addArc(tangent1End: p(14, 13.5), tangent2End: p(12, 13.5), radius: 2 * s)
+            path.addLine(to: p(4, 13.5))
+            path.addArc(tangent1End: p(2, 13.5), tangent2End: p(2, 11.5), radius: 2 * s)
+            path.addLine(to: p(2, 7))
+            path.addArc(tangent1End: p(2, 5), tangent2End: p(4, 5), radius: 2 * s)
+            path.closeSubpath()
         case .star:
             polyline(&path, [
                 (8, 1.8), (9.9, 5.7), (14.2, 6.3), (11.1, 9.3), (11.8, 13.6),

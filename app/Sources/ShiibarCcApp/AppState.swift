@@ -149,17 +149,43 @@ final class AppState: ObservableObject {
 
     // MARK: - Regular app while the window is open (§4.5/§8.30)
 
+    /// What keeps the app regular: the window, or the popover `Open in
+    /// popover` opened (`RegularAppHold`).
+    private(set) var regularAppHold = RegularAppHold()
+
     /// The window opened: the app becomes a regular app (Dock, ⌘Tab, menu
-    /// bar) for as long as it stays open.
+    /// bar) for as long as it stays open — unless it already is (the window
+    /// opened from the popover `Open in popover` opened).
     func noteRegularWindowOpened() {
-        switchToRegularApp()
+        apply(regularAppHold.windowOpened())
     }
 
-    /// The window closed: back to the resident accessory app. No activation
+    /// The window closed. `forOpenInPopover`: the app stays regular while
+    /// the popover that operation opens is shown (§4.5: returning to
+    /// accessory while it is shown may deactivate the app, which would close
+    /// that popover).
+    /// Otherwise back to the resident accessory app at once. No activation
     /// dance on the way down — the system hands focus (and the menu bar) to
     /// another app by itself.
-    func noteRegularWindowClosed() {
-        NSApp.setActivationPolicy(.accessory)
+    func noteRegularWindowClosed(forOpenInPopover: Bool) {
+        apply(regularAppHold.windowClosed(forOpenInPopover: forOpenInPopover))
+    }
+
+    /// The popover closed: back to accessory when it was the popover `Open
+    /// in popover` opened.
+    func notePopoverClosed() {
+        apply(regularAppHold.popoverClosed())
+    }
+
+    private func apply(_ effect: RegularAppHold.Effect?) {
+        switch effect {
+        case .switchToRegular:
+            switchToRegularApp()
+        case .switchToAccessory:
+            NSApp.setActivationPolicy(.accessory)
+        case nil:
+            break
+        }
     }
 
     /// Flip the app to a regular app for as long as a window exists
@@ -176,8 +202,14 @@ final class AppState: ObservableObject {
         if let dock = NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.apple.dock").first {
             dock.activate(options: [])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                // The window can be closed within this delay (the same key
+                // opens and closes it): never leave the app active with no
+                // window.
+                MainActor.assumeIsolated {
+                    guard let self, self.regularAppHold.allowsDeferredActivation else { return }
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         } else {
             // No Dock process to bounce through (not seen in practice) —

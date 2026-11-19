@@ -263,7 +263,7 @@ public enum UnifiedListEffect: Equatable, Sendable {
     case scheduleDragRefusalDismiss(id: Int, afterSeconds: Double)
     case closePopover
     /// Run Refresh (§4.6: the search and `shiibar-cc reconcile`), the same
-    /// as the header row's ⟳.
+    /// as the ⌄ menu's Refresh.
     case refresh
     case nextMatch
     case previousMatch

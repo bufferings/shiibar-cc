@@ -26,8 +26,31 @@ public enum MainSurfaceDefaultsKeys {
     /// The closed headings' names (`ListHeading` raw values: running,
     /// history, starred, recent), [String] (§4.5 "collapsing sections").
     public static let collapsedSections = "cc.shiibar.collapsedSections"
+    /// The surface form (`SurfaceForm` raw value: popover, window), String
+    /// (§4.5 "surface form").
+    public static let surfaceForm = "cc.shiibar.surfaceForm"
     /// `NSWindow.setFrameAutosaveName` for the single window.
     public static let mainWindowFrameAutosaveName = "cc.shiibar.mainWindow"
+}
+
+/// The form the list is shown in (§4.5 "surface form", §8.61): the tray
+/// icon click and the global hotkey open and close the surface of the
+/// current form. Only `Open in window` and `Open in popover` change it;
+/// closing the window does not. Persisted, so it survives a relaunch.
+public enum SurfaceForm: String, Equatable, Sendable {
+    case popover
+    case window
+
+    /// §4.5: the form without a stored value, or with an invalid one.
+    public static let defaultForm: SurfaceForm = .popover
+
+    /// The form a stored UserDefaults entry stands for: the default form for
+    /// a missing entry, a non-string value, or a string that names no form.
+    /// The caller does not write the result back.
+    public static func fromStored(_ stored: Any?) -> SurfaceForm {
+        guard let raw = stored as? String, let form = SurfaceForm(rawValue: raw) else { return defaultForm }
+        return form
+    }
 }
 
 /// The window pin (§4.5 "pin (Keep on Top)"): default OFF; only the window

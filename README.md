@@ -84,8 +84,8 @@ to the list (in the popover or a narrow window). ⌘F (or a click) takes you
 back to the search field, and Esc closes the popover. The hint at the
 bottom left shows the keys that work right now. The buttons at the
 bottom, with their keys (→ for View, ↩ for Jump / Resume, ⌘↩ for Branch),
-show while the list has focus and hide while you type in the search field. ⌘R (or the ⟳ button next to
-the search field) refreshes the whole list: the running sessions and the
+show while the list has focus and hide while you type in the search field. ⌘R (or **Refresh** in the ⌄ menu)
+refreshes the whole list: the running sessions and the
 past conversations. The popover is as tall as
 you drag its bottom edge, and stays that way. ⌘= and ⌘− make the text
 and the rows in the popover and the window larger or smaller, and ⌘0 goes
@@ -93,11 +93,17 @@ back to the default size (the same value is in Settings… → General → **Tex
 
 **Open in window** (the window button in the popover's header) moves the
 same list, with the same search and selection, into an ordinary window that
-stays put while you work through it. Widen the window and the selected
+stays put while you work through it. From then on the tray icon opens the
+window instead of the popover, also after you close the window and after
+you restart the app: a click opens the window when it is closed, brings it
+to the front when it is open but not in front, and closes it when it is
+already in front (closing it hands the keyboard back to the app you were
+in). **Open in popover** (the button right after the search field in the
+window's header) goes back to the popover. Widen the window and the selected
 conversation shows next to the list; drag the line between the two to
 resize the list, and double-click the line to go back to the default
-width. Pin the window (the pin button) to keep it in front of other
-windows. While the window is open the app shows up in the
+width. Pin the window (the pin button, to the right of Open in popover) to
+keep it in front of other windows. While the window is open the app shows up in the
 Dock with a regular menu bar menu (⌘, opens Settings… — where you can
 also switch the appearance between System, Light and Dark).
 
@@ -109,8 +115,10 @@ one you don't use elsewhere. It needs ⌃, ⌥ or ⌘ unless the key is a
 function key (F1–F20). Esc cancels recording, and × removes the shortcut.
 Pressing the shortcut opens the popover with the list focused (or the
 conversation, if one is open), so ↑ / ↓ and Return work right away;
-pressing it again closes the popover. While the window is open, the
-shortcut brings the window to the front instead, with the same focus.
+pressing it again closes the popover. After **Open in window**, the
+shortcut does what a click on the tray icon does — it opens the window,
+brings it to the front, or closes it when it is already in front — and,
+as in the popover, the list is focused when the window comes up.
 
 ### Conversations
 
@@ -302,7 +310,7 @@ flowchart LR
 - If a session's state ever drifts (a hook was missed, a pane was closed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on
-  demand via Refresh (the ⟳ button, or ⌘R).
+  demand via Refresh (in the ⌄ menu, or ⌘R).
 - All local state — the daemon's socket, its persisted session state, its
   log, and the Conversations search index (the full text of your
   conversations, kept only on your machine) — lives under

@@ -114,14 +114,12 @@ final class MainSurfaceModel: ObservableObject {
         )
     }
 
-    // MARK: - Refresh: ⟳ and ⌘R (§4.6 / §8.44 / §8.54)
+    // MARK: - Refresh: the ⌄ menu's Refresh and ⌘R (§4.5 / §4.6 / §8.61)
 
+    /// From the start of a Refresh until both its search and its reconcile
+    /// have finished. The ⌄ menu reads it when it opens (`Refreshing…`,
+    /// disabled).
     @Published private(set) var isRefreshing = false
-    /// Non-nil exactly while the ⟳ glyph spins (phase anchor, §8.44).
-    @Published private(set) var refreshStartedAt: Date?
-    /// When both the search and the reconcile of the Refresh had finished
-    /// (nil while either is in flight).
-    @Published private(set) var refreshRunEndedAt: Date?
 
     // MARK: - Conversation pane
 
@@ -169,11 +167,18 @@ final class MainSurfaceModel: ObservableObject {
     private(set) var windowColumns: ColumnMode = .one
     /// Window pin (§4.5 "pin (Keep on Top)"), persisted.
     @Published private(set) var keepOnTop: Bool
+    /// The surface form (§4.5 "surface form"), persisted. Changed only by
+    /// `Open in window` and `Open in popover`.
+    @Published private(set) var surfaceForm: SurfaceForm
 
     // MARK: - Callbacks into the AppKit layer (set by `MainSurfaceController`)
 
     var onClosePopover: () -> Void = {}
     var onOpenInWindow: () -> Void = {}
+    /// `Open in popover`, in its order (§4.5 "header row"): close the
+    /// window, then (the model saves the form) show the popover.
+    var onCloseWindowForPopover: () -> Void = {}
+    var onShowPopoverFromWindow: () -> Void = {}
     var onPresentMenu: (_ anchor: NSView, _ surface: MainSurface) -> Void = { _, _ in }
     var onKeepOnTopChanged: (Bool) -> Void = { _ in }
     /// Move keyboard focus to the list on this surface: the search field
@@ -203,7 +208,8 @@ final class MainSurfaceModel: ObservableObject {
     private let defaults: UserDefaults
     private let clock: () -> Date
     /// Run an action on the main actor after a delay (the second History
-    /// refetch after a Running row ended — §4.6 / §9). Injected for tests.
+    /// refetch after a Running row ended, and the end of a finished
+    /// Refresh's transient — §4.6 / §9). Injected for tests.
     private let schedule: (_ seconds: Double, _ action: @escaping @MainActor () -> Void) -> Void
     /// The system double-click interval (`NSEvent.doubleClickInterval`) and
     /// the system uptime clock the press times use (`NSEvent.timestamp`):
@@ -237,7 +243,6 @@ final class MainSurfaceModel: ObservableObject {
     private var indexGeneration = 0
     private var transientGeneration = 0
     private var delayedRefetchGeneration = 0
-    private var refreshCompletionTask: Task<Void, Never>?
     /// The current Refresh's search result (true = success); nil until it
     /// lands.
     private var refreshSearchSucceeded: Bool?
@@ -279,6 +284,7 @@ final class MainSurfaceModel: ObservableObject {
         // A missing key reads as false == `WindowKeepOnTop.defaultEnabled`.
         self.keepOnTop = defaults.object(forKey: MainSurfaceDefaultsKeys.windowKeepOnTop) as? Bool
             ?? WindowKeepOnTop.defaultEnabled
+        self.surfaceForm = SurfaceForm.fromStored(defaults.object(forKey: MainSurfaceDefaultsKeys.surfaceForm))
         textSize.$size
             .removeDuplicates()
             .dropFirst()
@@ -336,6 +342,15 @@ final class MainSurfaceModel: ObservableObject {
     /// notification permission, and run index -> search (§4.5 "updates
     /// while visible", §4.6 "when the popover or the window opens").
     func surfaceDidShow(_ surface: MainSurface) {
+        // A direct switch (`Open in window`, when the popover's close report
+        // arrives after the window is shown): the old surface counts as
+        // hidden first, so a pending deselect and the
+        // other per-press state end as on any close (§4.5 "row
+        // double-click"). Its own close report, which can arrive after
+        // this, is then a no-op.
+        if let previous = visibleSurface, previous != surface {
+            surfaceDidHide(previous)
+        }
         visibleSurface = surface
         send(.columnsChanged(surface == .popover ? .one : windowColumns))
         send(.clockTicked(now: nowSeconds()))
@@ -442,7 +457,25 @@ final class MainSurfaceModel: ObservableObject {
         run([.invoke(invocation)])
     }
 
-    func openInWindowClicked() { onOpenInWindow() }
+    /// `Open in window` (§4.5 "header row"): the form becomes the window
+    /// form (saved at once), then the popover closes and the window opens.
+    func openInWindowClicked() {
+        setSurfaceForm(.window)
+        onOpenInWindow()
+    }
+
+    /// `Open in popover` (§4.5 "header row"): the window closes, the form
+    /// becomes the popover form (saved at once), and the popover opens.
+    func openInPopoverClicked() {
+        onCloseWindowForPopover()
+        setSurfaceForm(.popover)
+        onShowPopoverFromWindow()
+    }
+
+    private func setSurfaceForm(_ form: SurfaceForm) {
+        surfaceForm = form
+        defaults.set(form.rawValue, forKey: MainSurfaceDefaultsKeys.surfaceForm)
+    }
 
     func menuClicked(anchor: NSView, surface: MainSurface) { onPresentMenu(anchor, surface) }
 
@@ -553,14 +586,13 @@ final class MainSurfaceModel: ObservableObject {
 
     // MARK: - Refresh
 
-    /// Refresh (§4.6 / §8.54), from ⟳ and from ⌘R: re-run the search with
-    /// the same query (History) and run `shiibar-cc reconcile` (Running),
-    /// then wait for both. A Refresh while one is in flight does nothing.
+    /// Refresh (§4.6), from the ⌄ menu's Refresh and from ⌘R: re-run the
+    /// search with the same query (History) and run `shiibar-cc reconcile`
+    /// (Running), then wait for both. A Refresh while one is in flight does
+    /// nothing.
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        refreshStartedAt = clock()
-        refreshRunEndedAt = nil
         refreshSearchSucceeded = nil
         refreshReconcileExitCode = nil
         refreshGeneration += 1
@@ -682,7 +714,9 @@ final class MainSurfaceModel: ObservableObject {
         let generation = transientGeneration
         transient = value
         guard autoClear, value != nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + MessageTransient.displaySeconds) { [weak self] in
+        // §9: a finished Refresh's transient stays this long. A newer
+        // transient replaces it and is not cleared by this timer.
+        schedule(MessageTransient.displaySeconds) { [weak self] in
             guard let self, self.transientGeneration == generation else { return }
             self.transient = nil
         }
@@ -823,43 +857,27 @@ final class MainSurfaceModel: ObservableObject {
     /// search (a newer search trigger replaces the Refresh's own run, and
     /// its result stands for it).
     private func noteRefreshSearchFinished(succeeded: Bool) {
-        guard isRefreshing, refreshRunEndedAt == nil, refreshSearchSucceeded == nil else { return }
+        guard isRefreshing, refreshSearchSucceeded == nil else { return }
         refreshSearchSucceeded = succeeded
         settleRefreshIfFinished()
     }
 
-    /// §4.6 / §8.44: once both the search and the reconcile have finished,
-    /// the ⟳ in-flight look lasts until the rotation reaches its next
-    /// whole-turn boundary at or after max(both finished, one turn); then
-    /// the outcome of §4.6's table replaces `Refreshing…`.
+    /// §4.6: once both the search and the reconcile have finished, the
+    /// outcome of §4.6's table replaces `Refreshing…` at once (no minimum
+    /// display time).
     private func settleRefreshIfFinished() {
-        guard let startedAt = refreshStartedAt, refreshRunEndedAt == nil,
+        guard isRefreshing,
               let searchSucceeded = refreshSearchSucceeded,
               let reconcileExitCode = refreshReconcileExitCode else { return }
         let outcome = RefreshOutcome.decide(searchSucceeded: searchSucceeded, reconcileExitCode: reconcileExitCode)
         if outcome.raisesAutomationWarning {
             onPermissionDenied()
         }
-        let now = clock()
-        refreshRunEndedAt = now
-        let runEndElapsed = now.timeIntervalSince(startedAt)
-        let stopElapsed = ConversationsRefreshSpin.stopElapsedSeconds(runEndSeconds: runEndElapsed)
-        let remaining = max(0, stopElapsed - runEndElapsed)
-        refreshCompletionTask?.cancel()
-        refreshCompletionTask = Task { [weak self] in
-            if remaining > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                if Task.isCancelled { return }
-            }
-            guard let self else { return }
-            self.isRefreshing = false
-            self.refreshStartedAt = nil
-            self.refreshRunEndedAt = nil
-            if let transient = outcome.transient {
-                self.setTransient(transient, autoClear: true)
-            } else if self.transient == .refreshing {
-                self.setTransient(nil)
-            }
+        isRefreshing = false
+        if let transient = outcome.transient {
+            setTransient(transient, autoClear: true)
+        } else if transient == .refreshing {
+            setTransient(nil)
         }
     }
 

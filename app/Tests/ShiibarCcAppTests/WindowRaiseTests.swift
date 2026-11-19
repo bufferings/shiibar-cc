@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 @testable import ShiibarCcApp
 
-/// The §8.43 raise used for the main window (tray click while the window is
-/// open, Dock click / reopen) and for the windows the ⌄ menu opens: an
+/// The §8.43 raise used for the main window (tray click or hotkey while the
+/// window is open and not frontmost, Dock click / reopen) and for the windows the ⌄ menu opens: an
 /// existing window is brought back (deminiaturize + front — asserted via
 /// visibility, since key status needs a focused app the test process is
 /// not). Raising must not move the window.

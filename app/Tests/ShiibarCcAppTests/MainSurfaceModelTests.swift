@@ -4,7 +4,7 @@ import XCTest
 @testable import ShiibarCcApp
 
 /// The shared model of the popover and the window (M44; DESIGN.md §4.5 /
-/// §4.6): the search pipeline (debounce, NFC, stale results, ⟳), index on
+/// §4.6): the search pipeline (debounce, NFC, stale results, Refresh), index on
 /// open, the row verbs and their outcomes, keys, stars, the pin, and the
 /// message line. Every outward action is a spy — no real subprocess,
 /// pasteboard, browser, state dir, or `UserDefaults.standard`. CJK fixture
@@ -187,7 +187,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNil(model.messageError)
     }
 
-    // MARK: - Refresh: ⟳ and ⌘R (§4.6 / §8.44 / §8.54 / §9)
+    // MARK: - Refresh: the ⌄ menu's Refresh and ⌘R (§4.6 / §8.61 / §9)
 
     /// The `shiibar-cc` runs Refresh started (the row verbs go through the
     /// same runner).
@@ -195,7 +195,7 @@ final class MainSurfaceModelTests: XCTestCase {
         spy.commands.filter { $0.arguments == ["reconcile"] }
     }
 
-    func testRefreshStartsTheSearchAndTheReconcile() {
+    func testRefreshShowsRefreshingAtTheStartAndStartsTheSearchAndTheReconcile() {
         let model = makeModel()
         model.refresh()
         XCTAssertTrue(model.isRefreshing)
@@ -205,20 +205,17 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(spy.commands.map(\.arguments), [["reconcile"]])
     }
 
-    func testRefreshWaitsForBothAndShowsDone() {
+    /// No minimum display time: the result replaces `Refreshing…` as soon
+    /// as both have finished.
+    func testRefreshWaitsForBothAndShowsTheResultAtOnce() {
         let model = makeModel()
         model.refresh()
         spy.searches[0].completion(ok(resultJSON(["r1"])))
         XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["r1"], "the result applies at once")
-        // Only the search has finished: still in flight.
-        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
         XCTAssertTrue(model.isRefreshing, "the reconcile has not finished")
-        XCTAssertNil(model.refreshRunEndedAt)
         XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
         reconciles[0].completion(0)
-        XCTAssertNotNil(model.refreshRunEndedAt, "both finished")
-        pump(until: { !model.isRefreshing }, timeout: 1.5)
-        XCTAssertFalse(model.isRefreshing)
+        XCTAssertFalse(model.isRefreshing, "both finished")
         XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
     }
 
@@ -226,30 +223,72 @@ final class MainSurfaceModelTests: XCTestCase {
         let model = makeModel()
         model.refresh()
         reconciles[0].completion(0)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
         XCTAssertTrue(model.isRefreshing, "the search has not finished")
-        XCTAssertNil(model.refreshRunEndedAt)
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
         spy.searches[0].completion(ok(resultJSON(["r1"])))
-        pump(until: { !model.isRefreshing }, timeout: 1.5)
+        XCTAssertFalse(model.isRefreshing)
         XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
     }
 
-    /// §4.6 / §8.44: the rotation lasts at least one turn even when both
-    /// runs end at once; a Refresh during the run starts nothing.
-    func testRefreshHoldsTheMinimumTurnAndIgnoresARefreshInFlight() {
+    /// §4.6: a Refresh (from the menu item or ⌘R) while one runs starts
+    /// nothing.
+    func testRefreshIgnoresARefreshInFlight() {
+        let model = makeModel()
+        model.refresh()
+        model.refresh()
+        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command]), .consumed)
+        XCTAssertEqual(spy.searches.count, 1, "a Refresh during the run starts no search")
+        XCTAssertEqual(spy.commands.count, 1, "a Refresh during the run starts no reconcile")
+        spy.searches[0].completion(ok(resultJSON(["r1"])))
+        reconciles[0].completion(0)
+        XCTAssertFalse(model.isRefreshing)
+        model.refresh()
+        XCTAssertEqual(spy.commands.count, 2, "after the run, a Refresh starts again")
+    }
+
+    /// §9: the finished transient clears after 2 seconds, timed by the
+    /// injected scheduler; a newer transient is not cleared by an older
+    /// timer.
+    func testRefreshResultClearsAfterTheDisplayTime() {
         let model = makeModel()
         model.refresh()
         spy.searches[0].completion(ok(resultJSON(["r1"])))
         reconciles[0].completion(0)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        XCTAssertTrue(model.isRefreshing, "the turn is not done at 0.3s")
+        XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
+        XCTAssertEqual(spy.scheduled.map(\.seconds), [2])
+        spy.scheduled[0].action()
+        XCTAssertNil(model.messageText)
+
         model.refresh()
-        XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command]), .consumed)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(spy.searches.count, 1, "a Refresh during the run starts no search")
-        XCTAssertEqual(spy.commands.count, 1, "a Refresh during the run starts no reconcile")
-        pump(until: { !model.isRefreshing }, timeout: 1.5)
+        spy.searches[1].completion(ok(resultJSON(["r1"])))
+        reconciles[1].completion(1)
+        XCTAssertEqual(model.messageText, "Refresh failed")
+        model.refresh()
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}")
+        spy.scheduled[1].action()
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}", "an older timer leaves a newer transient")
+    }
+
+    /// §4.6 "message line": `Refreshing…` shows over index progress and an
+    /// error; the finished transient does not.
+    func testRefreshingBeatsIndexProgressAndErrors() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a"])
+        model.query = "zz"
+        waitForSearches(2)
+        spy.searches[1].completion(CLIRunResult(exitCode: 1, stdout: "", stderr: ""))
+        XCTAssertEqual(model.messageText, "Search failed")
+        model.refresh()
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}", "over the error")
+        model.surfaceDidHide(.popover)
+        model.surfaceDidShow(.popover)
+        spy.indexLines[1](#"{"event":"start","total":4200,"full_build":true}"#)
+        spy.indexLines[1](#"{"event":"progress","done":340,"total":4200}"#)
+        XCTAssertEqual(model.messageText, "Refreshing\u{2026}", "over the index progress")
+        reconciles[0].completion(0)
+        spy.searches[2].completion(ok(resultJSON(["a"])))
         XCTAssertFalse(model.isRefreshing)
+        XCTAssertEqual(model.messageText, "Indexing 340 of 4,200\u{2026}", "the result does not beat the progress")
     }
 
     /// §4.6 table, as the model applies it: the transient, the TCC warning
@@ -279,16 +318,15 @@ final class MainSurfaceModelTests: XCTestCase {
             spy.searches[0].completion(result)
             reconciles[0].completion(c.reconcileExit)
             XCTAssertEqual(spy.permissionDeniedCount, c.permissionDenied, c.name)
-            pump(until: { !model.isRefreshing }, timeout: 1.5)
             XCTAssertFalse(model.isRefreshing, c.name)
             XCTAssertEqual(model.messageText, c.message, c.name)
         }
     }
 
-    /// §4.5 "key operations": ⌘R runs the same Refresh as ⟳ — with the
-    /// search field focused, with the list focused, on the detail page, and
-    /// in the window.
-    func testCommandRRunsTheSameRefreshAsTheButton() {
+    /// §4.5 "key operations": ⌘R runs the same Refresh as the ⌄ menu's
+    /// item — with the search field focused, with the list focused, on the
+    /// detail page, and in the window.
+    func testCommandRRunsTheSameRefreshAsTheMenuItem() {
         struct Case {
             let name: String
             let surface: MainSurface
@@ -316,12 +354,83 @@ final class MainSurfaceModelTests: XCTestCase {
             XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command], surface: c.surface,
                                searchFieldFocused: c.searchFieldFocused), .consumed, c.name)
             XCTAssertTrue(model.isRefreshing, c.name)
-            XCTAssertNotNil(model.refreshStartedAt, "\(c.name): ⟳ spins as for a click")
             XCTAssertEqual(model.messageText, "Refreshing\u{2026}", c.name)
             XCTAssertEqual(spy.searches.count, searchesBefore + 1, c.name)
             XCTAssertEqual(reconciles.count, 1, c.name)
             XCTAssertEqual(model.list.page, c.detailPage ? .detail : .list, "\(c.name): the page stays")
         }
+    }
+
+    // MARK: - Surface form (§4.5 "surface form")
+
+    func testSurfaceFormIsSavedAndReadBackOnlyByTheTwoButtons() {
+        let model = makeModel()
+        XCTAssertEqual(model.surfaceForm, .popover, "nothing stored: the popover form")
+        var openInWindow = 0
+        var openInPopover = 0
+        model.onOpenInWindow = { openInWindow += 1 }
+        model.onShowPopoverFromWindow = { openInPopover += 1 }
+
+        model.openInWindowClicked()
+        XCTAssertEqual(model.surfaceForm, .window)
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.surfaceForm) as? String, "window",
+                       "saved when it changes")
+        XCTAssertEqual(openInWindow, 1)
+        XCTAssertEqual(makeModel().surfaceForm, .window, "a new model reads the saved form")
+
+        // Closing the window (every close path ends in `surfaceDidHide`)
+        // and the other surface events leave the form alone.
+        model.surfaceDidShow(.window)
+        model.surfaceDidHide(.window)
+        model.surfaceDidShow(.popover)
+        model.surfaceDidHide(.popover)
+        XCTAssertEqual(model.surfaceForm, .window)
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.surfaceForm) as? String, "window")
+
+        model.openInPopoverClicked()
+        XCTAssertEqual(model.surfaceForm, .popover)
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.surfaceForm) as? String, "popover")
+        XCTAssertEqual(openInPopover, 1)
+        XCTAssertEqual(makeModel().surfaceForm, .popover)
+    }
+
+    func testInvalidStoredSurfaceFormReadsAsThePopover() {
+        for stored in ["sideways", 7, true] as [Any] {
+            defaults.set(stored, forKey: MainSurfaceDefaultsKeys.surfaceForm)
+            XCTAssertEqual(makeModel().surfaceForm, .popover, "\(stored)")
+        }
+        defaults.set("window", forKey: MainSurfaceDefaultsKeys.surfaceForm)
+        XCTAssertEqual(makeModel().surfaceForm, .window)
+    }
+
+    /// §4.5 "window" / "global hotkey": after a tray click opens the window
+    /// the search field takes focus; after the hotkey opens or raises it the
+    /// list does; a tray click that raises it leaves the focus alone.
+    func testFocusAfterOpeningOrRaisingTheWindow() {
+        XCTAssertEqual(SurfaceToggleFocus.after(.openWindow, source: .trayClick), .initial)
+        XCTAssertEqual(SurfaceToggleFocus.after(.openWindow, source: .hotKey), .list)
+        XCTAssertEqual(SurfaceToggleFocus.after(.raiseWindow, source: .hotKey), .list)
+        XCTAssertNil(SurfaceToggleFocus.after(.raiseWindow, source: .trayClick))
+        XCTAssertEqual(SurfaceToggleFocus.after(.openPopover, source: .trayClick), .initial)
+        XCTAssertEqual(SurfaceToggleFocus.after(.openPopover, source: .hotKey), .list)
+        XCTAssertNil(SurfaceToggleFocus.after(.closeWindow, source: .trayClick))
+        XCTAssertNil(SurfaceToggleFocus.after(.closeWindow, source: .hotKey))
+        XCTAssertNil(SurfaceToggleFocus.after(.closePopover, source: .trayClick))
+        XCTAssertNil(SurfaceToggleFocus.after(.closePopover, source: .hotKey))
+
+        // What each request does in the window (list page, rows shown).
+        let model = makeModel()
+        model.surfaceDidShow(.window)
+        spy.indexCompletions.last?(0)
+        spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
+        let search = model.searchFocusRequests[.window] ?? 0
+        model.requestInitialFocus()
+        XCTAssertEqual(model.searchFocusRequests[.window], search + 1, "initial: the search field")
+        XCTAssertTrue(spy.focusListSurfaces.isEmpty)
+        model.openedByHotKey()
+        XCTAssertEqual(spy.focusListSurfaces, [.window], "hotkey: the list")
+        XCTAssertEqual(model.searchFocusRequests[.window], search + 1)
+        XCTAssertNotNil(model.list.selection, "the first row is selected")
     }
 
     func testRefreshRunsNothingWhileAnInputMethodComposes() {
@@ -1172,6 +1281,45 @@ final class MainSurfaceModelTests: XCTestCase {
         model.surfaceDidHide(.popover)
         spy.scheduled[0].action()
         XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
+    }
+
+    /// Showing the other surface directly (`Open in window` / `Open in
+    /// popover`) ends the old surface first: a pending deselect is
+    /// cancelled, and the old surface's later close report changes nothing.
+    func testSwitchingSurfacesDirectlyCancelsThePendingDeselect() {
+        for (from, to) in [(MainSurface.popover, MainSurface.window), (.window, .popover)] {
+            let name = "\(from) -> \(to)"
+            let model = makeModel()
+            model.surfaceDidShow(from)
+            spy.indexCompletions.last?(0)
+            spy.searches.last?.completion(ok(resultJSON(["a"])))
+            model.rowClicked(.conversation(sessionID: "a"))
+            model.pointerDown(surface: from, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
+            model.rowClicked(.conversation(sessionID: "a"))
+            XCTAssertEqual(spy.scheduled.count, 1, name)
+            model.surfaceDidShow(to)
+            spy.scheduled[0].action()
+            XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), "\(name): the selection stays")
+            model.surfaceDidHide(from)
+            XCTAssertEqual(model.visibleSurface, to, "\(name): the old surface's close is a no-op")
+            XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), name)
+        }
+    }
+
+    /// `Open in popover` runs in its order: close the window, save the
+    /// form, show the popover.
+    func testOpenInPopoverClosesTheWindowThenSavesTheFormThenShowsThePopover() {
+        let model = makeModel()
+        model.openInWindowClicked()
+        var steps: [String] = []
+        model.onCloseWindowForPopover = {
+            steps.append("close window, form \(model.surfaceForm.rawValue)")
+        }
+        model.onShowPopoverFromWindow = {
+            steps.append("show popover, saved \(self.defaults.string(forKey: MainSurfaceDefaultsKeys.surfaceForm) ?? "-")")
+        }
+        model.openInPopoverClicked()
+        XCTAssertEqual(steps, ["close window, form window", "show popover, saved popover"])
     }
 
     /// Key-status reports and presses from the surface that is not on

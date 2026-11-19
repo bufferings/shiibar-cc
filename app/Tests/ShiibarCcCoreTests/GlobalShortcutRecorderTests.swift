@@ -218,14 +218,69 @@ final class GlobalShortcutRecorderTests: XCTestCase {
         XCTAssertEqual(recorder.handle(.clearClicked), [], "nothing to clear")
     }
 
-    // MARK: - Surface branch
+    // MARK: - Surface branch (§4.5 "tray icon click" / "global hotkey")
 
-    /// §4.5: the hotkey branches like the tray click — the window open:
-    /// raise it (never close, even when key); otherwise toggle the popover.
-    func testSurfaceToggle() {
-        XCTAssertEqual(SurfaceToggleAction.decide(windowOpen: false, popoverShown: false), .openPopover)
-        XCTAssertEqual(SurfaceToggleAction.decide(windowOpen: false, popoverShown: true), .closePopover)
-        XCTAssertEqual(SurfaceToggleAction.decide(windowOpen: true, popoverShown: false), .raiseWindow)
-        XCTAssertEqual(SurfaceToggleAction.decide(windowOpen: true, popoverShown: true), .raiseWindow)
+    /// Every combination of form × popover shown × window open × window
+    /// frontmost. The order: a shown popover closes; an open window closes
+    /// when frontmost and comes forward otherwise; else the form's surface
+    /// opens. Combinations the spec never produces follow the same order.
+    func testSurfaceToggleCoversEveryCombination() {
+        for form in [SurfaceForm.popover, .window] {
+            for popoverShown in [false, true] {
+                for windowOpen in [false, true] {
+                    for frontmost in [false, true] {
+                        let expected: SurfaceToggleAction
+                        if popoverShown {
+                            expected = .closePopover
+                        } else if windowOpen {
+                            expected = frontmost ? .closeWindow : .raiseWindow
+                        } else {
+                            expected = form == .popover ? .openPopover : .openWindow
+                        }
+                        XCTAssertEqual(
+                            SurfaceToggleAction.decide(form: form, popoverShown: popoverShown,
+                                                       windowOpen: windowOpen, windowFrontmost: frontmost),
+                            expected,
+                            "form \(form) popover \(popoverShown) window \(windowOpen) frontmost \(frontmost)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// The §4.5 table and the popover form, spelled out.
+    func testSurfaceToggleSpecRows() {
+        // Popover form: the popover toggles.
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .popover, popoverShown: false, windowOpen: false, windowFrontmost: false), .openPopover)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .popover, popoverShown: true, windowOpen: false, windowFrontmost: false), .closePopover)
+        // Window form: closed -> open; open, not frontmost -> raise;
+        // frontmost -> close.
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: false, windowOpen: false, windowFrontmost: false), .openWindow)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: false, windowOpen: false, windowFrontmost: true), .openWindow,
+                       "a closed window is never frontmost")
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: false, windowOpen: true, windowFrontmost: false), .raiseWindow)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: false, windowOpen: true, windowFrontmost: true), .closeWindow)
+        // Not produced by the spec: they follow the order.
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .popover, popoverShown: false, windowOpen: true, windowFrontmost: true), .closeWindow)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .popover, popoverShown: false, windowOpen: true, windowFrontmost: false), .raiseWindow)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: true, windowOpen: false, windowFrontmost: false), .closePopover)
+        XCTAssertEqual(SurfaceToggleAction.decide(form: .window, popoverShown: true, windowOpen: true, windowFrontmost: true), .closePopover)
+    }
+
+    /// §4.5: frontmost only when all four conditions hold.
+    func testWindowFrontmostNeedsAllFourConditions() {
+        for active in [false, true] {
+            for key in [false, true] {
+                for miniaturized in [false, true] {
+                    for onSpace in [false, true] {
+                        XCTAssertEqual(
+                            WindowFrontmost.isFrontmost(appActive: active, windowKey: key,
+                                                        windowMiniaturized: miniaturized, windowOnActiveSpace: onSpace),
+                            active && key && !miniaturized && onSpace,
+                            "active \(active) key \(key) minimized \(miniaturized) on space \(onSpace)")
+                    }
+                }
+            }
+        }
     }
 }

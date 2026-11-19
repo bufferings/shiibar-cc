@@ -19,8 +19,8 @@ public enum ConversationsKeyCommand: Equatable {
     case previousMatch
     /// ⌘F — focus the search field (§4.6/§8.41).
     case focusSearch
-    /// ⌘R — Refresh, the same operation as the header row's ⟳ (§4.6 /
-    /// §8.54).
+    /// ⌘R — Refresh, the same operation as the ⌄ menu's Refresh (§4.5
+    /// "key operations" / "⌄ menu", §4.6).
     case refresh
 }
 

@@ -158,17 +158,50 @@ public struct GlobalShortcutRecorder: Equatable, Sendable {
     }
 }
 
-/// What the hotkey (and the tray icon click) does with the surfaces (§4.5
-/// "tray icon click" / "global hotkey"): with the window open the window
-/// comes forward and becomes key (never closes, even when already key);
-/// otherwise the popover toggles.
+/// What the tray icon click and the global hotkey do with the surfaces
+/// (§4.5 "tray icon click" / "global hotkey", §8.61). Decided in this order:
+/// 1. the popover is shown: close it;
+/// 2. the window is open (minimized included): close it when it is
+///    frontmost, otherwise bring it forward;
+/// 3. neither: open the surface of the current form.
+/// Combinations the spec never produces (the window open in the popover
+/// form, the popover shown in the window form) follow the same order.
 public enum SurfaceToggleAction: Equatable, Sendable {
-    case raiseWindow
     case openPopover
     case closePopover
+    case openWindow
+    case raiseWindow
+    case closeWindow
 
-    public static func decide(windowOpen: Bool, popoverShown: Bool) -> SurfaceToggleAction {
-        if windowOpen { return .raiseWindow }
-        return popoverShown ? .closePopover : .openPopover
+    /// `windowFrontmost` is ignored while the window is not open.
+    public static func decide(
+        form: SurfaceForm,
+        popoverShown: Bool,
+        windowOpen: Bool,
+        windowFrontmost: Bool
+    ) -> SurfaceToggleAction {
+        if popoverShown { return .closePopover }
+        if windowOpen { return windowFrontmost ? .closeWindow : .raiseWindow }
+        switch form {
+        case .popover: return .openPopover
+        case .window: return .openWindow
+        }
+    }
+}
+
+/// "The window is frontmost" (§4.5 "tray icon click"): all four conditions
+/// hold. Any one failing (another app is active, another window of the app
+/// such as Settings is key, the window is minimized, or it is on another
+/// Space) makes it not frontmost; a pinned window drawn above other apps is
+/// not frontmost while it is not key. The values are read just before the
+/// click or the hotkey press acts on them.
+public enum WindowFrontmost {
+    public static func isFrontmost(
+        appActive: Bool,
+        windowKey: Bool,
+        windowMiniaturized: Bool,
+        windowOnActiveSpace: Bool
+    ) -> Bool {
+        appActive && windowKey && !windowMiniaturized && windowOnActiveSpace
     }
 }
