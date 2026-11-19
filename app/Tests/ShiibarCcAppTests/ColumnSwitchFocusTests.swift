@@ -84,30 +84,32 @@ final class ColumnSwitchFocusTests: XCTestCase {
 
     /// The window as `MainSurfaceController.openWindow` sets it up: the
     /// same content view, the window shown, the initial focus request (the
-    /// search field on the list page), and one History row delivered.
-    private func openWindow(width: CGFloat) throws -> (MainSurfaceModel, NSWindow) {
+    /// search field on the list page), and the conversations delivered
+    /// (one by default).
+    private func openWindow(width: CGFloat, conversations: [String] = ["s1"]) throws -> (MainSurfaceModel, NSWindow) {
         let model = makeModel()
         let window = OffscreenWindow(
             contentRect: NSRect(x: -40000, y: -40000, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: true)
         let hosting = FirstMouseHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .window))
-        return try show(hosting, in: window, surface: .window, model: model)
+        return try show(hosting, in: window, surface: .window, model: model, conversations: conversations)
     }
 
     /// The popover's content (always one column), hosted in a plain
     /// borderless offscreen window as the popover hosts it.
-    private func openPopoverContent() throws -> (MainSurfaceModel, NSWindow) {
+    private func openPopoverContent(conversations: [String] = ["s1"]) throws -> (MainSurfaceModel, NSWindow) {
         let model = makeModel()
         let window = OffscreenWindow(
             contentRect: NSRect(x: -40000, y: -40000, width: CGFloat(TextSize.default.popoverWidth), height: height),
             styleMask: [.borderless], backing: .buffered, defer: true)
         let hosting = NSHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .popover))
-        return try show(hosting, in: window, surface: .popover, model: model)
+        return try show(hosting, in: window, surface: .popover, model: model, conversations: conversations)
     }
 
     private func show(
-        _ hosting: NSHostingView<MainSurfaceView>, in window: NSWindow, surface: MainSurface, model: MainSurfaceModel
+        _ hosting: NSHostingView<MainSurfaceView>, in window: NSWindow, surface: MainSurface, model: MainSurfaceModel,
+        conversations: [String]
     ) throws -> (MainSurfaceModel, NSWindow) {
         // ARC holds the reference (release-on-close double-frees under XCTest).
         window.isReleasedWhenClosed = false
@@ -124,10 +126,11 @@ final class ColumnSwitchFocusTests: XCTestCase {
         XCTAssertLessThan(window.frame.maxX, -30000, "the window must stay offscreen")
         XCTAssertTrue(MainSurfaceController.isSearchFieldFocused(in: window), "the surface opens with the search field focused")
         try XCTUnwrap(indexCompletions.last)(0)
+        let json = conversations.enumerated().map { index, id in
+            #"{"session_id":"\#(id)","cwd":"/Users/example/demo","title":"t","updated_at":\#(100 - index),"live":false,"last_prompt":null}"#
+        }
         try XCTUnwrap(searches.last)(CLIRunResult(
-            exitCode: 0,
-            stdout: #"{"conversations":[{"session_id":"s1","cwd":"/Users/example/demo","title":"t","updated_at":1,"live":false,"last_prompt":null}]}"#,
-            stderr: ""))
+            exitCode: 0, stdout: #"{"conversations":[\#(json.joined(separator: ","))]}"#, stderr: ""))
         pump()
         return (model, window)
     }
@@ -156,7 +159,7 @@ final class ColumnSwitchFocusTests: XCTestCase {
     /// (`MainSurfaceController.focusList`), with a row selected.
     private func focusListWithSelectedRow(_ model: MainSurfaceModel, in window: NSWindow) {
         window.makeFirstResponder(nil)
-        model.rowClicked(.history(sessionID: "s1"))
+        model.rowClicked(.conversation(sessionID: "s1"))
         pump()
         XCTAssertNotNil(model.list.selection)
         XCTAssertTrue(window.firstResponder === window)
@@ -215,6 +218,91 @@ final class ColumnSwitchFocusTests: XCTestCase {
         resize(window, model: model, to: twoColumnWidth, expecting: .two)
         XCTAssertTrue(window.firstResponder === window, "the list keeps focus back in two columns")
         XCTAssertNotNil(model.list.selection)
+    }
+
+    // MARK: - Sections and the row drag keep the list page
+
+    /// A drag of a row onto `hit` and its drop, with the pumps between.
+    private func dragAndDrop(_ model: MainSurfaceModel, surface: MainSurface, row: String, onto hit: ListPointerHit) {
+        model.pointerDown(surface: surface, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
+        model.rowPressed(.conversation(sessionID: row), clickCount: 1, onStar: false, x: 10, y: 10)
+        model.rowPressDragged(x: 10, y: 20)
+        pump()
+        XCTAssertNotNil(model.list.cardDrag, "\(surface)")
+        model.cardDragMoved(hit)
+        pump()
+        model.cardDragEnded()
+        pump()
+    }
+
+    private func clickHeading(_ model: MainSurfaceModel, surface: MainSurface, _ heading: ListHeading) {
+        model.pointerDown(surface: surface, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
+        model.headingClicked(heading)
+        pump()
+    }
+
+    /// §4.5 "collapsing sections" / "row drag": adding the Starred section,
+    /// closing and opening headings, and drops that move rows keep the same
+    /// search field. A search field built anew would run the surface's
+    /// earlier focus request again and take the focus (DESIGN.md §8.59).
+    func testSectionChangesAndDropsKeepTheSearchField() throws {
+        for surface in [MainSurface.window, .popover] {
+            let conversations = ["s1", "s2", "s3"]
+            let (model, window) = surface == .window
+                ? try openWindow(width: oneColumnWidth, conversations: conversations)
+                : try openPopoverContent(conversations: conversations)
+            let field = try searchField(in: window)
+            window.makeFirstResponder(nil)
+            pump()
+
+            model.starClicked(sessionID: "s1")
+            model.starClicked(sessionID: "s2")
+            pump()
+            XCTAssertEqual(model.list.headings.map(\.heading), [.history, .starred, .recent], "\(surface)")
+            clickHeading(model, surface: surface, .starred)
+            XCTAssertEqual(model.list.headings.map(\.isOpen), [true, false, true], "\(surface)")
+            clickHeading(model, surface: surface, .history)
+            clickHeading(model, surface: surface, .history)
+            clickHeading(model, surface: surface, .starred)
+
+            // A reorder inside Starred, then a Recent row starred at a place.
+            dragAndDrop(model, surface: surface, row: "s2", onto: .element(.row(.conversation(sessionID: "s1")), upperHalf: true))
+            XCTAssertEqual(model.list.starredRows.map(\.sessionID), ["s2", "s1"], "\(surface)")
+            dragAndDrop(model, surface: surface, row: "s3", onto: .element(.row(.conversation(sessionID: "s2")), upperHalf: false))
+            XCTAssertEqual(model.list.starredRows.map(\.sessionID), ["s2", "s3", "s1"], "\(surface)")
+            XCTAssertEqual(model.list.headings.map(\.heading), [.history, .starred], "\(surface)")
+
+            XCTAssertTrue(try searchField(in: window) === field, "\(surface): the search field is not built anew")
+            XCTAssertFalse(MainSurfaceController.isSearchFieldFocused(in: window),
+                           "\(surface): no earlier focus request runs again")
+            window.orderOut(nil)
+            defaults = InMemoryDefaults()
+        }
+    }
+
+    /// §4.5 "collapsing sections": a heading click on a window that is not
+    /// key asks it to become key without moving its first responder and
+    /// without activating the app. (Whether it becomes key cannot be seen
+    /// here: an app that is not active has no key window, and the test must
+    /// not activate it.)
+    func testMakingTheSurfaceKeyKeepsItsFirstResponder() throws {
+        let (_, window) = try openWindow(width: oneColumnWidth)
+        let other = OffscreenWindow(
+            contentRect: NSRect(x: -42000, y: -42000, width: 200, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: true)
+        other.isReleasedWhenClosed = false
+        other.orderFrontRegardless()
+        other.makeKey()
+        pump()
+        let responder = window.firstResponder
+        let wasActive = NSApp.isActive
+        XCTAssertTrue(window.canBecomeKey)
+        XCTAssertTrue(MainSurfaceController.isSearchFieldFocused(in: window))
+        MainSurfaceController.makeKeyKeepingFocus(window)
+        pump()
+        XCTAssertTrue(window.firstResponder === responder, "the focus stays where it was")
+        XCTAssertEqual(NSApp.isActive, wasActive, "the app is not activated")
+        other.orderOut(nil)
     }
 
     // MARK: - Search field focus

@@ -15,8 +15,17 @@ public enum MainSurfaceDefaultsKeys {
     public static let listColumnWidth = "cc.shiibar.listColumnWidth"
     /// Window pin ("Keep on top"), Bool.
     public static let windowKeepOnTop = "cc.shiibar.windowKeepOnTop"
-    /// Starred conversation session IDs, [String].
+    /// Starred conversation session IDs as an unordered set, [String],
+    /// stored by app versions without the Starred section's order. Read
+    /// only while `starredSessionList` is absent; never written or removed
+    /// (§4.6 "stars").
     public static let starredSessionIDs = "cc.shiibar.starredSessionIDs"
+    /// The stars as an ordered list of session IDs, [String]: the Starred
+    /// section's order (§4.6 "stars").
+    public static let starredSessionList = "cc.shiibar.starredSessionList"
+    /// The closed headings' names (`ListHeading` raw values: running,
+    /// history, starred, recent), [String] (§4.5 "collapsing sections").
+    public static let collapsedSections = "cc.shiibar.collapsedSections"
     /// `NSWindow.setFrameAutosaveName` for the single window.
     public static let mainWindowFrameAutosaveName = "cc.shiibar.mainWindow"
 }
@@ -40,10 +49,10 @@ public enum MainSurfaceRefresh {
     public static let endedRowSecondRefetchSeconds: Double = 2
 }
 
-/// The History section's display cap (§4.6 "History section", §9).
-public enum HistoryDisplayLimit {
-    /// §9: History shows at most this many rows (after the Running
-    /// exclusion and the starred-first order). The Running section is never
+/// The Recent section's display cap (§4.6 "Recent section", §9).
+public enum RecentDisplayLimit {
+    /// §9: Recent shows at most this many rows (after the Running and
+    /// Starred exclusions). The Running and Starred sections are never
     /// capped, and the cap applies to display only — the search result
     /// itself (star pruning, Running titles, the result count) is whole.
     public static let maxRows = 100

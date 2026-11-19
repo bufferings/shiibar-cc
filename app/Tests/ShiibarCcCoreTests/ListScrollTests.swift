@@ -8,7 +8,7 @@ final class ListScrollTests: XCTestCase {
     private let viewport = ListViewport(top: 200, height: 500, contentHeight: 2_000)
 
     private func row(_ top: Double, _ bottom: Double, _ id: String = "x") -> ListRowExtent {
-        ListRowExtent(key: .history(sessionID: id), top: top, bottom: bottom)
+        ListRowExtent(key: .conversation(sessionID: id), top: top, bottom: bottom)
     }
 
     // MARK: - Reveal
@@ -78,8 +78,8 @@ final class ListScrollTests: XCTestCase {
 
     private let rows = [
         ListRowExtent(key: .running(target: "t0"), top: 31, bottom: 100),
-        ListRowExtent(key: .history(sessionID: "a"), top: 131, bottom: 200),
-        ListRowExtent(key: .history(sessionID: "b"), top: 200, bottom: 269),
+        ListRowExtent(key: .conversation(sessionID: "a"), top: 131, bottom: 200),
+        ListRowExtent(key: .conversation(sessionID: "b"), top: 200, bottom: 269),
     ]
 
     func testCaptureTakesTheRowAtTheTopEdge() {
@@ -87,14 +87,14 @@ final class ListScrollTests: XCTestCase {
             ListScrollAnchor.capture(viewport: ListViewport(top: top, height: 300, contentHeight: 600), rows: rows)
         }
         XCTAssertEqual(capture(0), ListScrollAnchor(key: .running(target: "t0"), offset: -31), "header above the first row")
-        XCTAssertEqual(capture(150), ListScrollAnchor(key: .history(sessionID: "a"), offset: 19))
-        XCTAssertEqual(capture(200), ListScrollAnchor(key: .history(sessionID: "b"), offset: 0))
-        XCTAssertEqual(capture(290), ListScrollAnchor(key: .history(sessionID: "b"), offset: 90), "past the last row")
+        XCTAssertEqual(capture(150), ListScrollAnchor(key: .conversation(sessionID: "a"), offset: 19))
+        XCTAssertEqual(capture(200), ListScrollAnchor(key: .conversation(sessionID: "b"), offset: 0))
+        XCTAssertEqual(capture(290), ListScrollAnchor(key: .conversation(sessionID: "b"), offset: 90), "past the last row")
         XCTAssertNil(ListScrollAnchor.capture(viewport: viewport, rows: []))
     }
 
     func testRestoreFollowsTheRow() {
-        let anchor = ListScrollAnchor(key: .history(sessionID: "a"), offset: 19)
+        let anchor = ListScrollAnchor(key: .conversation(sessionID: "a"), offset: 19)
         let viewport = ListViewport(top: 0, height: 300, contentHeight: 1_000)
         XCTAssertEqual(anchor.restoredTop(viewport: viewport, rows: rows), 150)
         let moved = rows.map { ListRowExtent(key: $0.key, top: $0.top + 69, bottom: $0.bottom + 69) }
@@ -133,7 +133,7 @@ final class ListScrollTests: XCTestCase {
     func testAnchorRestoresTheSameRowAcrossInsets() {
         let popover = ListViewport(clipTop: 150, clipHeight: 552, topInset: 0, bottomInset: 0, contentHeight: 1_000)
         let anchor = ListScrollAnchor.capture(viewport: popover, rows: rows)
-        XCTAssertEqual(anchor, ListScrollAnchor(key: .history(sessionID: "a"), offset: 19))
+        XCTAssertEqual(anchor, ListScrollAnchor(key: .conversation(sessionID: "a"), offset: 19))
         let window = ListViewport(clipTop: -46, clipHeight: 594, topInset: 46, bottomInset: 0, contentHeight: 1_000)
         let top = anchor?.restoredTop(viewport: window, rows: rows)
         XCTAssertEqual(top, 150, "the same unobscured top")

@@ -46,9 +46,14 @@ a glance:
 
 Click the tray icon and a popover opens under it with one list: the
 sessions running right now (**Running**, newest first, each with its status
-symbol) and your past Claude Code conversations (**History**). Type to
-filter both at once (the × at the right end of the search field clears
-it). Click a row to select it (click it again to clear the selection);
+symbol) and your past Claude Code conversations (**History**). Once you
+star a conversation, History has two parts: the conversations you starred
+(**Starred**, in the order you arrange them) and the rest (**Recent**,
+newest first). Click a section heading (Running, History, Starred or
+Recent) to collapse or expand it. Type to
+filter the whole list at once (the × at the right end of the search field clears
+it); while you search, History is one list with the starred conversations
+first. Click a row to select it (click it again to clear the selection);
 the buttons at the bottom act on the selected row, and
 double-clicking a row runs its main button directly (⌘-double-click runs
 Branch instead). On a running
@@ -111,7 +116,7 @@ shortcut brings the window to the front instead, with the same focus.
 
 Alongside the live status view, Shiibar CC keeps a searchable index of your
 Claude Code conversation history across every folder; that index is what
-fills the History section. Select a row and press the **View** button at
+fills History. Select a row and press the **View** button at
 the bottom (or →) to **read** the conversation from the
 bottom (latest) up: in the popover, and in a narrow window, it slides in as
 a page of its own; in a wide window there is no **View** button, and the
@@ -119,7 +124,10 @@ selected row's conversation shows next to the list. Search is incremental; each 
 two or more characters matches as a case-insensitive substring ("auth" finds
 "authentication"), multiple words are AND-ed, and the matches are
 highlighted in the conversation (⌘G / ⇧⌘G step through them). Star a
-conversation in History to keep it at the top of the section.
+past conversation (hover its row and click the star) to move it to Starred.
+Drag the rows in Starred to reorder them; dragging a row from Recent
+into Starred stars it where you drop it, and dragging one back to Recent
+removes the star. Dragging is off while you search.
 
 <img src="docs/assets/conversations-window.png" width="700"
      alt="The Shiibar CC window, wide enough for two columns: the Running
@@ -136,7 +144,7 @@ shiibar-cc conversations search "auth middleware"   # add --json for a stable
 ```
 
 Conversations reads Claude Code's transcripts, an undocumented internal
-format; a Claude Code update may break the History section or the
+format; a Claude Code update may break History or the
 conversation view until Shiibar CC catches up.
 
 ## Permissions

@@ -10,8 +10,8 @@ import SwiftUI
 
 enum SurfaceColors {
     /// The list's pale, opaque ground in the popover and the window: a
-    /// shade off the system backgrounds so white cards stand out on light
-    /// and veiled cards on dark (window-design.html `--cardsbg`). The
+    /// shade off the system backgrounds so white row frames stand out on
+    /// light and veiled ones on dark (window-design.html `--cardsbg`). The
     /// popover paints its arrow with the same color.
     static let listBackgroundNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -20,12 +20,12 @@ enum SurfaceColors {
                 ?? .windowBackgroundColor
     }
     /// The share of gray in the light list ground: enough that the ground is
-    /// visibly off the white cards.
+    /// visibly off the white row frames.
     static let lightListGrayFraction: CGFloat = 0.10
     static let listBackground = Color(nsColor: listBackgroundNSColor)
     /// The conversation pane: the plain reading background.
     static let paneBackground = Color(nsColor: .controlBackgroundColor)
-    /// A card: opaque white on light; a light veil on dark so it reads on
+    /// A row frame's ground: opaque white on light; a light veil on dark so it reads on
     /// any ground (window background or popover material).
     static let cardNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -35,27 +35,38 @@ enum SurfaceColors {
     static let card = Color(nsColor: cardNSColor)
     static let cardBorderNSColor = NSColor.separatorColor
     static let cardBorder = Color(nsColor: cardBorderNSColor)
-    /// Selected card ground while the list has focus: a pale accent tint
+    /// Selected row ground while the list has focus: a pale accent tint
     /// (window-design.html `.sel`; DESIGN.md §4.5 "row selection").
     static let selectionTint = Color.accentColor.opacity(0.16)
-    /// Selected card border while the list has focus, and the hovered card
-    /// border (`--tintline`).
-    static let tintLine = Color.accentColor.opacity(0.5)
-    /// Selected card ground while the search field has focus: a pale neutral
+    /// Selected row ground while the search field has focus: a pale neutral
     /// gray, the inactive-selection look (window-design.html `.sel.inact`).
-    /// Slightly denser on dark, where the veiled cards are close in value.
+    /// Slightly denser on dark, where the veiled frames are close in value.
     static let inactiveSelectionTint = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor.systemGray.withAlphaComponent(
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.26 : 0.18)
     })
-    /// Selected card border while the search field has focus (`--grayline`):
-    /// clearly stronger than the unselected border, and not the accent the
-    /// hovered border uses.
-    static let inactiveSelectionLine = Color(nsColor: .systemGray).opacity(0.6)
     static let line = Color(nsColor: .separatorColor)
     static let secondary = Color(nsColor: .secondaryLabelColor)
     /// Neutral chip / key-hint ground (`rgba(127,127,127,.09)`).
     static let chip = Color.gray.opacity(0.09)
+    /// The section heading band (window-design.html `.rows .sec`: gray at
+    /// 12%). The system gray, a little denser on dark, where the veiled
+    /// frames are close in value to the list ground, so the band, the frames
+    /// and the ground stay apart in both appearances.
+    static let sectionBand = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor.systemGray.withAlphaComponent(
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.18 : 0.12)
+    })
+    /// The Running mark: the unreviewed badge's red (DESIGN.md §4.5
+    /// "collapsing sections"; `RowSymbolView`).
+    static let runningMark = Color.red
+    /// A hovered row's ground (window-design.html `.row.hov`: gray at 9%),
+    /// paler than the gray selection ground.
+    static let rowHover = Color.gray.opacity(0.09)
+    /// The reason a row cannot be dragged (`.tip`): a dark ground with light
+    /// text on light, a light ground with dark text on dark.
+    static let refusalTipGround = Color(nsColor: .labelColor)
+    static let refusalTipText = Color(nsColor: .textBackgroundColor)
     /// §8.49: yellow is for stars only (page values).
     static let starFill = Color(red: 0xF5 / 255, green: 0xB4 / 255, blue: 0x00 / 255)
     static let starLine = Color(red: 0xD3 / 255, green: 0x97 / 255, blue: 0x00 / 255)
@@ -76,6 +87,41 @@ enum SurfaceMetrics {
     static let trafficLightsWidth: CGFloat = 78
     /// `.hb`: 24×24, radius 7.
     static let headerButton: CGFloat = 24
+    /// The section heading band (`.rows .sec`): inner left 10 / right 8,
+    /// 8 between its parts, radius 6. Its edges are the row frames' edges.
+    static let sectionBandLeading: CGFloat = 10
+    static let sectionBandTrailing: CGFloat = 8
+    static let sectionBandSpacing: CGFloat = 8
+    static let sectionBandRadius: CGFloat = 6
+    /// A frame of rows (`.group`): radius 10, a 1pt border; the rows'
+    /// grounds stay inside its corners (radius 9). The divider between two
+    /// rows starts at the rows' text (11 in from the border) and runs to the
+    /// border on the right.
+    static let rowFrameRadius: CGFloat = 10
+    static let rowFrameBorder: CGFloat = 1
+    static let rowInnerRadius: CGFloat = 9
+    static let rowLeading: CGFloat = 11
+    static let rowTrailing: CGFloat = 8
+    /// Between a row's three lines and its symbol-and-time column (`.row`
+    /// gap 8; fixed — horizontal spacing does not follow the text size).
+    static let rowColumnSpacing: CGFloat = 8
+    /// The row drag's drop line (`.dropline`): 2pt thick, centered on the
+    /// row boundary, starting 3pt left of the frame with an 8pt ring (2pt
+    /// line) on its left end and ending at the frame's right edge. The
+    /// emphasized heading's inner border and the emphasized frame's border
+    /// are 2pt (`.sec.over`, `.group.over`). None of these follow the text
+    /// size (DESIGN.md §4.5 "text size").
+    static let dropLineWidth: CGFloat = 2
+    static let dropLineLeadOut: CGFloat = 3
+    static let dropRingDiameter: CGFloat = 8
+    static let dropRingLine: CGFloat = 2
+    static let dropHeaderBorder: CGFloat = 2
+    /// The reason a row cannot be dragged (`.tip`): 9 inside on the sides,
+    /// radius 6, its top-left corner 12 right of and 16 below the pointer.
+    static let refusalTipHorizontal: CGFloat = 9
+    static let refusalTipRadius: CGFloat = 6
+    static let refusalTipOffsetX: CGFloat = 12
+    static let refusalTipOffsetY: CGFloat = 16
 }
 
 /// Dimensions that follow the text size (DESIGN.md §4.5 "text size"): each
@@ -126,15 +172,32 @@ struct SurfaceScale: Equatable {
     var hiddenRowsVertical: CGFloat { scaled(6) }
     /// Below the last row.
     var listBottom: CGFloat { scaled(8) }
-    /// Between cards.
-    var rowGap: CGFloat { scaled(6) }
-    /// Section header: bold name and count, top 10 / bottom 6.
+    /// Headings (`.rows .sec`): bold name and count, 4 inside at the top
+    /// and the bottom. The band (Running and History, also while searching
+    /// without its ground) has 8 above it and 6 below it; the text-only
+    /// headings under History (`.sec.sub`) 6 above and 4 below. Two
+    /// neighbors are apart by the larger of the upper one's space below and
+    /// the lower one's space above; a frame of rows has none of its own.
     var sectionTitleFont: CGFloat { scaled(12) }
     var sectionCountFont: CGFloat { scaled(11) }
-    var sectionHeaderTop: CGFloat { scaled(10) }
+    var sectionHeaderTop: CGFloat { scaled(8) }
     var sectionHeaderBottom: CGFloat { scaled(6) }
+    var subHeadingTop: CGFloat { scaled(6) }
+    var subHeadingBottom: CGFloat { scaled(4) }
+    var sectionBandVertical: CGFloat { scaled(4) }
+    /// The chevron: a 12pt line-art icon (stroke 1.8) in a 14pt box.
+    var sectionChevronBox: CGFloat { scaled(14) }
+    var sectionChevronIcon: CGFloat { scaled(12) }
+    var sectionChevronLine: CGFloat { scaled(1.8) }
+    /// The Running mark's dot (§9: 7pt at 13).
+    var runningMark: CGFloat { scaled(7) }
+    /// The reason a row cannot be dragged (`.tip`): 12pt text, 4 inside at
+    /// the top and the bottom (its sides, corner radius and distance from
+    /// the pointer are fixed — `SurfaceMetrics`).
+    var refusalTipFont: CGFloat { scaled(12) }
+    var refusalTipVertical: CGFloat { scaled(4) }
 
-    // MARK: Row card
+    // MARK: Row
 
     /// The symbol-and-time column's width (§9: 28pt at 13). The elapsed
     /// time widens it when it does not fit (§4.5).
@@ -142,15 +205,15 @@ struct SurfaceScale: Equatable {
     /// The column's symbol box, 20×20 (§9): the status symbol's size, and the
     /// star's click area (§4.6 "stars").
     var rowSymbol: CGFloat { scaled(20) }
-    /// The symbol sits 1pt below the card's text top, level with the label
-    /// line (the card's top line).
+    /// The symbol sits 1pt below the row's text top, level with the label
+    /// line (the row's top line).
     var rowSymbolTop: CGFloat { scaled(1) }
     /// The History star (§9: 16pt at 13, smaller than the status symbol and
     /// centered in the symbol box) and its strokes.
     var star: CGFloat { scaled(16) }
     var starFilledLine: CGFloat { scaled(0.7) }
     var starOutlineLine: CGFloat { scaled(1.1) }
-    /// The card's three lines (§4.5): the label and the last prompt in the
+    /// The row's three lines (§4.5): the label and the last prompt in the
     /// small size, the bold title in the body size. The elapsed time in the
     /// symbol-and-time column uses the label's size.
     var rowTitleFont: CGFloat { scaled(13) }
@@ -162,14 +225,14 @@ struct SurfaceScale: Equatable {
     /// the label-title gap so the label and the title read as one pair,
     /// apart from the last prompt (§8.59).
     var rowTitlePromptSpacing: CGFloat { scaled(4) }
-    /// Line boxes of the card lines: the title inherits `.app` (13px,
+    /// Line boxes of the row lines: the title inherits `.app` (13px,
     /// line-height 1.35); the label and the last prompt are `.sub` / `.t3`
     /// (11px, line-height 1.45). Text is vertically centered in its box.
     var rowTitleHeight: CGFloat { scaled(17.55) }
     var rowLabelHeight: CGFloat { scaled(15.95) }
     var rowPromptHeight: CGFloat { scaled(15.95) }
-    var rowCardTop: CGFloat { scaled(8) }
-    var rowCardBottom: CGFloat { scaled(9) }
+    var rowTop: CGFloat { scaled(8) }
+    var rowBottom: CGFloat { scaled(9) }
 
     // MARK: Footer, status lines, key hints
 
@@ -252,7 +315,7 @@ extension EnvironmentValues {
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)
 
 enum SurfaceIcon {
-    case search, refresh, pin, chevronDown, chevronUp, back, window, star
+    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, star
 
     /// The icon's outline on a 16-unit box, y down.
     func path(in rect: CGRect) -> Path {
@@ -299,6 +362,8 @@ enum SurfaceIcon {
             polyline(&path, [(4, 6), (8, 10), (12, 6)])
         case .chevronUp:
             polyline(&path, [(4, 10), (8, 6), (12, 10)])
+        case .chevronRight:
+            polyline(&path, [(6, 4), (10, 8), (6, 12)])
         case .back:
             polyline(&path, [(10, 3.5), (5.5, 8), (10, 12.5)])
         case .window:

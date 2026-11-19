@@ -3,7 +3,7 @@ import XCTest
 @testable import ShiibarCcCore
 
 /// Row composition for the unified list (DESIGN.md §4.5 "Running
-/// rows" / "action buttons", §4.6 "History section" / "stars" / "search scope").
+/// rows" / "action buttons", §4.6 "Recent section" / "stars" / "search scope").
 final class UnifiedListRowsTests: XCTestCase {
     // MARK: - Running card title fallback order (§4.5)
 
@@ -207,14 +207,14 @@ final class UnifiedListRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.id), [.running(target: "b"), .running(target: "c"), .running(target: "d"), .running(target: "a")])
     }
 
-    func testHistoryExcludesRunningSessions() {
+    func testRecentExcludesRunningSessions() {
         let agents = [
             UL.agent("t1", session: "s1"),
             UL.agent("t2", session: ""),
             UL.agent("tu", status: .unknown, session: "s3"),
         ]
         let results = [UL.summary("s1"), UL.summary("s2"), UL.summary("s3")]
-        let rows = UnifiedListBuilder.historyRows(results: results, agents: agents, stars: [], now: UL.now, home: UL.home)
+        let rows = UnifiedListBuilder.conversationRows(results: results, agents: agents, stars: [], now: UL.now, home: UL.home).recent
         // s1 is running; an empty agent session_id excludes nothing; an
         // unknown-status agent has no Running row so it excludes nothing.
         XCTAssertEqual(rows.map(\.sessionID), ["s2", "s3"])
@@ -232,18 +232,17 @@ final class UnifiedListRowsTests: XCTestCase {
         state.handle(.agentsUpdated(agents))
         state.handle(.historyDelivered(results, isFiltered: true))
         XCTAssertEqual(state.runningRows.map(\.id), [.running(target: "t2")])
-        XCTAssertEqual(state.sections.map(\.title), ["Running", "History"])
-        XCTAssertEqual(state.sections.map(\.count), [1, 2])
+        XCTAssertEqual(state.headings.map(\.title), ["Running", "History"])
+        XCTAssertEqual(state.headings.map(\.countText), ["1", "2"])
 
         // Browse: every Running row, including the empty session_id one.
         state.handle(.historyDelivered(results, isFiltered: false))
-        XCTAssertEqual(state.sections.map(\.count), [3, 2])
-        XCTAssertEqual(state.sections.map(\.countText), ["3", "2"])
+        XCTAssertEqual(state.headings.map(\.countText), ["3", "2"])
 
         // A section with no rows is hidden, heading included.
         state.handle(.historyDelivered([UL.summary("s1")], isFiltered: true))
-        XCTAssertEqual(state.sections.map(\.title), ["Running"])
-        XCTAssertEqual(state.sections.map(\.count), [1])
+        XCTAssertEqual(state.headings.map(\.title), ["Running"])
+        XCTAssertEqual(state.headings.map(\.countText), ["1"])
     }
 
     func testEmptyStateText() {
@@ -267,58 +266,53 @@ final class UnifiedListRowsTests: XCTestCase {
 
     // MARK: - Stars
 
-    func testStarredRowsComeFirstKeepingResultOrder() {
+    /// §4.6 "Starred section" / "Recent section": starred conversations
+    /// form Starred in the stars' order; Recent keeps the rest newest
+    /// first. A Starred row has the filled star (`Unstar`), a Recent row
+    /// the hover star (`Star`).
+    func testStarredAndRecentRowsSplitByTheStars() {
         let results = [
             UL.summary("a", updatedAt: 50), UL.summary("b", updatedAt: 40),
             UL.summary("c", updatedAt: 30), UL.summary("d", updatedAt: 20),
         ]
-        let rows = UnifiedListBuilder.historyRows(results: results, agents: [], stars: ["d", "b"], now: UL.now, home: UL.home)
-        XCTAssertEqual(rows.map(\.sessionID), ["b", "d", "a", "c"])
-        XCTAssertEqual(rows.map(\.symbol), [
-            .star(isStarred: true), .star(isStarred: true), .star(isStarred: false), .star(isStarred: false),
-        ])
+        let rows = UnifiedListBuilder.conversationRows(
+            results: results, agents: [], stars: ["d", "b"], now: UL.now, home: UL.home)
+        XCTAssertEqual(rows.starred.map(\.sessionID), ["d", "b"], "the stars' order, not the newest first")
+        XCTAssertEqual(rows.recent.map(\.sessionID), ["a", "c"])
+        XCTAssertEqual(rows.starred.map(\.section), [.starred, .starred])
+        XCTAssertEqual(rows.recent.map(\.section), [.recent, .recent])
+        XCTAssertEqual(rows.starred.map(\.symbol), [.star(isStarred: true), .star(isStarred: true)])
+        XCTAssertEqual(rows.starred.first?.symbol.tooltip, "Unstar")
+        XCTAssertEqual(rows.recent.first?.symbol.tooltip, "Star")
+        XCTAssertEqual(rows.starred.first?.id, .conversation(sessionID: "d"), "Starred and Recent share the key")
     }
 
-    func testStarOnARunningConversationIsKeptButNotShown() {
-        var state = UnifiedListState(home: UL.home, now: UL.now, stars: ["s1"])
-        state.handle(.historyDelivered([UL.summary("h"), UL.summary("s1")], isFiltered: false))
-        XCTAssertEqual(state.historyRows.first?.sessionID, "s1")
+    func testStarredRowsHaveTheRecentRowsContentAndButtons() {
+        let summary = UL.summary("s", cwd: nil, updatedAt: UL.now - 300, live: true, lastPrompt: "hi")
+        let starred = UnifiedListBuilder.historyRow(summary: summary, isStarred: true, now: UL.now, home: UL.home)
+        let recent = UnifiedListBuilder.historyRow(summary: summary, isStarred: false, now: UL.now, home: UL.home)
+        XCTAssertEqual(starred.labelLine, recent.labelLine)
+        XCTAssertTrue(starred.showsRunningMark)
+        XCTAssertEqual(starred.lastPrompt, recent.lastPrompt)
+        XCTAssertEqual(starred.primaryButton, recent.primaryButton)
+        XCTAssertEqual(starred.branchButton, recent.branchButton)
+        XCTAssertFalse(starred.branchButton.isEnabled, "no cwd: Branch disabled")
+    }
+
+    func testStarOnARunningConversationShowsOnlyInRunning() {
+        // §4.6 "stars": while running, only in Running; the star and its
+        // place in the list are kept, and it returns there when it ends.
+        var state = UnifiedListState(home: UL.home, now: UL.now, stars: ["x", "s1", "y"])
+        state.handle(.historyDelivered([UL.summary("h"), UL.summary("y"), UL.summary("s1"), UL.summary("x")],
+                                       isFiltered: false))
+        XCTAssertEqual(state.starredRows.map(\.sessionID), ["x", "s1", "y"])
         state.handle(.agentsUpdated([UL.agent("t1", session: "s1")]))
         XCTAssertEqual(state.runningRows.first?.symbol, .status(.idle, unreviewed: false))
-        XCTAssertEqual(state.historyRows.map(\.sessionID), ["h"])
-        XCTAssertEqual(state.stars, ["s1"], "the star is kept while running")
+        XCTAssertEqual(state.starredRows.map(\.sessionID), ["x", "y"])
+        XCTAssertEqual(state.recentRows.map(\.sessionID), ["h"])
+        XCTAssertEqual(state.stars, ["x", "s1", "y"], "the star and its place are kept while running")
         state.handle(.agentsUpdated([]))
-        XCTAssertEqual(state.historyRows.map(\.sessionID), ["s1", "h"], "back in the starred position")
-    }
-
-    func testStarSetRules() {
-        XCTAssertEqual(StarredSessions.toggled(["a"], sessionID: "b"), ["a", "b"])
-        XCTAssertEqual(StarredSessions.toggled(["a", "b"], sessionID: "a"), ["b"])
-        XCTAssertEqual(
-            StarredSessions.pruned(["a", "gone", "b"], browseResults: [UL.summary("a"), UL.summary("b"), UL.summary("c")]),
-            ["a", "b"])
-        XCTAssertEqual(StarredSessions.pruned(["a"], browseResults: []), [])
-    }
-
-    func testStarPruningOnlyOnBrowseResults() {
-        var state = UnifiedListState(home: UL.home, now: UL.now, stars: ["a", "gone"])
-        let filtered = state.handle(.historyDelivered([UL.summary("a")], isFiltered: true))
-        XCTAssertEqual(state.stars, ["a", "gone"], "a filtered result never prunes")
-        XCTAssertFalse(filtered.contains { if case .persistStars = $0 { return true } else { return false } })
-        let browse = state.handle(.historyDelivered([UL.summary("a")], isFiltered: false))
-        XCTAssertEqual(state.stars, ["a"])
-        XCTAssertTrue(browse.contains(.persistStars(["a"])))
-        let again = state.handle(.historyDelivered([UL.summary("a")], isFiltered: false))
-        XCTAssertFalse(again.contains { if case .persistStars = $0 { return true } else { return false } },
-                       "nothing to persist when unchanged")
-    }
-
-    func testStarPersistenceUsesInjectedDefaults() {
-        let defaults = InMemoryDefaults()
-        XCTAssertEqual(StarredSessions.load(from: defaults), [])
-        StarredSessions.save(["b", "a"], to: defaults)
-        XCTAssertEqual(defaults.stringArray(forKey: "cc.shiibar.starredSessionIDs"), ["a", "b"])
-        XCTAssertEqual(StarredSessions.load(from: defaults), ["a", "b"])
+        XCTAssertEqual(state.starredRows.map(\.sessionID), ["x", "s1", "y"], "back at its place in the list")
     }
 
     // MARK: - Buttons (§4.5 "action buttons", §4.6)

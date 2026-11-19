@@ -84,6 +84,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         model.onPresentMenu = { [weak self] anchor, surface in self?.presentMenu(anchor: anchor, surface: surface) }
         model.onKeepOnTopChanged = { [weak self] _ in self?.applyWindowLevel() }
         model.onFocusList = { [weak self] surface in self?.focusList(on: surface) }
+        model.onMakeSurfaceKey = { [weak self] surface in self?.makeKey(surface) }
         state.closeKeySurface = { [weak self] in self?.closeKeySurface() }
         state.willOpenAuxiliaryWindow = { [weak self] in self?.closePopover() }
         state.raiseMainWindow = { [weak self] in self?.raiseWindow() }
@@ -540,6 +541,20 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         }
         guard Self.isSearchFieldFocused(in: window) else { return }
         window.makeFirstResponder(nil)
+    }
+
+    /// A heading click (§4.5 "collapsing sections"): the surface becomes
+    /// key with its first responder unchanged.
+    private func makeKey(_ surface: MainSurface) {
+        guard let window = surfaceWindow(surface) else { return }
+        Self.makeKeyKeepingFocus(window)
+    }
+
+    /// Makes `window` key (when it is not and can be) without touching its
+    /// first responder or activating the app.
+    static func makeKeyKeepingFocus(_ window: NSWindow) {
+        guard !window.isKeyWindow, window.canBecomeKey else { return }
+        window.makeKey()
     }
 
     /// The search field has focus: it (or its field editor) is the first

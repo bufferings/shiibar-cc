@@ -23,7 +23,7 @@ final class UnifiedListStateTests: XCTestCase {
 
     private var order: [UnifiedRowKey] {
         [.running(target: "t1"), .running(target: "t2"),
-         .history(sessionID: "h1"), .history(sessionID: "h2"), .history(sessionID: "h3")]
+         .conversation(sessionID: "h1"), .conversation(sessionID: "h2"), .conversation(sessionID: "h3")]
     }
 
     // MARK: - Launch and ↑ / ↓
@@ -62,20 +62,20 @@ final class UnifiedListStateTests: XCTestCase {
             XCTAssertEqual(state.selection?.key, expected)
         }
         XCTAssertEqual(state.handle(.moveDown), [], "bottom edge: no move")
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h3"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h3"))
         state.handle(.moveUp)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
     }
 
     func testArrowsMoveWithinSearchResultsOnly() {
         var state = populated()
         state.handle(.historyDelivered([UL.summary("s2"), UL.summary("h2")], isFiltered: true))
-        XCTAssertEqual(state.visibleRows.map(\.id), [.running(target: "t2"), .history(sessionID: "h2")])
+        XCTAssertEqual(state.visibleRows.map(\.id), [.running(target: "t2"), .conversation(sessionID: "h2")])
         state.handle(.moveDown)
         state.handle(.moveDown)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
         state.handle(.moveDown)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
     }
 
     /// ⌥↑ / ⌥↓ and the detail header's prev / next buttons (§4.5 "key
@@ -84,14 +84,14 @@ final class UnifiedListStateTests: XCTestCase {
     /// and nothing happens at the ends.
     func testPreviousNextConversationOnTheDetailPage() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         XCTAssertEqual(state.page, .detail)
         let effects = state.handle(.nextConversation)
         XCTAssertEqual(state.page, .detail)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
         XCTAssertEqual(effects, [.loadConversation(sessionID: "h2")])
         XCTAssertEqual(state.handle(.previousConversation), [.loadConversation(sessionID: "h1")])
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h1"))
         // Back to the list page: bring the moved selection into view; the
         // focus is the list.
         XCTAssertEqual(state.handle(.back), [.scrollSelectionIntoView, .focusList])
@@ -112,7 +112,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// The decided commands reach the same events.
     func testPerformPreviousNextConversation() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         XCTAssertEqual(state.perform(.nextConversation), [.loadConversation(sessionID: "h2")])
         XCTAssertEqual(state.perform(.previousConversation), [.loadConversation(sessionID: "h1")])
     }
@@ -148,7 +148,7 @@ final class UnifiedListStateTests: XCTestCase {
             for testCase in cases {
                 let name = "\(columns), \(testCase.name)"
                 var state = populated(columns: columns)
-                state.handle(.rowClicked(.history(sessionID: "h1")))
+                state.handle(.rowClicked(.conversation(sessionID: "h1")))
                 XCTAssertEqual(state.handle(.surfaceKeyChanged(testCase.surfaceKey)), [], name)
                 XCTAssertEqual(state.handle(.searchFieldFocusChanged(testCase.searchFieldFocused)), [], name)
                 XCTAssertEqual(state.isSurfaceKey, testCase.surfaceKey, name)
@@ -164,7 +164,7 @@ final class UnifiedListStateTests: XCTestCase {
                     XCTAssertEqual(pane.bottomPanel.buttons != nil, !testCase.searchFieldFocused, name)
                 }
                 // The key status changes no selection and no page.
-                XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"), name)
+                XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h1"), name)
                 XCTAssertEqual(state.page, .list, name)
             }
         }
@@ -188,15 +188,15 @@ final class UnifiedListStateTests: XCTestCase {
         }
         let cases = [
             Case(name: "one column, History, no selection", columns: .one, preselected: nil,
-                 clicked: .history(sessionID: "h2"), expectedSessionID: "h2", expectedEffects: [.focusList]),
+                 clicked: .conversation(sessionID: "h2"), expectedSessionID: "h2", expectedEffects: [.focusList]),
             Case(name: "one column, Running, no selection", columns: .one, preselected: nil,
                  clicked: .running(target: "t2"), expectedSessionID: "s2", expectedEffects: [.focusList]),
-            Case(name: "one column, another row selected", columns: .one, preselected: .history(sessionID: "h1"),
-                 clicked: .history(sessionID: "h3"), expectedSessionID: "h3", expectedEffects: [.focusList]),
+            Case(name: "one column, another row selected", columns: .one, preselected: .conversation(sessionID: "h1"),
+                 clicked: .conversation(sessionID: "h3"), expectedSessionID: "h3", expectedEffects: [.focusList]),
             Case(name: "two columns, History", columns: .two, preselected: nil,
-                 clicked: .history(sessionID: "h2"), expectedSessionID: "h2",
+                 clicked: .conversation(sessionID: "h2"), expectedSessionID: "h2",
                  expectedEffects: [.focusList, .loadConversation(sessionID: "h2")]),
-            Case(name: "two columns, another row selected", columns: .two, preselected: .history(sessionID: "h1"),
+            Case(name: "two columns, another row selected", columns: .two, preselected: .conversation(sessionID: "h1"),
                  clicked: .running(target: "t1"), expectedSessionID: "s1",
                  expectedEffects: [.focusList, .loadConversation(sessionID: "s1")]),
         ]
@@ -220,9 +220,9 @@ final class UnifiedListStateTests: XCTestCase {
     /// `No conversation selected`; one column stays on the list page.
     func testClickOnTheSelectedRowDeselects() {
         let cases: [(String, ColumnMode, UnifiedRowKey)] = [
-            ("one column, History", .one, .history(sessionID: "h2")),
+            ("one column, History", .one, .conversation(sessionID: "h2")),
             ("one column, Running", .one, .running(target: "t1")),
-            ("two columns, History", .two, .history(sessionID: "h2")),
+            ("two columns, History", .two, .conversation(sessionID: "h2")),
             ("two columns, Running", .two, .running(target: "t1")),
         ]
         for (name, columns, key) in cases {
@@ -290,7 +290,7 @@ final class UnifiedListStateTests: XCTestCase {
         for columns in [ColumnMode.one, .two] {
             for testCase in cases {
                 let name = "\(columns), \(testCase.name)"
-                let key = UnifiedRowKey.history(sessionID: "h2")
+                let key = UnifiedRowKey.conversation(sessionID: "h2")
                 var state = populated(columns: columns)
                 state.handle(.rowClicked(key))
                 state.handle(.surfaceKeyChanged(testCase.surfaceKey))
@@ -329,12 +329,12 @@ final class UnifiedListStateTests: XCTestCase {
             for selectFirst in [false, true] {
                 let name = "\(columns), preselected: \(selectFirst)"
                 var state = populated(columns: columns)
-                if selectFirst { state.handle(.rowClicked(.history(sessionID: "h1"))) }
+                if selectFirst { state.handle(.rowClicked(.conversation(sessionID: "h1"))) }
                 state.handle(.surfaceKeyChanged(false))
                 state.handle(.pointerDown(surfaceKey: false, searchFieldFocused: false))
                 state.handle(.surfaceKeyChanged(true))
-                let effects = state.handle(.rowClicked(.history(sessionID: "h3")))
-                XCTAssertEqual(state.selection, RowSelection(key: .history(sessionID: "h3"), sessionID: "h3"), name)
+                let effects = state.handle(.rowClicked(.conversation(sessionID: "h3")))
+                XCTAssertEqual(state.selection, RowSelection(key: .conversation(sessionID: "h3"), sessionID: "h3"), name)
                 XCTAssertEqual(effects, columns == .two ? [.focusList, .loadConversation(sessionID: "h3")] : [.focusList], name)
                 XCTAssertTrue(state.isSelectionActive, "\(name): key again, the card is accent")
             }
@@ -345,7 +345,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// click without a new press decides from the current look.
     func testPressSnapshotIsUsedOnce() {
         var state = populated()
-        let key = UnifiedRowKey.history(sessionID: "h1")
+        let key = UnifiedRowKey.conversation(sessionID: "h1")
         state.handle(.rowClicked(key))
         state.handle(.pointerDown(surfaceKey: false, searchFieldFocused: false))
         state.handle(.rowClicked(key))
@@ -388,7 +388,7 @@ final class UnifiedListStateTests: XCTestCase {
         var state = populated(columns: columns)
         switch look {
         case .unselected:
-            state.handle(.rowClicked(.history(sessionID: "h3")))
+            state.handle(.rowClicked(.conversation(sessionID: "h3")))
         case .accent:
             state.handle(.rowClicked(key))
         case .graySearchField:
@@ -410,7 +410,7 @@ final class UnifiedListStateTests: XCTestCase {
     func testClickAndDoubleClickByRowLook() {
         let rows: [(UnifiedRowKey, String, RowInvocation)] = [
             (.running(target: "t2"), "s2", .jump(target: "t2")),
-            (.history(sessionID: "h1"), "h1", .resume(sessionID: "h1", cwd: "/Users/example/demo/web")),
+            (.conversation(sessionID: "h1"), "h1", .resume(sessionID: "h1", cwd: "/Users/example/demo/web")),
         ]
         for columns in [ColumnMode.one, .two] {
             for (key, sessionID, invocation) in rows {
@@ -463,7 +463,7 @@ final class UnifiedListStateTests: XCTestCase {
     func testDoubleClickWithTheButtonDisabledOnlySelects() {
         var state = populated()
         state.handle(.historyDelivered([UL.summary("x", cwd: nil)], isFiltered: false))
-        let key = UnifiedRowKey.history(sessionID: "x")
+        let key = UnifiedRowKey.conversation(sessionID: "x")
         click(&state, key)
         XCTAssertEqual(state.selectedRow?.primaryButton.isEnabled, false)
         XCTAssertEqual(click(&state, key, count: 2), [.focusList])
@@ -486,17 +486,17 @@ final class UnifiedListStateTests: XCTestCase {
         let branchH1 = RowInvocation.branch(sessionID: "h1", cwd: "/Users/example/demo/web")
         let branchS2 = RowInvocation.branch(sessionID: "s2", cwd: "/Users/example/demo/api")
         let cases = [
-            Case(name: "History, ⌘ at both presses", key: .history(sessionID: "h1"),
+            Case(name: "History, ⌘ at both presses", key: .conversation(sessionID: "h1"),
                  firstCommand: true, secondCommand: true, expectedInvocation: branchH1),
-            Case(name: "History, ⌘ at the second press only", key: .history(sessionID: "h1"),
+            Case(name: "History, ⌘ at the second press only", key: .conversation(sessionID: "h1"),
                  firstCommand: false, secondCommand: true, expectedInvocation: branchH1),
-            Case(name: "History, ⌘ at the first press only", key: .history(sessionID: "h1"),
+            Case(name: "History, ⌘ at the first press only", key: .conversation(sessionID: "h1"),
                  firstCommand: true, secondCommand: false, expectedInvocation: resumeH1),
             Case(name: "Running, ⌘", key: .running(target: "t2"),
                  firstCommand: false, secondCommand: true, expectedInvocation: branchS2),
             Case(name: "Running without a session_id: Branch disabled", key: .running(target: "t0"),
                  firstCommand: false, secondCommand: true, expectedInvocation: nil),
-            Case(name: "History without a cwd: Branch disabled", key: .history(sessionID: "x"),
+            Case(name: "History without a cwd: Branch disabled", key: .conversation(sessionID: "x"),
                  firstCommand: false, secondCommand: true, expectedInvocation: nil),
         ]
         for columns in [ColumnMode.one, .two] {
@@ -533,7 +533,7 @@ final class UnifiedListStateTests: XCTestCase {
         for columns in [ColumnMode.one, .two] {
             var plain = populated(columns: columns)
             var command = populated(columns: columns)
-            let key = UnifiedRowKey.history(sessionID: "h2")
+            let key = UnifiedRowKey.conversation(sessionID: "h2")
             XCTAssertEqual(click(&command, key, command: true), click(&plain, key), "\(columns)")
             XCTAssertEqual(command.selection, plain.selection, "\(columns)")
             // A second, separate single click on the accent row.
@@ -547,7 +547,7 @@ final class UnifiedListStateTests: XCTestCase {
     func testTripleClickRunsTheActionOnce() {
         for columns in [ColumnMode.one, .two] {
             var state = populated(columns: columns)
-            let key = UnifiedRowKey.history(sessionID: "h2")
+            let key = UnifiedRowKey.conversation(sessionID: "h2")
             click(&state, key, count: 1)
             XCTAssertEqual(click(&state, key, count: 2).filter { if case .invoke = $0 { return true } else { return false } },
                            [.invoke(.resume(sessionID: "h2", cwd: "/Users/example/demo/web"))], "\(columns)")
@@ -567,25 +567,25 @@ final class UnifiedListStateTests: XCTestCase {
     func testSecondClickOnAnotherRowIsAPlainClick() {
         for columns in [ColumnMode.one, .two] {
             var state = populated(columns: columns)
-            click(&state, .history(sessionID: "h1"), count: 1)
-            let onOther = click(&state, .history(sessionID: "h2"), count: 2)
+            click(&state, .conversation(sessionID: "h1"), count: 1)
+            let onOther = click(&state, .conversation(sessionID: "h2"), count: 2)
             XCTAssertEqual(onOther, columns == .two ? [.focusList, .loadConversation(sessionID: "h2")] : [.focusList],
                            "\(columns)")
-            XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"), "\(columns)")
-            XCTAssertEqual(click(&state, .history(sessionID: "h2"), count: 3),
+            XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"), "\(columns)")
+            XCTAssertEqual(click(&state, .conversation(sessionID: "h2"), count: 3),
                            [.focusList, .invoke(.resume(sessionID: "h2", cwd: "/Users/example/demo/web"))],
                            "\(columns): the next click on the same row completes a double-click there")
         }
         // The first click on an accent row, the second on another row: the
         // other row is selected and the pending deselect is gone.
         var state = populated()
-        click(&state, .history(sessionID: "h1"))
-        click(&state, .history(sessionID: "h1"), count: 1)
+        click(&state, .conversation(sessionID: "h1"))
+        click(&state, .conversation(sessionID: "h1"), count: 1)
         XCTAssertNotNil(state.pendingDeselect)
-        click(&state, .history(sessionID: "h3"), count: 2)
+        click(&state, .conversation(sessionID: "h3"), count: 2)
         XCTAssertNil(state.pendingDeselect)
         XCTAssertEqual(state.handle(.deferredDeselectDue(id: 1)), [])
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h3"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h3"))
     }
 
     /// A press that reached no row (empty space, a button, the star) ends
@@ -593,7 +593,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// a plain click.
     func testPressOutsideTheRowsBreaksTheSequence() {
         var state = populated()
-        let key = UnifiedRowKey.history(sessionID: "h1")
+        let key = UnifiedRowKey.conversation(sessionID: "h1")
         click(&state, key, count: 1)
         state.handle(.pointerDown(surfaceKey: true, searchFieldFocused: false, clickCount: 2, pressedAt: nil))
         // No row click for that press; the next press counts 3.
@@ -605,7 +605,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// selection or the page (↑ / ↓, the row leaving the list, → or View
     /// opening the detail page) and when the surface closes.
     func testPendingDeselectIsCancelledByOtherChanges() {
-        let key = UnifiedRowKey.history(sessionID: "h2")
+        let key = UnifiedRowKey.conversation(sessionID: "h2")
         let cancellers: [(String, UnifiedListEvent)] = [
             ("↓", .moveDown),
             ("↑", .moveUp),
@@ -648,7 +648,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// timer acts.
     func testOnlyTheNewestDeferredDeselectActs() {
         var state = populated()
-        let key = UnifiedRowKey.history(sessionID: "h1")
+        let key = UnifiedRowKey.conversation(sessionID: "h1")
         click(&state, key)
         XCTAssertEqual(click(&state, key, count: 1).first, .scheduleDeferredDeselect(id: 1, pressedAt: nil))
         XCTAssertEqual(click(&state, key, count: 1).first, .scheduleDeferredDeselect(id: 2, pressedAt: nil))
@@ -690,7 +690,7 @@ final class UnifiedListStateTests: XCTestCase {
             let expectedEffects: [UnifiedListEffect]
         }
         let cases = [
-            Case(name: "one column, a row selected", columns: .one, selected: .history(sessionID: "h2"),
+            Case(name: "one column, a row selected", columns: .one, selected: .conversation(sessionID: "h2"),
                  expectedPage: .detail, expectedEffects: [.loadConversation(sessionID: "h2"), .focusConversationPane]),
             Case(name: "one column, a Running row selected", columns: .one, selected: .running(target: "t2"),
                  expectedPage: .detail, expectedEffects: [.loadConversation(sessionID: "s2"), .focusConversationPane]),
@@ -698,7 +698,7 @@ final class UnifiedListStateTests: XCTestCase {
                  expectedPage: .detail, expectedEffects: [.focusConversationPane]),
             Case(name: "one column, no selection", columns: .one, selected: nil,
                  expectedPage: .list, expectedEffects: []),
-            Case(name: "two columns, a row selected", columns: .two, selected: .history(sessionID: "h2"),
+            Case(name: "two columns, a row selected", columns: .two, selected: .conversation(sessionID: "h2"),
                  expectedPage: .list, expectedEffects: []),
         ]
         for testCase in cases {
@@ -744,7 +744,7 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testRowClickOnUnknownKeyIsIgnored() {
         var state = populated()
-        XCTAssertEqual(state.handle(.rowClicked(.history(sessionID: "nope"))), [])
+        XCTAssertEqual(state.handle(.rowClicked(.conversation(sessionID: "nope"))), [])
         XCTAssertNil(state.selection)
     }
 
@@ -797,15 +797,15 @@ final class UnifiedListStateTests: XCTestCase {
         let cases = [
             Case(name: "one column, no selection", columns: .one, preselected: nil, empty: false,
                  expectedSelection: .running(target: "t1"), expectedEffects: [.focusList, .scrollSelectionIntoView]),
-            Case(name: "one column, a selection", columns: .one, preselected: .history(sessionID: "h2"), empty: false,
-                 expectedSelection: .history(sessionID: "h2"), expectedEffects: [.focusList]),
+            Case(name: "one column, a selection", columns: .one, preselected: .conversation(sessionID: "h2"), empty: false,
+                 expectedSelection: .conversation(sessionID: "h2"), expectedEffects: [.focusList]),
             Case(name: "one column, no rows", columns: .one, preselected: nil, empty: true,
                  expectedSelection: nil, expectedEffects: []),
             Case(name: "two columns, no selection", columns: .two, preselected: nil, empty: false,
                  expectedSelection: .running(target: "t1"),
                  expectedEffects: [.focusList, .loadConversation(sessionID: "s1"), .scrollSelectionIntoView]),
-            Case(name: "two columns, a selection", columns: .two, preselected: .history(sessionID: "h2"), empty: false,
-                 expectedSelection: .history(sessionID: "h2"), expectedEffects: [.focusList]),
+            Case(name: "two columns, a selection", columns: .two, preselected: .conversation(sessionID: "h2"), empty: false,
+                 expectedSelection: .conversation(sessionID: "h2"), expectedEffects: [.focusList]),
             Case(name: "two columns, no rows", columns: .two, preselected: nil, empty: true,
                  expectedSelection: nil, expectedEffects: []),
         ]
@@ -839,9 +839,9 @@ final class UnifiedListStateTests: XCTestCase {
             let expectedEffects: [UnifiedListEffect]
         }
         let cases = [
-            Case(name: "one column, a selection", columns: .one, preselected: .history(sessionID: "h2"),
+            Case(name: "one column, a selection", columns: .one, preselected: .conversation(sessionID: "h2"),
                  detailPage: false, empty: false,
-                 expectedSelection: .history(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
+                 expectedSelection: .conversation(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "one column, no selection", columns: .one, preselected: nil,
                  detailPage: false, empty: false,
                  expectedSelection: .running(target: "t1"), expectedPage: .list,
@@ -849,13 +849,13 @@ final class UnifiedListStateTests: XCTestCase {
             Case(name: "one column, no rows", columns: .one, preselected: nil,
                  detailPage: false, empty: true,
                  expectedSelection: nil, expectedPage: .list, expectedEffects: [.focusSearchField]),
-            Case(name: "one column, detail page", columns: .one, preselected: .history(sessionID: "h2"),
+            Case(name: "one column, detail page", columns: .one, preselected: .conversation(sessionID: "h2"),
                  detailPage: true, empty: false,
-                 expectedSelection: .history(sessionID: "h2"), expectedPage: .detail,
+                 expectedSelection: .conversation(sessionID: "h2"), expectedPage: .detail,
                  expectedEffects: [.focusConversationPane]),
-            Case(name: "two columns, a selection", columns: .two, preselected: .history(sessionID: "h2"),
+            Case(name: "two columns, a selection", columns: .two, preselected: .conversation(sessionID: "h2"),
                  detailPage: false, empty: false,
-                 expectedSelection: .history(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
+                 expectedSelection: .conversation(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "two columns, no selection", columns: .two, preselected: nil,
                  detailPage: false, empty: false,
                  expectedSelection: .running(target: "t1"), expectedPage: .list,
@@ -931,7 +931,7 @@ final class UnifiedListStateTests: XCTestCase {
         for testCase in cases {
             var state = populated(columns: testCase.columns)
             if testCase.select {
-                state.handle(.rowClicked(.history(sessionID: "h1")))
+                state.handle(.rowClicked(.conversation(sessionID: "h1")))
             }
             XCTAssertEqual(state.handle(.searchFieldFocusChanged(testCase.searchFieldFocused)), [], testCase.name)
             XCTAssertEqual(state.isSearchFieldFocused, testCase.searchFieldFocused, testCase.name)
@@ -952,12 +952,12 @@ final class UnifiedListStateTests: XCTestCase {
                 XCTAssertEqual(state.paneContent, .noSelection, testCase.name)
             }
             // The focus report changes no selection and no page.
-            XCTAssertEqual(state.selection?.key, testCase.select ? .history(sessionID: "h1") : nil, testCase.name)
+            XCTAssertEqual(state.selection?.key, testCase.select ? .conversation(sessionID: "h1") : nil, testCase.name)
             XCTAssertEqual(state.page, .list, testCase.name)
         }
         // The detail page's hints do not depend on focus.
         var detail = populated()
-        detail.openDetailPage(.history(sessionID: "h1"))
+        detail.openDetailPage(.conversation(sessionID: "h1"))
         for focused in [false, true] {
             detail.handle(.searchFieldFocusChanged(focused))
             guard case .conversation(let pane) = detail.paneContent else { return XCTFail("expected a pane") }
@@ -987,16 +987,16 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testSearchKeepsTheSelectionWhileItIsInTheResults() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h2"))
+        state.openDetailPage(.conversation(sessionID: "h2"))
         let effects = state.handle(.historyDelivered([UL.summary("h2"), UL.summary("h3")], isFiltered: true))
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
         XCTAssertEqual(state.page, .detail)
         XCTAssertEqual(effects, [], "the pane is not reloaded")
     }
 
     func testSearchDropsTheSelectionWhenItLeavesTheResults() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h2"))
+        state.openDetailPage(.conversation(sessionID: "h2"))
         let effects = state.handle(.historyDelivered([UL.summary("h3")], isFiltered: true))
         XCTAssertNil(state.selection)
         XCTAssertEqual(state.page, .list, "the detail page returns to the list")
@@ -1014,7 +1014,7 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testRefetchThatDropsTheShownConversationReturnsToList() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h3"))
+        state.openDetailPage(.conversation(sessionID: "h3"))
         state.handle(.historyDelivered([UL.summary("h1"), UL.summary("h2")], isFiltered: false))
         XCTAssertNil(state.selection)
         XCTAssertEqual(state.page, .list)
@@ -1023,9 +1023,9 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testFullBuildHidesHistoryAndDropsAHistorySelection() {
         var state = populated(columns: .two)
-        state.handle(.rowClicked(.history(sessionID: "h1")))
+        state.handle(.rowClicked(.conversation(sessionID: "h1")))
         state.handle(.fullBuildChanged(true))
-        XCTAssertEqual(state.historyRows, [])
+        XCTAssertEqual(state.recentRows, [])
         XCTAssertEqual(state.runningRows.count, 2, "Running does not wait for the index")
         XCTAssertNil(state.selection)
     }
@@ -1055,7 +1055,7 @@ final class UnifiedListStateTests: XCTestCase {
             [UL.summary("s2", cwd: "/Users/example/demo/api"), UL.summary("s1", live: true), UL.summary("h1")],
             isFiltered: false))
         XCTAssertFalse(state.isAwaitingRefetch)
-        XCTAssertEqual(state.selection, RowSelection(key: .history(sessionID: "s2"), sessionID: "s2"))
+        XCTAssertEqual(state.selection, RowSelection(key: .conversation(sessionID: "s2"), sessionID: "s2"))
         XCTAssertEqual(state.page, .detail)
         XCTAssertEqual(delivered, [], "same conversation: the pane is not reloaded")
         guard case .conversation(let after) = state.paneContent else { return XCTFail("expected a pane") }
@@ -1086,7 +1086,7 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testFailedFetchWithoutPendingKeepsEverything() {
         var state = populated()
-        state.handle(.rowClicked(.history(sessionID: "h1")))
+        state.handle(.rowClicked(.conversation(sessionID: "h1")))
         let before = state
         XCTAssertEqual(state.handle(.historyFetchFailed), [])
         XCTAssertEqual(state, before)
@@ -1104,10 +1104,10 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testRemovalOfAnUnselectedRowRefetchesWithoutTouchingTheSelection() {
         var state = populated()
-        state.handle(.rowClicked(.history(sessionID: "h1")))
+        state.handle(.rowClicked(.conversation(sessionID: "h1")))
         let effects = state.handle(.agentsUpdated([UL.agent("t2", session: "s2", createdAt: 10)]))
         XCTAssertEqual(effects, UL.endedRowRefetches)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h1"))
         XCTAssertFalse(state.isAwaitingRefetch)
     }
 
@@ -1147,7 +1147,7 @@ final class UnifiedListStateTests: XCTestCase {
             if testCase.filtered {
                 state.handle(.historyDelivered([UL.summary("s1", live: true), UL.summary("h1")], isFiltered: true))
             }
-            let key = UnifiedRowKey.history(sessionID: "h1")
+            let key = UnifiedRowKey.conversation(sessionID: "h1")
             if testCase.openDetail {
                 state.openDetailPage(key)
             } else {
@@ -1161,7 +1161,7 @@ final class UnifiedListStateTests: XCTestCase {
             XCTAssertEqual(state.selection, RowSelection(key: .running(target: "t9"), sessionID: "h1"), testCase.name)
             XCTAssertEqual(state.page, testCase.expectedPage, testCase.name)
             XCTAssertEqual(effects, [], "\(testCase.name): same conversation, no reload")
-            XCTAssertFalse(state.historyRows.contains { $0.sessionID == "h1" }, testCase.name)
+            XCTAssertFalse(state.recentRows.contains { $0.sessionID == "h1" }, testCase.name)
             XCTAssertEqual(state.selectedRow?.primaryButton.kind, .jump, testCase.name)
             XCTAssertEqual(state.footerHints, [.move], testCase.name)
         }
@@ -1171,13 +1171,13 @@ final class UnifiedListStateTests: XCTestCase {
     /// produces none, so the History row stays (and stays selected).
     func testHistoryRowWithUnknownStatusAgentStaysSelected() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         state.handle(.agentsUpdated([
             UL.agent("t1", session: "s1", createdAt: 20),
             UL.agent("t2", session: "s2", createdAt: 10),
             UL.agent("t9", status: .unknown, session: "h1", createdAt: 30),
         ]))
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h1"))
         XCTAssertEqual(state.page, .detail)
     }
 
@@ -1185,11 +1185,11 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testWideningFromTheDetailPageKeepsTheConversation() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h3"))
+        state.openDetailPage(.conversation(sessionID: "h3"))
         let effects = state.handle(.columnsChanged(.two))
         XCTAssertEqual(state.columns, .two)
         XCTAssertEqual(state.page, .list)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h3"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h3"))
         XCTAssertEqual(effects, [.scrollSelectionIntoView], "no reload; the list reappears")
         guard case .conversation(let pane) = state.paneContent else { return XCTFail("expected a pane") }
         XCTAssertNil(pane.positionText)
@@ -1200,10 +1200,10 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testNarrowingShowsTheListPageAndKeepsTheSelection() {
         var state = populated(columns: .two)
-        state.handle(.rowClicked(.history(sessionID: "h2")))
+        state.handle(.rowClicked(.conversation(sessionID: "h2")))
         let effects = state.handle(.columnsChanged(.one))
         XCTAssertEqual(state.page, .list)
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h2"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h2"))
         XCTAssertEqual(effects, [])
         XCTAssertEqual(state.paneContent, .hidden)
         // Opening the detail page again loads the conversation.
@@ -1212,7 +1212,7 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testSameColumnModeIsANoOp() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         XCTAssertEqual(state.handle(.columnsChanged(.one)), [])
         XCTAssertEqual(state.page, .detail, "popover reopening keeps the detail page")
     }
@@ -1231,7 +1231,7 @@ final class UnifiedListStateTests: XCTestCase {
         XCTAssertTrue(first.showsButtons)
         XCTAssertEqual(first.hints, [.prevNext, .back])
         XCTAssertEqual(first.primaryButton.kind, .jump)
-        state.openDetailPage(.history(sessionID: "h3"))
+        state.openDetailPage(.conversation(sessionID: "h3"))
         guard case .conversation(let last) = state.paneContent else { return XCTFail("expected a pane") }
         XCTAssertEqual(last.positionText, "5 / 5")
         XCTAssertTrue(last.canGoPrevious)
@@ -1274,11 +1274,11 @@ final class UnifiedListStateTests: XCTestCase {
                  expected: BottomPanelModel(hints: [.move],
                                             buttons: BottomPanelButtons(primary: jumpT2, branch: branchS2),
                                             showsViewButton: true)),
-            Case(name: "one column, History row", columns: .one, selected: .history(sessionID: "h1"), endSelectedRunningRow: false,
+            Case(name: "one column, History row", columns: .one, selected: .conversation(sessionID: "h1"), endSelectedRunningRow: false,
                  expected: BottomPanelModel(hints: [.move],
                                             buttons: BottomPanelButtons(primary: resumeH1, branch: branchH1),
                                             showsViewButton: true)),
-            Case(name: "one column, disabled primary (live in History)", columns: .one, selected: .history(sessionID: "live"),
+            Case(name: "one column, disabled primary (live in History)", columns: .one, selected: .conversation(sessionID: "live"),
                  endSelectedRunningRow: false,
                  expected: BottomPanelModel(hints: [.move],
                                             buttons: BottomPanelButtons(primary: liveJump, branch: branchLive),
@@ -1288,7 +1288,7 @@ final class UnifiedListStateTests: XCTestCase {
                                             buttons: BottomPanelButtons(primary: jumpT2.disabled(), branch: branchS2.disabled()),
                                             showsViewButton: true)),
             Case(name: "two columns, no selection", columns: .two, selected: nil, endSelectedRunningRow: false, expected: nil),
-            Case(name: "two columns, History row", columns: .two, selected: .history(sessionID: "h1"), endSelectedRunningRow: false,
+            Case(name: "two columns, History row", columns: .two, selected: .conversation(sessionID: "h1"), endSelectedRunningRow: false,
                  expected: nil),
         ]
         for testCase in cases {
@@ -1323,7 +1323,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// hints stay.
     func testDetailPagePanelHidesTheButtonsWhileTheSearchFieldHasFocus() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         state.handle(.searchFieldFocusChanged(true))
         guard case .conversation(let focused) = state.paneContent else { return XCTFail("expected the detail page") }
         XCTAssertEqual(focused.bottomPanel, BottomPanelModel(hints: [.prevNext, .back], buttons: nil, showsViewButton: false))
@@ -1336,7 +1336,7 @@ final class UnifiedListStateTests: XCTestCase {
     /// hints, the two-column right column without hints, buttons always.
     func testPaneBottomPanel() {
         var one = populated()
-        one.openDetailPage(.history(sessionID: "h1"))
+        one.openDetailPage(.conversation(sessionID: "h1"))
         guard case .conversation(let detail) = one.paneContent else { return XCTFail("expected the detail page") }
         XCTAssertEqual(detail.bottomPanel, BottomPanelModel(
             hints: [.prevNext, .back],
@@ -1358,27 +1358,29 @@ final class UnifiedListStateTests: XCTestCase {
 
     func testFocusSearchReturnsToTheListPage() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         XCTAssertEqual(state.handle(.focusSearch), [.focusSearchField, .scrollSelectionIntoView])
         XCTAssertEqual(state.page, .list)
         XCTAssertEqual(state.handle(.focusSearch), [.focusSearchField])
     }
 
-    func testStarToggleReordersWithoutSelecting() {
+    func testStarToggleMovesTheRowBetweenSectionsWithoutSelecting() {
         var state = populated()
         let effects = state.handle(.starToggled(sessionID: "h3"))
         XCTAssertEqual(effects, [.persistStars(["h3"])])
         XCTAssertNil(state.selection)
-        XCTAssertEqual(state.historyRows.map(\.sessionID), ["h3", "h1", "h2"])
+        XCTAssertEqual(state.starredRows.map(\.sessionID), ["h3"])
+        XCTAssertEqual(state.recentRows.map(\.sessionID), ["h1", "h2"])
         state.handle(.starToggled(sessionID: "h3"))
-        XCTAssertEqual(state.historyRows.map(\.sessionID), ["h1", "h2", "h3"])
+        XCTAssertEqual(state.starredRows.map(\.sessionID), [])
+        XCTAssertEqual(state.recentRows.map(\.sessionID), ["h1", "h2", "h3"])
     }
 
     func testStarToggleKeepsAnExistingSelection() {
         var state = populated()
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         state.handle(.starToggled(sessionID: "h2"))
-        XCTAssertEqual(state.selection?.key, .history(sessionID: "h1"))
+        XCTAssertEqual(state.selection?.key, .conversation(sessionID: "h1"))
         XCTAssertEqual(state.page, .detail)
     }
 
@@ -1396,7 +1398,7 @@ final class UnifiedListStateTests: XCTestCase {
         var state = populated()
         XCTAssertEqual(state.perform(.primary), [], "no selection: nothing")
         XCTAssertEqual(state.perform(.branch), [])
-        state.openDetailPage(.history(sessionID: "h1"))
+        state.openDetailPage(.conversation(sessionID: "h1"))
         XCTAssertEqual(state.perform(.primary), [.invoke(.resume(sessionID: "h1", cwd: "/Users/example/demo/web"))])
         XCTAssertEqual(state.perform(.branch), [.invoke(.branch(sessionID: "h1", cwd: "/Users/example/demo/web"))])
         XCTAssertEqual(state.perform(.nextMatch), [.nextMatch])
@@ -1419,7 +1421,7 @@ final class UnifiedListStateTests: XCTestCase {
             columns: .two, page: .list, searchFieldFocused: false, hasRows: true,
             hasSelection: false, primaryEnabled: false, branchEnabled: false,
             conversationPaneVisible: false, isPopover: false, hasMarkedText: false))
-        state.handle(.rowClicked(.history(sessionID: "h1")))
+        state.handle(.rowClicked(.conversation(sessionID: "h1")))
         state.handle(.searchFieldFocusChanged(true))
         XCTAssertEqual(state.keyContext(isPopover: false, hasMarkedText: true), ListKeyContext(
             columns: .two, page: .list, searchFieldFocused: true, hasRows: true,

@@ -1,8 +1,9 @@
 // The single state shared by the popover and the window (DESIGN.md §4.5
 // "the popover and the window share one state" / "switching by width" /
 // "row selection" / "row click" / "row double-click" / "opening the detail
-// page" / "key operations", §4.6 "display state rules" / "History refetch
-// triggers" / "bottom panel", §8.49, §8.59). A value type driven by explicit events; each
+// page" / "collapsing sections" / "row drag" / "key operations", §4.6
+// "display state rules" / "History refetch triggers" / "bottom panel" /
+// "stars", §8.49, §8.59, §8.60). A value type driven by explicit events; each
 // event returns the side effects the app must perform. The app holds ONE
 // instance (e.g. in an ObservableObject), feeds it daemon updates, search
 // results, clock ticks and user input, and renders from its derived
@@ -17,8 +18,8 @@
 import Foundation
 
 /// The selected row: its key, plus its session_id so a Running row that
-/// ends can carry the selection over to the History row with the same
-/// session_id (§4.5).
+/// ends can carry the selection over to the Starred or Recent row with the
+/// same session_id (§4.5).
 public struct RowSelection: Equatable, Sendable {
     public let key: UnifiedRowKey
     public let sessionID: String
@@ -57,6 +58,35 @@ public struct PendingDeselect: Equatable, Sendable {
     /// Matches `.deferredDeselectDue(id:)` to the schedule that set it.
     public let id: Int
     public let key: UnifiedRowKey
+}
+
+/// Why a press on a row does not start a drag (§4.5 "row drag": rows that
+/// cannot be dragged). Shown near the pointer as one line.
+public enum RowDragRefusal: Equatable, Sendable {
+    /// A Running row.
+    case running
+    /// Any row while searching.
+    case searching
+    /// A Recent row while the Starred section is not shown (no Starred
+    /// rows): there is nowhere to drop it.
+    case noStarredSection
+
+    public var text: String {
+        switch self {
+        case .running: return "Running is ordered automatically"
+        case .searching: return "Clear the search to reorder"
+        case .noStarredSection: return "Click the star to add it to Starred"
+        }
+    }
+}
+
+/// The reason on screen; `id` matches `.dragRefusalDismissDue(id:)` to the
+/// schedule that set it.
+public struct DragRefusalNotice: Equatable, Sendable {
+    public let id: Int
+    public let refusal: RowDragRefusal
+
+    public var text: String { refusal.text }
 }
 
 public enum UnifiedListEvent: Equatable, Sendable {
@@ -143,12 +173,52 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// or the surface closed).
     case deferredDeselectDue(id: Int)
     /// The visible surface closed (popover closed / window closed): a
-    /// pending deselect and the click sequence are dropped.
+    /// pending deselect and the click sequence are dropped, a row drag is
+    /// cancelled, and the reason a row cannot be dragged goes away.
     case surfaceHidden
     /// The column mode of the visible surface changed.
     case columnsChanged(ColumnMode)
-    /// A click on a History row's star (never selects — §4.6).
+    /// A click on a Starred or Recent row's star (never selects — §4.6).
     case starToggled(sessionID: String)
+    /// A click on a heading (§4.5 "collapsing sections"): it opens or
+    /// closes — only the first click of consecutive clicks (the click count
+    /// comes from the press, `.pointerDown`), and nothing while searching.
+    /// The focus and the other sections' selection stay; the surface
+    /// becomes key.
+    case headingClicked(ListHeading)
+    /// The mouse button went down on a row: whether on its star, the
+    /// system's click count, and where (any fixed coordinates, used only to
+    /// measure the distance the pointer moves). The second (or later) press
+    /// of a multi-click on a selected Starred or Recent row cancels that
+    /// row's pending deselect: the deselect never runs while the button is
+    /// held (§4.5 "row double-click" / "row drag").
+    case rowPressed(UnifiedRowKey, clickCount: Int, onStar: Bool, x: Double, y: Double)
+    /// The pointer moved with the button still down after `.rowPressed`
+    /// (same coordinates). Once it is §9's distance away, the press is
+    /// decided once: it starts a row drag — doing what a click does at that
+    /// point (selects the row when it is not selected, focuses the list),
+    /// and the press is no click afterwards — or, on a row that cannot be
+    /// dragged, the reason is shown (§4.5 "row drag").
+    case rowPressDragged(x: Double, y: Double)
+    /// The button went up after `.rowPressed`.
+    case rowPressReleased
+    /// The time the reason stays on screen has passed
+    /// (`.scheduleDragRefusalDismiss`).
+    case dragRefusalDismissDue(id: Int)
+    /// The pointer of the drag is at `hit` (moved, or the list changed or
+    /// scrolled under it).
+    case cardDragMoved(ListPointerHit)
+    /// The button was released: the drop runs when there is a target;
+    /// otherwise the drag is cancelled.
+    case cardDragEnded
+    /// The drag ends with nothing changed (Esc, or another cancel trigger
+    /// the app sees — §4.5 "row drag": cancel).
+    case cardDragCancelled
+    /// The search text became valid (true: a 2+ character term) or stopped
+    /// being valid (false). "Searching" (§4.5 "collapsing sections" / "row
+    /// drag") follows this at once — before the search result arrives, and
+    /// also when the search fails.
+    case queryValidityChanged(Bool)
 }
 
 public enum UnifiedListEffect: Equatable, Sendable {
@@ -174,8 +244,13 @@ public enum UnifiedListEffect: Equatable, Sendable {
     /// refetch after a Running row disappeared; §9 delay). A newer schedule
     /// may replace a pending one.
     case refetchHistoryLater(afterSeconds: Double)
-    /// Persist the star set (`StarredSessions.save`).
-    case persistStars(Set<String>)
+    /// Persist the stars' ordered list (`StarredSessions.save`).
+    case persistStars([String])
+    /// Persist the set of closed headings (`CollapsedSections.save`).
+    case persistCollapsedSections(Set<ListHeading>)
+    /// Make the visible surface the key window without moving the keyboard
+    /// focus (a click on a section heading — §4.5 "collapsing sections").
+    case makeSurfaceKey
     /// Run a row verb; feed the exit code to `RowInvocationOutcome.classify`.
     case invoke(RowInvocation)
     /// Answer with `.deferredDeselectDue(id:)` once the system double-click
@@ -183,6 +258,9 @@ public enum UnifiedListEffect: Equatable, Sendable {
     /// nil = from now) — §4.5 "row double-click". A cancelled deselect
     /// ignores the answer, so the timer itself never needs cancelling.
     case scheduleDeferredDeselect(id: Int, pressedAt: TimeInterval?)
+    /// Answer with `.dragRefusalDismissDue(id:)` after `afterSeconds` (§9:
+    /// the reason a row cannot be dragged stays this long).
+    case scheduleDragRefusalDismiss(id: Int, afterSeconds: Double)
     case closePopover
     /// Run Refresh (§4.6: the search and `shiibar-cc reconcile`), the same
     /// as the header row's ⟳.
@@ -284,7 +362,7 @@ public struct ConversationPaneModel: Equatable, Sendable {
     /// The row the pane shows (buttons already disabled while awaiting the
     /// refetch after a Running row ended).
     public let row: UnifiedListRow
-    /// The header's first line (§4.6): the card's folder label · elapsed ago.
+    /// The header's first line (§4.6): the row's folder label · elapsed ago.
     public var labelAndElapsed: String { row.headerLabelAndElapsed }
     /// The header's second line (§4.6): the title.
     public var title: String { row.headerTitle }
@@ -349,7 +427,10 @@ public struct UnifiedListState: Equatable, Sendable {
     public private(set) var history: [ConversationSummary]?
     /// Whether `history` came from a query with a valid term.
     public private(set) var historyIsFiltered = false
-    public private(set) var stars: Set<String>
+    public private(set) var stars: StarredList
+    /// The remembered closed headings (§4.5 "collapsing sections"). Kept
+    /// while searching and for headings not shown.
+    public private(set) var collapsedSections: Set<ListHeading>
     public private(set) var isFullBuild = false
 
     // MARK: View state
@@ -390,41 +471,223 @@ public struct UnifiedListState: Equatable, Sendable {
         let row: UnifiedRowKey
         let baseCount: Int
     }
+    /// The system click count of the latest press in a click sequence
+    /// that started with a heading click; nil = none.
+    private var headingClickCount: Int?
+    /// The current press continues a click sequence that started with a
+    /// heading click: it does nothing, whatever is under the pointer, since
+    /// the first click may have moved what is there (§4.5 "collapsing
+    /// sections").
+    private var pressContinuesHeadingClick = false
+    /// The current press started a row drag, so its click (if one
+    /// arrives) is not a click (§4.5 "row drag": start).
+    private var pressStartedDrag = false
+    /// The row drag in progress; nil = none.
+    public private(set) var cardDrag: CardDrag?
+    /// The press on a row not yet decided as a drag or not (`.rowPressed`);
+    /// nil once decided, released, or without one.
+    private var rowPress: RowPress?
+    /// The reason a row cannot be dragged, while on screen (§4.5 "row
+    /// drag": rows that cannot be dragged).
+    public private(set) var dragRefusal: DragRefusalNotice?
+    private var nextRefusalID = 0
+
+    private struct RowPress: Equatable, Sendable {
+        let key: UnifiedRowKey
+        let clickCount: Int
+        let onStar: Bool
+        let x: Double
+        let y: Double
+    }
 
     // MARK: Derived rows
 
+    /// Every section's rows, closed sections included.
     public private(set) var runningRows: [UnifiedListRow] = []
-    /// The History rows shown: at most `HistoryDisplayLimit.maxRows`, taken
-    /// from the head of the full order (§4.6). Everything that consumes rows
-    /// (sections, ↑ / ↓, position, selection) sees only these.
-    public private(set) var historyRows: [UnifiedListRow] = []
-    /// How many History rows the cap hides (0 when none).
-    public private(set) var hiddenHistoryCount = 0
+    /// Starred rows, in the stars' order (no cap — §4.6 "Starred section").
+    public private(set) var starredRows: [UnifiedListRow] = []
+    /// The Recent rows: at most `RecentDisplayLimit.maxRows`, taken from
+    /// the head of the full order (§4.6). Everything that consumes rows
+    /// (blocks, ↑ / ↓, position, selection) sees only these.
+    public private(set) var recentRows: [UnifiedListRow] = []
+    /// How many Recent rows the cap hides (0 when none).
+    public private(set) var hiddenRecentCount = 0
 
-    public init(home: String?, now: Int64, stars: Set<String> = []) {
+    public init(
+        home: String?,
+        now: Int64,
+        stars: StarredList = StarredList(),
+        collapsedSections: Set<ListHeading> = []
+    ) {
         self.home = home
         self.now = now
         self.stars = stars
+        self.collapsedSections = collapsedSections
     }
 
     // MARK: Derived properties
 
-    /// Every row shown, in on-screen order (Running, then History). ↑ / ↓
-    /// and the detail page's position move within this list.
-    public var visibleRows: [UnifiedListRow] { runningRows + historyRows }
+    /// Searching (§4.5 "collapsing sections", §4.6 "search scope"): the
+    /// search text is valid. Running and History show open whatever is
+    /// remembered, the headings do not toggle, and no row can be dragged.
+    public var isSearching: Bool { isQueryValid }
+    /// The search text is valid (`.queryValidityChanged`).
+    public private(set) var isQueryValid = false
 
-    /// The non-empty sections (§4.5: an empty section is hidden, heading
-    /// included).
-    public var sections: [UnifiedListSectionModel] {
-        var result: [UnifiedListSectionModel] = []
+    /// Every row of a section, shown or not.
+    public func rows(of section: UnifiedListSection) -> [UnifiedListRow] {
+        switch section {
+        case .running: return runningRows
+        case .starred: return starredRows
+        case .recent: return recentRows
+        }
+    }
+
+    /// Whether a section's rows are on screen (§4.5 "collapsing sections"):
+    /// not when the section is closed, and Starred and Recent not while
+    /// History is closed. While History stands for the Recent heading (no
+    /// Starred rows), Recent shows only while both are open — the same
+    /// rule. Every section while searching.
+    public func isSectionShown(_ section: UnifiedListSection) -> Bool {
+        if isSearching { return true }
+        switch section {
+        case .running:
+            return !collapsedSections.contains(.running)
+        case .starred, .recent:
+            return !collapsedSections.contains(.history) && !collapsedSections.contains(ListHeading(section))
+        }
+    }
+
+    /// Every row shown, in on-screen order (Running, Starred, Recent),
+    /// without the rows of closed sections (§4.5 "collapsing sections":
+    /// they count as not in the list). ↑ / ↓, the list's first row and the
+    /// detail page's position move within this list.
+    public var visibleRows: [UnifiedListRow] {
+        UnifiedListSection.allCases.filter(isSectionShown).flatMap(rows(of:))
+    }
+
+    /// The History heading stands for the Recent heading: Starred has no
+    /// rows and Recent has some (§4.5 "the list has three sections").
+    public var historyHeadingIsRecentHeading: Bool {
+        starredRows.isEmpty && !recentRows.isEmpty
+    }
+
+    /// Whether a heading is drawn open (§4.5 "collapsing sections"). While
+    /// the History heading stands for the Recent heading, it is open only
+    /// while both History and Recent are. Every heading while searching.
+    public func isHeadingOpen(_ heading: ListHeading) -> Bool {
+        if isSearching { return true }
+        if heading == .history, historyHeadingIsRecentHeading {
+            return !collapsedSections.contains(.history) && !collapsedSections.contains(.recent)
+        }
+        return !collapsedSections.contains(heading)
+    }
+
+    /// The Running mark (§4.5 "collapsing sections"): while Running is
+    /// closed — not while searching — and has a waiting or unreviewed row.
+    public var showsRunningAttentionMark: Bool {
+        guard !isSectionShown(.running) else { return false }
+        return runningRows.contains { row in
+            if case .status(let kind, let unreviewed) = row.symbol {
+                return kind == .waiting || unreviewed
+            }
+            return false
+        }
+    }
+
+    /// The Recent heading's count (§4.5 "row counts", §4.6 "Recent
+    /// section"): the row count, or `first 100` while the cap leaves rows
+    /// out.
+    public var recentCountText: String {
+        hiddenRecentCount > 0 ? "first \(RecentDisplayLimit.maxRows)" : "\(recentRows.count)"
+    }
+
+    /// The list page, top to bottom (§4.5 "the list has three sections" /
+    /// "collapsing sections" / "row drag", §4.6 "search scope"): the
+    /// headings shown, the frames of rows, and the `N more` line. A section
+    /// without rows is not shown, heading included; a closed heading shows
+    /// alone.
+    public var blocks: [ListBlock] {
+        var blocks: [ListBlock] = []
+        let drag = cardDrag
+        if isSearching {
+            if !runningRows.isEmpty {
+                blocks.append(.heading(ListHeadingModel(
+                    heading: .running, style: .plain, countText: "\(runningRows.count)", isCollapsible: false)))
+                blocks.append(.frame(ListFrameModel(id: .running, rows: runningRows)))
+            }
+            let history = starredRows + recentRows
+            if !history.isEmpty {
+                // §4.6 "search scope": one frame, Starred rows first; the
+                // count is both sections' rows, `first` while the cap
+                // leaves Recent rows out.
+                let count = hiddenRecentCount > 0 ? "first \(history.count)" : "\(history.count)"
+                blocks.append(.heading(ListHeadingModel(
+                    heading: .history, style: .plain, countText: count, isCollapsible: false)))
+                blocks.append(.frame(ListFrameModel(id: .history, rows: history)))
+                if let more = hiddenRecentText { blocks.append(.moreLine(more)) }
+            }
+            return blocks
+        }
         if !runningRows.isEmpty {
-            result.append(UnifiedListSectionModel(section: .running, rows: runningRows))
+            let open = isHeadingOpen(.running)
+            blocks.append(.heading(ListHeadingModel(
+                heading: .running, style: .band, countText: "\(runningRows.count)", isOpen: open,
+                showsAttentionMark: showsRunningAttentionMark)))
+            if open { blocks.append(.frame(ListFrameModel(id: .running, rows: runningRows))) }
         }
-        if !historyRows.isEmpty {
-            result.append(UnifiedListSectionModel(section: .history, rows: historyRows,
-                                                  hiddenCount: hiddenHistoryCount))
+        guard !starredRows.isEmpty || !recentRows.isEmpty else { return blocks }
+        let historyOpen = isHeadingOpen(.history)
+        if historyHeadingIsRecentHeading {
+            blocks.append(.heading(ListHeadingModel(
+                heading: .history, style: .band, countText: recentCountText, isOpen: historyOpen)))
+            if historyOpen {
+                blocks.append(.frame(ListFrameModel(id: .recent, rows: recentRows)))
+                if let more = hiddenRecentText { blocks.append(.moreLine(more)) }
+            }
+            return blocks
         }
-        return result
+        blocks.append(.heading(ListHeadingModel(heading: .history, style: .band, countText: nil, isOpen: historyOpen)))
+        guard historyOpen else { return blocks }
+        let starredOpen = isHeadingOpen(.starred)
+        blocks.append(.heading(ListHeadingModel(
+            heading: .starred, style: .sub, countText: "\(starredRows.count)", isOpen: starredOpen,
+            hint: drag?.section == .recent ? ListHeadingModel.starHint : nil,
+            isDropTarget: drag?.indicator == .heading(.starred))))
+        if starredOpen {
+            var lineShown = false
+            if case .line = drag?.indicator { lineShown = true }
+            blocks.append(.frame(ListFrameModel(
+                id: .starred, rows: starredRows, isEmphasized: drag?.section == .recent && lineShown)))
+        }
+        if !recentRows.isEmpty {
+            let recentOpen = isHeadingOpen(.recent)
+            blocks.append(.heading(ListHeadingModel(
+                heading: .recent, style: .sub, countText: recentCountText, isOpen: recentOpen,
+                hint: drag?.section == .starred ? ListHeadingModel.unstarHint : nil,
+                isDropTarget: drag?.indicator == .heading(.recent))))
+            if recentOpen {
+                blocks.append(.frame(ListFrameModel(id: .recent, rows: recentRows)))
+                if let more = hiddenRecentText { blocks.append(.moreLine(more)) }
+            }
+        }
+        return blocks
+    }
+
+    /// The headings shown, top to bottom (`blocks`).
+    public var headings: [ListHeadingModel] {
+        blocks.compactMap { block in
+            if case .heading(let model) = block { return model }
+            return nil
+        }
+    }
+
+    /// A row drawn faded during a row drag (§4.5 "row drag"): Running and
+    /// Recent rows — they are never a drop position — except the dragged
+    /// row itself.
+    public func isRowDimmed(_ row: UnifiedListRow) -> Bool {
+        guard let drag = cardDrag else { return false }
+        return row.id != drag.key && row.section != .starred
     }
 
     public var isAwaitingRefetch: Bool { awaitingRefetchRow != nil }
@@ -445,27 +708,30 @@ public struct UnifiedListState: Equatable, Sendable {
         selection != nil && (columns == .two || page == .detail)
     }
 
-    /// The empty-state line (§4.6): only when both sections are empty, never
+    /// The empty-state line (§4.6): only when every section is empty (a
+    /// closed section's rows count as rows), never
     /// during a full index build, and never before a search result has been
     /// delivered (`history` is nil until the first delivery after launch).
     /// "Searching" means the shown result came from a query with a valid
     /// term (assumption: a query with only 1-character words shows the
     /// browse list, so it reads as empty).
     public var emptyStateText: String? {
-        guard !isFullBuild, history != nil, runningRows.isEmpty, historyRows.isEmpty else { return nil }
+        guard !isFullBuild, history != nil, runningRows.isEmpty, starredRows.isEmpty, recentRows.isEmpty
+        else { return nil }
         return historyIsFiltered ? "No matching conversations" : "No conversations"
     }
 
-    /// The line under the last History card when the cap hides rows (§4.6;
-    /// window-design.html "hidden conversation count"); nil when nothing is
-    /// hidden. Not a row: it is never selectable.
-    public var hiddenHistoryText: String? {
-        guard hiddenHistoryCount > 0 else { return nil }
+    /// The line below the Recent rows' frame when the cap hides rows (§4.6
+    /// "Recent section"); nil when nothing is hidden, and while the Recent
+    /// rows are not shown (§4.5 "collapsing sections"). Not a row: it is
+    /// never selectable.
+    public var hiddenRecentText: String? {
+        guard hiddenRecentCount > 0, isSectionShown(.recent) else { return nil }
         let hint = historyIsFiltered ? "refine your search" : "search to narrow down"
-        return "\(hiddenHistoryCount) more \u{2014} \(hint)"
+        return "\(hiddenRecentCount) more \u{2014} \(hint)"
     }
 
-    /// The selected card's look (§4.5 "row selection"): accent while the
+    /// The selected row's look (§4.5 "row selection"): accent while the
     /// keys act on the list — the surface is key and the list has focus —
     /// and gray while the search field has focus or the surface is not key.
     public var isSelectionActive: Bool { isSurfaceKey && !isSearchFieldFocused }
@@ -534,8 +800,39 @@ public struct UnifiedListState: Equatable, Sendable {
             branchEnabled: row?.branchButton.isEnabled ?? false,
             conversationPaneVisible: isConversationPaneVisible,
             isPopover: isPopover,
-            hasMarkedText: hasMarkedText
+            hasMarkedText: hasMarkedText,
+            cardDragging: cardDrag != nil
         )
+    }
+
+    /// Whether a press on `key` may start a row drag once it moves far
+    /// enough (§4.5 "row drag": start): a Starred or Recent row on screen,
+    /// not on its star, not while searching, a Recent row only while the
+    /// Starred section is shown, and not the second (or later) press of a
+    /// double-click on that row. `clickCount` is the system's click count
+    /// of the press.
+    public func canStartCardDrag(key: UnifiedRowKey, clickCount: Int, onStar: Bool) -> Bool {
+        guard !onStar, cardDrag == nil, dragRefusal(key: key, onStar: onStar) == nil,
+              let row = visibleRows.first(where: { $0.id == key }), !row.sessionID.isEmpty else { return false }
+        return !isRepeatPress(on: key, clickCount: clickCount)
+    }
+
+    /// The press is the second (or later) press of a double-click on `key`.
+    private func isRepeatPress(on key: UnifiedRowKey, clickCount: Int) -> Bool {
+        guard clickCount > 1, let sequence = clickSequence else { return false }
+        return sequence.row == key
+    }
+
+    /// Why a press on `key` cannot start a drag (§4.5 "row drag": rows that
+    /// cannot be dragged); nil on the star, on a row not on screen, and on
+    /// a row that can be dragged. When several apply, the first of: a
+    /// Running row, searching, a Recent row while Starred has no rows.
+    public func dragRefusal(key: UnifiedRowKey, onStar: Bool) -> RowDragRefusal? {
+        guard !onStar, let row = visibleRows.first(where: { $0.id == key }) else { return nil }
+        if row.section == .running { return .running }
+        if isSearching { return .searching }
+        if row.section == .recent, starredRows.isEmpty { return .noStarredSection }
+        return nil
     }
 
     // MARK: Events
@@ -554,20 +851,19 @@ public struct UnifiedListState: Equatable, Sendable {
         case .historyDelivered(let results, let isFiltered):
             history = results
             historyIsFiltered = isFiltered
-            if !isFiltered {
-                let pruned = StarredSessions.pruned(stars, browseResults: results)
-                if pruned != stars {
-                    stars = pruned
-                    effects.append(.persistStars(stars))
-                }
+            if !isFiltered, let pruned = stars.pruned(browseResults: results) {
+                stars = pruned
+                effects.append(.persistStars(stars.sessionIDs))
             }
             rebuild()
             if let pending = awaitingRefetchRow {
-                // The refetch completed: keep the selection on the History
-                // row with the same session_id, else deselect (§4.5).
+                // The refetch completed: keep the selection on the Starred
+                // or Recent row with the same session_id, else deselect —
+                // also when that row is in a closed section (§4.5).
                 awaitingRefetchRow = nil
-                if historyRows.contains(where: { $0.sessionID == pending.sessionID }) {
-                    selection = RowSelection(key: .history(sessionID: pending.sessionID), sessionID: pending.sessionID)
+                let key = UnifiedRowKey.conversation(sessionID: pending.sessionID)
+                if visibleRows.contains(where: { $0.id == key }) {
+                    selection = RowSelection(key: key, sessionID: pending.sessionID)
                 } else {
                     deselect()
                 }
@@ -605,6 +901,19 @@ public struct UnifiedListState: Equatable, Sendable {
             // View or → (§4.5 "opening the detail page").
             let press = pointerPress
             pointerPress = nil
+            if pressContinuesHeadingClick {
+                pressContinuesHeadingClick = false
+                clickSequence = nil
+                break
+            }
+            headingClickCount = nil
+            if pressStartedDrag {
+                // §4.5 "row drag": the press that started a drag is no
+                // click, and no click sequence continues from it.
+                pressStartedDrag = false
+                clickSequence = nil
+                break
+            }
             let wasActive = press?.selectionActive ?? isSelectionActive
             guard let row = visibleRows.first(where: { $0.id == key }) else {
                 clickSequence = nil
@@ -699,6 +1008,12 @@ public struct UnifiedListState: Equatable, Sendable {
 
         case .surfaceKeyChanged(let key):
             isSurfaceKey = key
+            if !key {
+                // §4.5 "row drag": cancelled when the window stops being
+                // key, and a press not yet decided starts nothing.
+                cardDrag = nil
+                rowPress = nil
+            }
 
         case .pointerDown(let surfaceKey, let searchFieldFocused, let clickCount, let pressedAt, let commandKey):
             if pointerPress != nil {
@@ -712,6 +1027,12 @@ public struct UnifiedListState: Equatable, Sendable {
                 clickCount: clickCount,
                 pressedAt: pressedAt,
                 commandKey: commandKey)
+            pressStartedDrag = false
+            pressContinuesHeadingClick = clickCount > 1 && headingClickCount == clickCount - 1
+            headingClickCount = pressContinuesHeadingClick ? clickCount : nil
+            // §4.5 "row drag": the next press clears the reason a row
+            // cannot be dragged.
+            dragRefusal = nil
 
         case .deferredDeselectDue(let id):
             guard let pending = pendingDeselect, pending.id == id else { break }
@@ -724,6 +1045,12 @@ public struct UnifiedListState: Equatable, Sendable {
             pendingDeselect = nil
             pointerPress = nil
             clickSequence = nil
+            headingClickCount = nil
+            pressContinuesHeadingClick = false
+            pressStartedDrag = false
+            cardDrag = nil
+            rowPress = nil
+            dragRefusal = nil
 
         case .columnsChanged(let newColumns):
             guard newColumns != columns else { break }
@@ -733,10 +1060,131 @@ public struct UnifiedListState: Equatable, Sendable {
             page = .list
 
         case .starToggled(let sessionID):
-            stars = StarredSessions.toggled(stars, sessionID: sessionID)
-            effects.append(.persistStars(stars))
+            // A star click that continues a click sequence begun on a
+            // heading does nothing: the toggle may have moved this star under
+            // the pointer (§4.5 "collapsing sections"). The sequence keeps
+            // counting, so later clicks of it do nothing either.
+            if pressContinuesHeadingClick {
+                pressContinuesHeadingClick = false
+                pointerPress = nil
+                break
+            }
+            // §4.6 "stars": shown at once, without a new search; a new star
+            // goes to the end of Starred. A row that moves into a closed
+            // section deselects (§4.5 "row selection").
+            stars = stars.toggled(sessionID, results: history ?? [])
+            effects.append(.persistStars(stars.sessionIDs))
             rebuild()
+            reconcileSelection()
+
+        case .headingClicked(let heading):
+            let press = pointerPress
+            pointerPress = nil
+            clickSequence = nil
+            // §4.5 "collapsing sections": a click on a heading of a window
+            // that is not key makes it key, also when nothing toggles.
+            effects.append(.makeSurfaceKey)
+            let continues = pressContinuesHeadingClick
+            pressContinuesHeadingClick = false
+            headingClickCount = press?.clickCount ?? 1
+            // Only the first click of consecutive clicks toggles, and
+            // nothing toggles while searching (Running and History show
+            // open).
+            guard !continues, !isSearching else { break }
+            if heading == .history, historyHeadingIsRecentHeading {
+                // The History heading stands for the Recent heading: open
+                // closes History; closed opens both, so the click always
+                // shows the rows (§4.5, §8.60).
+                if isHeadingOpen(.history) {
+                    collapsedSections.insert(.history)
+                } else {
+                    collapsedSections.remove(.history)
+                    collapsedSections.remove(.recent)
+                }
+            } else if collapsedSections.contains(heading) {
+                collapsedSections.remove(heading)
+            } else {
+                collapsedSections.insert(heading)
+            }
+            if !isSectionShown(.running), awaitingRefetchRow != nil {
+                // The selected Running row that just ended belongs to the
+                // section being closed.
+                deselect()
+            }
+            effects.append(.persistCollapsedSections(collapsedSections))
+            reconcileSelection()
+
+        case .rowPressed(let key, let clickCount, let onStar, let x, let y):
+            rowPress = RowPress(key: key, clickCount: clickCount, onStar: onStar, x: x, y: y)
+            // §4.5 "row double-click" / "row drag": the deselect of a
+            // Starred or Recent row never runs while the button is down.
+            if !onStar, clickCount > 1, let pending = pendingDeselect, pending.key == key,
+               visibleRows.first(where: { $0.id == key })?.section != .running {
+                pendingDeselect = nil
+            }
+
+        case .rowPressDragged(let x, let y):
+            guard let press = rowPress,
+                  CardDragMetrics.hasMovedFarEnough(fromX: press.x, fromY: press.y, toX: x, toY: y) else { break }
+            // One decision per press; a press that continues a heading
+            // click does nothing (§4.5 "collapsing sections").
+            rowPress = nil
+            guard !pressContinuesHeadingClick else { break }
+            if canStartCardDrag(key: press.key, clickCount: press.clickCount, onStar: press.onStar),
+               let row = visibleRows.first(where: { $0.id == press.key }) {
+                pressStartedDrag = true
+                // §4.5 "row drag": no deselect from this press, and what a
+                // click does at the press: select an unselected row, focus
+                // the list.
+                pendingDeselect = nil
+                if selection?.key != press.key {
+                    select(row)
+                }
+                effects.append(.focusList)
+                cardDrag = CardDrag(key: press.key, sessionID: row.sessionID, section: row.section)
+            } else if !isRepeatPress(on: press.key, clickCount: press.clickCount),
+                      let refusal = dragRefusal(key: press.key, onStar: press.onStar) {
+                // The second (or later) press of a double-click shows no
+                // reason (§4.5 "row drag").
+                nextRefusalID += 1
+                dragRefusal = DragRefusalNotice(id: nextRefusalID, refusal: refusal)
+                effects.append(.scheduleDragRefusalDismiss(
+                    id: nextRefusalID, afterSeconds: CardDragMetrics.refusalSeconds))
+            }
+
+        case .rowPressReleased:
+            rowPress = nil
+
+        case .dragRefusalDismissDue(let id):
+            if dragRefusal?.id == id {
+                dragRefusal = nil
+            }
+
+        case .cardDragMoved(let hit):
+            guard var drag = cardDrag else { break }
+            drag.lastHit = hit
+            cardDrag = drag
+
+        case .cardDragEnded:
+            guard let drag = cardDrag else { break }
+            cardDrag = nil
+            if let target = drag.target {
+                drop(drag, on: target, effects: &effects)
+            }
+
+        case .cardDragCancelled:
+            cardDrag = nil
+
+        case .queryValidityChanged(let valid):
+            guard valid != isQueryValid else { break }
+            isQueryValid = valid
+            // Searching ends: a selected row in a closed section deselects
+            // (§4.5 "collapsing sections").
+            reconcileSelection()
+
         }
+
+        updateCardDrag()
 
         let after = Observation(self)
         // A pending deselect belongs to the selection and page the click
@@ -779,6 +1227,7 @@ public struct UnifiedListState: Equatable, Sendable {
         case .moveDown: return handle(.moveDown)
         case .previousConversation: return handle(.previousConversation)
         case .nextConversation: return handle(.nextConversation)
+        case .cancelCardDrag: return handle(.cardDragCancelled)
         case .enterFromSearchField: return handle(.enterFromSearchField)
         case .openDetail: return handle(.openDetail)
         case .back: return handle(.back)
@@ -856,26 +1305,81 @@ public struct UnifiedListState: Equatable, Sendable {
         runningRows = UnifiedListBuilder.runningRows(
             agents: agents, results: history, isFiltered: historyIsFiltered, now: now, home: home
         )
-        let allHistoryRows = UnifiedListBuilder.historyRows(
+        let conversations = UnifiedListBuilder.conversationRows(
             results: history, agents: agents, stars: stars, now: now, home: home
         )
-        historyRows = Array(allHistoryRows.prefix(HistoryDisplayLimit.maxRows))
-        hiddenHistoryCount = allHistoryRows.count - historyRows.count
+        starredRows = conversations.starred
+        recentRows = Array(conversations.recent.prefix(RecentDisplayLimit.maxRows))
+        hiddenRecentCount = conversations.recent.count - recentRows.count
+    }
+
+    /// After every event: a drag ends when searching starts or when the
+    /// dragged row is no longer among the shown rows of the section it
+    /// started in (§4.5 "row drag": cancel); otherwise its target is worked
+    /// out again from the pointer, since the list may have changed. A held
+    /// target is one indicator, so its line and its drop position cannot
+    /// part when rows come or go next to the line.
+    private mutating func updateCardDrag() {
+        guard var drag = cardDrag else { return }
+        let stillShown = isSectionShown(drag.section) && rows(of: drag.section).contains { $0.id == drag.key }
+        guard !isSearching, stillShown else {
+            cardDrag = nil
+            return
+        }
+        drag.indicator = dropResolver(source: drag.section).resolve(drag.lastHit, previous: drag.indicator)
+        cardDrag = drag
+    }
+
+    /// The drop table's inputs for the list as shown (§4.5 "row drag").
+    func dropResolver(source: UnifiedListSection) -> CardDropResolver {
+        let historyOpen = !isSearching && !collapsedSections.contains(.history)
+        let starredHeadingShown = historyOpen && !starredRows.isEmpty
+        var rowSections: [UnifiedRowKey: UnifiedListSection] = [:]
+        for row in visibleRows {
+            rowSections[row.id] = row.section
+        }
+        return CardDropResolver(
+            source: source,
+            shownStarred: isSectionShown(.starred) ? starredRows.map(\.sessionID) : [],
+            starredHeadingShown: starredHeadingShown,
+            recentHeadingShown: starredHeadingShown && !recentRows.isEmpty,
+            rowSections: rowSections)
+    }
+
+    /// §4.5 "row drag": drop. A move that leaves the order as it is changes
+    /// (and saves) nothing. The moved row keeps its selection unless it
+    /// lands in a closed section.
+    private mutating func drop(_ drag: CardDrag, on target: CardDropTarget, effects: inout [UnifiedListEffect]) {
+        let results = history ?? []
+        let changed: StarredList?
+        switch target {
+        case .starred(let before):
+            changed = stars.moving(drag.sessionID, before: before, shown: starredRows.map(\.sessionID), results: results)
+        case .unstar:
+            changed = drag.section == .starred ? stars.removing(drag.sessionID, results: results) : nil
+        }
+        guard let changed else { return }
+        stars = changed
+        effects.append(.persistStars(stars.sessionIDs))
+        rebuild()
+        reconcileSelection()
     }
 
     /// §4.5: a selected row that is no longer in the list deselects (no other
-    /// row gets selected). A Running row keyed by target picks up a changed
-    /// session_id. A selected History row whose conversation moved to
-    /// Running (e.g. after Resume) keeps the selection — and the shown page —
-    /// on the Running row with the same session_id.
+    /// row gets selected) — a row in a closed section counts as not in the
+    /// list. A Running row keyed by target picks up a changed session_id. A
+    /// selected Starred or Recent row whose conversation moved to Running
+    /// (e.g. after Resume) keeps the selection — and the shown page — on the
+    /// Running row with the same session_id, while Running is open.
     private mutating func reconcileSelection() {
         guard awaitingRefetchRow == nil, let current = selection else { return }
         if let row = visibleRows.first(where: { $0.id == current.key }) {
             if row.sessionID != current.sessionID {
                 selection = RowSelection(key: current.key, sessionID: row.sessionID)
             }
-        } else if case .history = current.key,
+        } else if case .conversation = current.key,
                   !current.sessionID.isEmpty,
+                  isSectionShown(.running),
                   let running = runningRows.first(where: { $0.sessionID == current.sessionID }) {
             selection = RowSelection(key: running.id, sessionID: running.sessionID)
         } else {

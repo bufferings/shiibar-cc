@@ -74,7 +74,7 @@ struct ConversationsLaunchers {
 final class MainSurfaceModel: ObservableObject {
     // MARK: - Shared list state
 
-    /// The single state machine (§4.5). Views read `sections`,
+    /// The single state machine (§4.5). Views read `blocks`,
     /// `emptyStateText`, `footerHints`, `paneContent` from here.
     @Published private(set) var list: UnifiedListState
 
@@ -180,6 +180,9 @@ final class MainSurfaceModel: ObservableObject {
     /// resigns first responder, so its caret disappears (§4.5 "key
     /// operations").
     var onFocusList: (MainSurface) -> Void = { _ in }
+    /// Make this surface's window key without moving the keyboard focus (a
+    /// click on a heading — §4.5 "collapsing sections").
+    var onMakeSurfaceKey: (MainSurface) -> Void = { _ in }
     /// Called every time a surface is shown (AppState: re-evaluate the
     /// notification permission — §4.5).
     var onSurfaceShown: () -> Void = {}
@@ -269,7 +272,10 @@ final class MainSurfaceModel: ObservableObject {
         self.uptime = uptime
         self.webPaneFactory = webPaneFactory
         let now = Int64(clock().timeIntervalSince1970)
-        self.list = UnifiedListState(home: home, now: now, stars: StarredSessions.load(from: defaults))
+        self.list = UnifiedListState(
+            home: home, now: now,
+            stars: StarredSessions.load(from: defaults),
+            collapsedSections: CollapsedSections.load(from: defaults))
         // A missing key reads as false == `WindowKeepOnTop.defaultEnabled`.
         self.keepOnTop = defaults.object(forKey: MainSurfaceDefaultsKeys.windowKeepOnTop) as? Bool
             ?? WindowKeepOnTop.defaultEnabled
@@ -388,6 +394,38 @@ final class MainSurfaceModel: ObservableObject {
 
     func rowClicked(_ key: UnifiedRowKey) { send(.rowClicked(key)) }
     func starClicked(sessionID: String) { send(.starToggled(sessionID: sessionID)) }
+
+    /// A click on a heading (§4.5 "collapsing sections"; Core decides
+    /// whether it toggles).
+    func headingClicked(_ heading: ListHeading) { send(.headingClicked(heading)) }
+
+    // MARK: - Row drag (§4.5 "row drag")
+
+    /// The button went down on a row; `x` / `y` are window coordinates.
+    func rowPressed(_ key: UnifiedRowKey, clickCount: Int, onStar: Bool, x: Double, y: Double) {
+        send(.rowPressed(key, clickCount: clickCount, onStar: onStar, x: x, y: y))
+    }
+
+    /// The pointer moved with the button held after `rowPressed` (window
+    /// coordinates). Core decides once whether the press becomes a drag or
+    /// shows why the row cannot be dragged.
+    func rowPressDragged(x: Double, y: Double) { send(.rowPressDragged(x: x, y: y)) }
+
+    func rowPressReleased() { send(.rowPressReleased) }
+
+    /// The drag's pointer is at `hit`. Sent only when it changes: every
+    /// event re-publishes the state.
+    func cardDragMoved(_ hit: ListPointerHit) {
+        guard list.cardDrag != nil, list.cardDrag?.lastHit != hit else { return }
+        send(.cardDragMoved(hit))
+    }
+
+    func cardDragEnded() { send(.cardDragEnded) }
+
+    func cardDragCancelled() {
+        guard list.cardDrag != nil else { return }
+        send(.cardDragCancelled)
+    }
     func backClicked() { send(.back) }
     func previousConversationClicked() { send(.previousConversation) }
     func nextConversationClicked() { send(.nextConversation) }
@@ -589,8 +627,16 @@ final class MainSurfaceModel: ObservableObject {
                 }
             case .persistStars(let stars):
                 StarredSessions.save(stars, to: defaults)
+            case .persistCollapsedSections(let sections):
+                CollapsedSections.save(sections, to: defaults)
+            case .makeSurfaceKey:
+                if let surface = focusSurface { onMakeSurfaceKey(surface) }
             case .invoke(let invocation):
                 invoke(invocation)
+            case .scheduleDragRefusalDismiss(let id, let seconds):
+                schedule(seconds) { [weak self] in
+                    self?.send(.dragRefusalDismissDue(id: id))
+                }
             case .scheduleDeferredDeselect(let id, let pressedAt):
                 // Measured from the press (§4.5): the click action runs on
                 // mouse-up, part of the interval has already passed.
@@ -708,6 +754,14 @@ final class MainSurfaceModel: ObservableObject {
     // MARK: - Search (§4.6)
 
     private func queryDidChange() {
+        // "Searching" follows the search text at once (§4.5 "collapsing
+        // sections"): Running and History show open, headings and drags
+        // stop, and a drag in progress is cancelled, before any result
+        // arrives.
+        let valid = ConversationsQuery.shouldIssueSearch(query.precomposedStringWithCanonicalMapping)
+        if valid != list.isQueryValid {
+            send(.queryValidityChanged(valid))
+        }
         // Highlights and the counter follow the query at once, without
         // moving the scroll (§4.6).
         recomputeHits()

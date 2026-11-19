@@ -55,6 +55,10 @@ public struct ListViewport: Equatable, Sendable {
     public var maxTop: Double { max(0, contentHeight - height) }
 
     func clamped(_ value: Double) -> Double { min(max(0, value), maxTop) }
+
+    /// A top offset kept inside the valid range (the row drag's
+    /// auto-scroll — §4.5 "row drag").
+    public func clampedTop(_ value: Double) -> Double { clamped(value) }
 }
 
 /// The shared list scroll position (§4.5): the row at the top edge of the

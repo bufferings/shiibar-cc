@@ -139,7 +139,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(spy.searches.count, 1, "keystrokes inside the debounce collapse to one search")
         XCTAssertEqual(spy.searches[0].arguments, ["conversations", "search", navNFC, "--json"])
         spy.searches[0].completion(ok(resultJSON(["hit"])))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["hit"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["hit"])
     }
 
     func testOneCharacterQueryBrowses() {
@@ -157,7 +157,7 @@ final class MainSurfaceModelTests: XCTestCase {
         waitForSearches(2)
         spy.searches[1].completion(ok(resultJSON(["new"])))
         spy.searches[0].completion(ok(resultJSON(["old-a", "old-b"])))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["new"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["new"])
     }
 
     func testCancelledSearchFailureDoesNotFlagAnError() {
@@ -178,7 +178,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.query = "zz"
         waitForSearches(2)
         spy.searches[1].completion(CLIRunResult(exitCode: 1, stdout: "", stderr: ""))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["a", "b"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["a", "b"])
         XCTAssertEqual(model.messageText, "Search failed")
         // §4.6: the error clears on the next successful fetch.
         model.refresh()
@@ -209,7 +209,7 @@ final class MainSurfaceModelTests: XCTestCase {
         let model = makeModel()
         model.refresh()
         spy.searches[0].completion(ok(resultJSON(["r1"])))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["r1"], "the result applies at once")
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["r1"], "the result applies at once")
         // Only the search has finished: still in flight.
         RunLoop.main.run(until: Date().addingTimeInterval(0.7))
         XCTAssertTrue(model.isRefreshing, "the reconcile has not finished")
@@ -311,7 +311,7 @@ final class MainSurfaceModelTests: XCTestCase {
                 spy.indexCompletions.last?(0)
                 spy.searches.last?.completion(ok(resultJSON(["a"])))
             }
-            if c.detailPage { openDetailPage(model, .history(sessionID: "a")) }
+            if c.detailPage { openDetailPage(model, .conversation(sessionID: "a")) }
             let searchesBefore = spy.searches.count
             XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "r"), [.command], surface: c.surface,
                                searchFieldFocused: c.searchFieldFocused), .consumed, c.name)
@@ -353,7 +353,7 @@ final class MainSurfaceModelTests: XCTestCase {
         spy.indexLines[1](#"{"event":"progress","done":340,"total":4200}"#)
         XCTAssertTrue(model.list.isFullBuild)
         XCTAssertEqual(model.messageText, "Indexing 340 of 4,200\u{2026}")
-        XCTAssertEqual(model.list.historyRows, [])
+        XCTAssertEqual(model.list.recentRows, [])
         XCTAssertNil(model.list.emptyStateText, "no empty line during a full build")
         model.query = "ab"
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
@@ -374,7 +374,7 @@ final class MainSurfaceModelTests: XCTestCase {
         ] {
             let model = makeModel()
             openPopover(model, delivering: ["a", "b"])
-            openDetailPage(model, .history(sessionID: "b"))
+            openDetailPage(model, .conversation(sessionID: "b"))
             XCTAssertEqual(model.list.page, .detail)
             let showsBefore = spy.shows.count
             model.surfaceDidHide(.popover)
@@ -383,15 +383,15 @@ final class MainSurfaceModelTests: XCTestCase {
             spy.indexLines[1](#"{"event":"progress","done":1,"total":3}"#)
             XCTAssertFalse(model.list.isFullBuild, line)
             XCTAssertEqual(model.messageText, "Indexing 1 of 3\u{2026}", "progress still shows")
-            XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["a", "b"], "History stays: \(line)")
-            XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"), line)
+            XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["a", "b"], "History stays: \(line)")
+            XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"), line)
             XCTAssertEqual(model.list.page, .detail, line)
             XCTAssertEqual(spy.shows.count, showsBefore, "the page is not reloaded")
             spy.indexCompletions[1](0)
             XCTAssertNil(model.messageText)
             XCTAssertEqual(spy.searches.count, 2, "the index is followed by a search")
             spy.searches[1].completion(ok(resultJSON(["a", "b"])))
-            XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+            XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
             XCTAssertEqual(model.list.page, .detail)
         }
     }
@@ -410,7 +410,7 @@ final class MainSurfaceModelTests: XCTestCase {
         spy.indexCompletions[1](0)
         XCTAssertEqual(spy.searches.last?.arguments, ["conversations", "search", "ab", "--json"])
         spy.searches.last?.completion(ok(resultJSON(["ab-hit"])))
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["ab-hit"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["ab-hit"])
     }
 
     func testLaterStartFollowsTheLatestFullBuildFlag() {
@@ -432,7 +432,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.surfaceDidShow(.popover)
         spy.indexCompletions[1](1)
         XCTAssertEqual(model.messageText, "Indexing failed")
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["a"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["a"])
         XCTAssertEqual(spy.searches.count, 1)
     }
 
@@ -454,12 +454,12 @@ final class MainSurfaceModelTests: XCTestCase {
     func testRowClickLoadsTheConversationAndShowErrorsShowInThePane() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        openDetailPage(model, .history(sessionID: "b"))
+        openDetailPage(model, .conversation(sessionID: "b"))
         XCTAssertEqual(model.list.page, .detail)
         XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "b", "--json"]])
         spy.shows[0].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
         XCTAssertEqual(model.paneLoadError, MainSurfaceModel.unavailableText)
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["a", "b"], "the list stays")
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["a", "b"], "the list stays")
     }
 
     func testRunningRowRemovalRefetchesHistoryNowAndAgainLater() {
@@ -483,11 +483,11 @@ final class MainSurfaceModelTests: XCTestCase {
         openPopover(model, delivering: [])
         model.agentsUpdated([])
         spy.searches[1].completion(ok(#"{"conversations":[\#(summaryJSON("s1", live: true))]}"#))
-        XCTAssertFalse(model.list.historyRows[0].primaryButton.isEnabled, "live: disabled Jump")
+        XCTAssertFalse(model.list.recentRows[0].primaryButton.isEnabled, "live: disabled Jump")
         spy.scheduled[0].action()
         spy.searches[2].completion(ok(#"{"conversations":[\#(summaryJSON("s1", live: false))]}"#))
-        XCTAssertEqual(model.list.historyRows[0].primaryButton.kind, .resume)
-        XCTAssertTrue(model.list.historyRows[0].primaryButton.isEnabled)
+        XCTAssertEqual(model.list.recentRows[0].primaryButton.kind, .resume)
+        XCTAssertTrue(model.list.recentRows[0].primaryButton.isEnabled)
     }
 
     func testANewerRemovalReplacesThePendingSecondRefetch() {
@@ -521,7 +521,7 @@ final class MainSurfaceModelTests: XCTestCase {
             waitForSearches(2)
             spy.searches[1].completion(ok(resultJSON(["a"])))
         }
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(spy.shows.last?.arguments, ["conversations", "show", "a", "--json"])
         spy.shows.last?.completion(ok(showJSON("a", texts: texts)))
     }
@@ -590,9 +590,9 @@ final class MainSurfaceModelTests: XCTestCase {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
         XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsViewButton: true))
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertEqual(model.list.page, .list)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertTrue(spy.shows.isEmpty, "a click never opens (or loads) the detail page")
         XCTAssertEqual(spy.focusListSurfaces, [.popover], "a click moves focus to the list")
         XCTAssertEqual(model.list.listBottomPanel?.slots, [.view, .branch, .primary])
@@ -600,7 +600,7 @@ final class MainSurfaceModelTests: XCTestCase {
         let paneFocus = model.paneFocusRequests[.popover] ?? 0
         model.viewClicked()
         XCTAssertEqual(model.list.page, .detail)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "a", "--json"]])
         XCTAssertEqual(model.paneFocusRequests[.popover], paneFocus + 1)
         XCTAssertTrue(spy.commands.isEmpty, "View runs no command")
@@ -610,7 +610,7 @@ final class MainSurfaceModelTests: XCTestCase {
         // → with list focus does the same from the list page.
         let viaKey = makeModel()
         openPopover(viaKey, delivering: ["a", "b"])
-        viaKey.rowClicked(.history(sessionID: "a"))
+        viaKey.rowClicked(.conversation(sessionID: "a"))
         XCTAssertEqual(key(viaKey, .rightArrow), .consumed)
         XCTAssertEqual(viaKey.list, model.list, "→ leaves the same state as View")
     }
@@ -618,7 +618,7 @@ final class MainSurfaceModelTests: XCTestCase {
     func testResumeRunsTheCliAndClosesThePopoverOnSuccess() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        guard let buttons = panelButtons(model, selecting: .history(sessionID: "a")) else { return }
+        guard let buttons = panelButtons(model, selecting: .conversation(sessionID: "a")) else { return }
         model.buttonClicked(buttons.primary)
         XCTAssertEqual(spy.commands.map(\.arguments),
                        [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "a"]])
@@ -662,7 +662,7 @@ final class MainSurfaceModelTests: XCTestCase {
             let model = makeModel()
             model.agentsUpdated([agent("iterm2:T1", session: "s1")])
             openPopover(model, delivering: ["a"])
-            let key: UnifiedRowKey = testCase.jump ? .running(target: "iterm2:T1") : .history(sessionID: "a")
+            let key: UnifiedRowKey = testCase.jump ? .running(target: "iterm2:T1") : .conversation(sessionID: "a")
             guard let buttons = panelButtons(model, selecting: key) else { return }
             model.buttonClicked(buttons.primary)
             spy.commands[0].completion(testCase.exitCode)
@@ -677,7 +677,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.windowDidBecomeKey()
         spy.indexCompletions[0](0)
         spy.searches[0].completion(ok(resultJSON(["a"])))
-        guard let buttons = panelButtons(model, selecting: .history(sessionID: "a")) else { return }
+        guard let buttons = panelButtons(model, selecting: .conversation(sessionID: "a")) else { return }
         model.buttonClicked(buttons.primary)
         spy.commands[0].completion(0)
         XCTAssertEqual(spy.closePopoverCount, 0)
@@ -688,7 +688,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.surfaceDidShow(.popover)
         spy.indexCompletions[0](0)
         spy.searches[0].completion(ok(#"{"conversations":[\#(summaryJSON("x", cwd: nil))]}"#))
-        guard let buttons = panelButtons(model, selecting: .history(sessionID: "x")) else { return }
+        guard let buttons = panelButtons(model, selecting: .conversation(sessionID: "x")) else { return }
         XCTAssertFalse(buttons.primary.isEnabled)
         XCTAssertFalse(buttons.branch.isEnabled)
         model.buttonClicked(buttons.primary)
@@ -743,10 +743,10 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNil(model.list.selection)
 
         XCTAssertEqual(key(model, .returnKey, searchFieldFocused: true), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(spy.focusListSurfaces, [.popover], "focus moves to the list")
         XCTAssertEqual(key(model, .downArrow), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"), "↓ with list focus moves")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"), "↓ with list focus moves")
         XCTAssertEqual(key(model, .returnKey), .consumed)
         XCTAssertEqual(spy.commands.map(\.arguments),
                        [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "b"]])
@@ -757,7 +757,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(key(model, .returnKey, [.command], searchFieldFocused: true), .consumed)
         XCTAssertEqual(key(model, .downArrow, searchFieldFocused: true), .consumed)
         XCTAssertEqual(spy.commands.count, 2)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
     }
 
     /// §4.5: Enter in the search field focuses the list, selecting the
@@ -773,13 +773,13 @@ final class MainSurfaceModelTests: XCTestCase {
         let withRows = makeModel()
         openPopover(withRows, delivering: ["a", "b"])
         XCTAssertEqual(key(withRows, .returnKey, searchFieldFocused: true), .consumed)
-        XCTAssertEqual(withRows.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(withRows.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(spy.focusListSurfaces, [.popover])
         XCTAssertTrue(spy.commands.isEmpty, "Enter in the search field never runs Resume")
         // Back in the search field with a selection: focus only.
-        withRows.rowClicked(.history(sessionID: "b"))
+        withRows.rowClicked(.conversation(sessionID: "b"))
         XCTAssertEqual(key(withRows, .returnKey, searchFieldFocused: true), .consumed)
-        XCTAssertEqual(withRows.list.selection?.key, .history(sessionID: "b"))
+        XCTAssertEqual(withRows.list.selection?.key, .conversation(sessionID: "b"))
         XCTAssertTrue(spy.commands.isEmpty)
     }
 
@@ -797,11 +797,11 @@ final class MainSurfaceModelTests: XCTestCase {
         let withRows = makeModel()
         openPopover(withRows, delivering: ["a", "b"])
         withRows.openedByHotKey()
-        XCTAssertEqual(withRows.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(withRows.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(spy.focusListSurfaces, [.popover])
         XCTAssertTrue(spy.commands.isEmpty, "never runs a verb")
 
-        openDetailPage(withRows, .history(sessionID: "b"))
+        openDetailPage(withRows, .conversation(sessionID: "b"))
         let paneRequests = withRows.paneFocusRequests[.popover] ?? 0
         withRows.openedByHotKey()
         XCTAssertEqual(withRows.list.page, .detail, "the detail page stays")
@@ -817,7 +817,7 @@ final class MainSurfaceModelTests: XCTestCase {
         spy.searches[0].completion(ok(#"{"conversations":[\#(summaryJSON("x", cwd: nil))]}"#))
         XCTAssertEqual(key(model, .returnKey), .consumed)
         XCTAssertEqual(key(model, .returnKey, [.command]), .consumed)
-        model.rowClicked(.history(sessionID: "x"))
+        model.rowClicked(.conversation(sessionID: "x"))
         XCTAssertEqual(key(model, .returnKey), .consumed)
         XCTAssertEqual(key(model, .returnKey, [.command]), .consumed)
         XCTAssertTrue(spy.commands.isEmpty)
@@ -829,15 +829,15 @@ final class MainSurfaceModelTests: XCTestCase {
     func testTypingWithListFocusPassesThroughWithoutEffect() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         let searchFocus = model.searchFocusRequests[.popover] ?? 0
         for typed in [ListKey.other(charactersIgnoringModifiers: "t"), .other(charactersIgnoringModifiers: " "), .delete] {
             XCTAssertEqual(key(model, typed), .passThrough, "\(typed)")
         }
         XCTAssertEqual(model.searchFocusRequests[.popover] ?? 0, searchFocus, "the search field does not take focus")
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(model.query, "")
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: " ")), .passThrough, "detail page: Space to the pane")
         XCTAssertEqual(model.list.page, .detail)
 
@@ -856,7 +856,7 @@ final class MainSurfaceModelTests: XCTestCase {
         openPopover(model, delivering: ["a", "b"])
         XCTAssertEqual(key(model, .rightArrow), .consumed)
         XCTAssertEqual(model.list.page, .list, "no selection: nothing")
-        model.rowClicked(.history(sessionID: "b"))
+        model.rowClicked(.conversation(sessionID: "b"))
         let paneFocus = model.paneFocusRequests[.popover] ?? 0
         XCTAssertEqual(key(model, .rightArrow), .consumed)
         XCTAssertEqual(model.list.page, .detail)
@@ -879,33 +879,33 @@ final class MainSurfaceModelTests: XCTestCase {
     func testDetailPageArrowsScrollAndOptionArrowsSwitch() {
         let model = makeModel()
         openPopover(model, delivering: ["a", "b"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertEqual(key(model, .downArrow, [.option]), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "list page: ⌥↓ does nothing")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), "list page: ⌥↓ does nothing")
         XCTAssertEqual(key(model, .downArrow, [.option], searchFieldFocused: true), .passThrough,
                        "search field: ⌥↓ is text editing")
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
         for arrow in [ListKey.downArrow, .upArrow] {
             XCTAssertEqual(key(model, arrow), .passToConversationPane, "\(arrow)")
         }
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "↑ / ↓ do not switch")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), "↑ / ↓ do not switch")
         guard case .conversation(let pane) = model.list.paneContent else { return XCTFail("expected the pane") }
         XCTAssertEqual(pane.hints, [.prevNext, .back])
 
         XCTAssertEqual(key(model, .downArrow, [.option]), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
         XCTAssertEqual(model.list.page, .detail)
         XCTAssertEqual(spy.shows.last?.arguments, ["conversations", "show", "b", "--json"])
         XCTAssertEqual(key(model, .downArrow, [.option]), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"), "last row: nothing")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"), "last row: nothing")
         XCTAssertEqual(key(model, .upArrow, [.option]), .consumed)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
 
         model.nextConversationClicked()
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
         model.previousConversationClicked()
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
     }
 
@@ -915,13 +915,13 @@ final class MainSurfaceModelTests: XCTestCase {
     func testSearchFieldFocusReportsDriveHintsAndButtons() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertEqual(model.list.footerHints, [.move])
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
         model.searchFieldFocusChanged(surface: .popover, focused: true)
         XCTAssertEqual(model.list.footerHints, [.list])
         XCTAssertNil(model.list.listBottomPanel?.buttons, "no buttons while the search field has focus")
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "the selection stays")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), "the selection stays")
         model.searchFieldFocusChanged(surface: .window, focused: false)
         XCTAssertEqual(model.list.footerHints, [.list], "the hidden window's report is ignored")
         // A key event carries the live focus location too.
@@ -936,7 +936,7 @@ final class MainSurfaceModelTests: XCTestCase {
     func testEnterFromTheSearchFieldShowsTheButtonsAgain() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         model.searchFieldFocusChanged(surface: .popover, focused: true)
         XCTAssertNil(model.list.listBottomPanel?.buttons)
         XCTAssertEqual(key(model, .returnKey, searchFieldFocused: true), .consumed)
@@ -951,9 +951,9 @@ final class MainSurfaceModelTests: XCTestCase {
     func testClickOnTheSelectedRowDeselects() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertNotNil(model.list.listBottomPanel?.buttons)
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertNil(model.list.selection)
         XCTAssertEqual(model.list.listBottomPanel, BottomPanelModel(hints: [.move], buttons: nil, showsViewButton: true))
         XCTAssertEqual(spy.focusListSurfaces, [.popover, .popover], "each click moves focus to the list")
@@ -977,7 +977,7 @@ final class MainSurfaceModelTests: XCTestCase {
         for testCase in cases {
             let model = makeModel()
             openPopover(model, delivering: ["a", "b"])
-            model.rowClicked(.history(sessionID: "a"))
+            model.rowClicked(.conversation(sessionID: "a"))
             model.surfaceKeyChanged(surface: .popover, isKey: testCase.surfaceWasKey)
             model.searchFieldFocusChanged(surface: .popover, focused: testCase.searchFieldFocused)
             XCTAssertEqual(model.list.isSelectionActive, testCase.surfaceWasKey && !testCase.searchFieldFocused, testCase.name)
@@ -989,12 +989,12 @@ final class MainSurfaceModelTests: XCTestCase {
             model.searchFieldFocusChanged(surface: .popover, focused: false)
             XCTAssertTrue(model.list.isSelectionActive, testCase.name)
             spy.focusListSurfaces = []
-            model.rowClicked(.history(sessionID: "a"))
+            model.rowClicked(.conversation(sessionID: "a"))
             // §4.5 "row double-click": the deselect waits for the
             // double-click interval (the injected scheduler).
             XCTAssertEqual(spy.scheduled.count, testCase.expectDeselect ? 1 : 0, testCase.name)
             spy.scheduled.forEach { $0.action() }
-            XCTAssertEqual(model.list.selection?.key, testCase.expectDeselect ? nil : .history(sessionID: "a"), testCase.name)
+            XCTAssertEqual(model.list.selection?.key, testCase.expectDeselect ? nil : .conversation(sessionID: "a"), testCase.name)
             XCTAssertEqual(spy.focusListSurfaces, [.popover], "\(testCase.name): the click moves focus to the list")
         }
     }
@@ -1014,9 +1014,9 @@ final class MainSurfaceModelTests: XCTestCase {
         let cases = [
             Case(name: "popover, Running", surface: .popover, key: .running(target: "iterm2:T1"),
                  expected: ["focus", "iterm2:T1"]),
-            Case(name: "popover, History", surface: .popover, key: .history(sessionID: "a"),
+            Case(name: "popover, History", surface: .popover, key: .conversation(sessionID: "a"),
                  expected: ["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "a"]),
-            Case(name: "window, History", surface: .window, key: .history(sessionID: "a"),
+            Case(name: "window, History", surface: .window, key: .conversation(sessionID: "a"),
                  expected: ["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "a"]),
         ]
         for testCase in cases {
@@ -1062,10 +1062,10 @@ final class MainSurfaceModelTests: XCTestCase {
         spy.searches[0].completion(ok(#"{"conversations":[\#(summaryJSON("x", cwd: nil))]}"#))
         for count in [1, 2] {
             model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false, clickCount: count)
-            model.rowClicked(.history(sessionID: "x"))
+            model.rowClicked(.conversation(sessionID: "x"))
         }
         XCTAssertTrue(spy.commands.isEmpty)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "x"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "x"))
         XCTAssertEqual(spy.focusListSurfaces, [.popover, .popover])
     }
 
@@ -1083,9 +1083,9 @@ final class MainSurfaceModelTests: XCTestCase {
         let cases = [
             Case(name: "popover, Running", surface: .popover, key: .running(target: "iterm2:T1"),
                  expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "s1"]]),
-            Case(name: "popover, History", surface: .popover, key: .history(sessionID: "a"),
+            Case(name: "popover, History", surface: .popover, key: .conversation(sessionID: "a"),
                  expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "a"]]),
-            Case(name: "window, History", surface: .window, key: .history(sessionID: "a"),
+            Case(name: "window, History", surface: .window, key: .conversation(sessionID: "a"),
                  expected: [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "a"]]),
             Case(name: "popover, Running without a session_id (Branch disabled)", surface: .popover,
                  key: .running(target: "iterm2:T0"), expected: []),
@@ -1148,14 +1148,14 @@ final class MainSurfaceModelTests: XCTestCase {
                 doubleClickInterval: { 0.5 },
                 uptime: { testCase.now })
             openPopover(model, delivering: ["a"])
-            model.rowClicked(.history(sessionID: "a"))
+            model.rowClicked(.conversation(sessionID: "a"))
             model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false,
                               clickCount: 1, pressedAt: testCase.pressedAt)
-            model.rowClicked(.history(sessionID: "a"))
+            model.rowClicked(.conversation(sessionID: "a"))
             let name = "pressed \(String(describing: testCase.pressedAt)), now \(testCase.now)"
             XCTAssertEqual(spy.scheduled.count, 1, name)
             XCTAssertEqual(spy.scheduled.first?.seconds ?? -1, testCase.expectedDelay, accuracy: 1e-9, name)
-            XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"), "\(name): not yet")
+            XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"), "\(name): not yet")
             spy.scheduled[0].action()
             XCTAssertNil(model.list.selection, name)
         }
@@ -1165,13 +1165,13 @@ final class MainSurfaceModelTests: XCTestCase {
     func testClosingTheSurfaceCancelsThePendingDeselect() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         XCTAssertEqual(spy.scheduled.count, 1)
         model.surfaceDidHide(.popover)
         spy.scheduled[0].action()
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
     }
 
     /// Key-status reports and presses from the surface that is not on
@@ -1180,7 +1180,7 @@ final class MainSurfaceModelTests: XCTestCase {
     func testKeyStatusAndPressReportsFollowTheVisibleSurface() {
         let model = makeModel()
         openPopover(model, delivering: ["a"])
-        model.rowClicked(.history(sessionID: "a"))
+        model.rowClicked(.conversation(sessionID: "a"))
         model.surfaceKeyChanged(surface: .window, isKey: false)
         XCTAssertTrue(model.list.isSurfaceKey, "the hidden window's report is ignored")
         model.pointerDown(surface: .window, surfaceWasKey: false, searchFieldFocused: false)
@@ -1202,7 +1202,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.requestInitialFocus()
         XCTAssertEqual(model.searchFocusRequests[.popover], search + 1)
         XCTAssertNil(model.searchFocusRequests[.window], "a popover request never reaches the window")
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(model.paneFocusRequests[.popover], 1, "opening the detail page focuses the pane")
         let pane = model.paneFocusRequests[.popover] ?? 0
         model.requestInitialFocus()
@@ -1213,7 +1213,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.searchFocusRequests[.popover], searchBeforeBack, "back never focuses the search field")
         XCTAssertEqual(spy.focusListSurfaces.count, focusListBeforeBack + 1, "back to the list focuses the list")
         // ⌘F from the detail page: back to the list page, then the search field.
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(key(model, .other(charactersIgnoringModifiers: "f"), [.command]), .consumed)
         XCTAssertEqual(model.list.page, .list)
         XCTAssertEqual(model.searchFocusRequests[.popover], searchBeforeBack + 1)
@@ -1223,14 +1223,125 @@ final class MainSurfaceModelTests: XCTestCase {
 
     func testStarsPersistToTheInjectedDefaults() {
         let model = makeModel()
-        openPopover(model, delivering: ["a", "b"])
-        model.starClicked(sessionID: "b")
-        XCTAssertEqual(StarredSessions.load(from: defaults), ["b"])
-        XCTAssertEqual(model.list.historyRows.map(\.sessionID), ["b", "a"])
+        openPopover(model, delivering: ["a", "b", "c"])
+        model.starClicked(sessionID: "c")
+        model.starClicked(sessionID: "a")
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.starredSessionList) as? [String], ["c", "a"],
+                       "the ordered list, a new star at the end")
+        XCTAssertNil(defaults.object(forKey: MainSurfaceDefaultsKeys.starredSessionIDs), "the unordered key is not written")
+        XCTAssertEqual(model.list.starredRows.map(\.sessionID), ["c", "a"])
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["b"])
         XCTAssertNil(model.list.selection)
-        // A new model reads the stars back.
+        // A new model reads the stars back, in order.
         let reloaded = makeModel()
-        XCTAssertEqual(reloaded.list.stars, ["b"])
+        XCTAssertEqual(reloaded.list.stars, ["c", "a"])
+    }
+
+    func testUnorderedStarsAreSavedNewestFirstWithoutRemovingTheUnorderedValue() {
+        defaults.set(["b", "c"], forKey: MainSurfaceDefaultsKeys.starredSessionIDs)
+        let model = makeModel()
+        XCTAssertTrue(model.list.stars.isUnordered)
+        openPopover(model, delivering: ["a", "b", "c"])
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.starredSessionList) as? [String], ["b", "c"])
+        XCTAssertEqual(defaults.stringArray(forKey: MainSurfaceDefaultsKeys.starredSessionIDs), ["b", "c"],
+                       "the unordered value stays")
+        XCTAssertEqual(makeModel().list.stars, ["b", "c"])
+    }
+
+    func testCollapsedSectionsPersistToTheInjectedDefaults() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a", "b"])
+        model.starClicked(sessionID: "a")
+        model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
+        model.headingClicked(.recent)
+        model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false, clickCount: 1)
+        model.headingClicked(.history)
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.collapsedSections) as? [String],
+                       ["history", "recent"])
+        XCTAssertEqual(model.list.headings.map(\.isOpen), [false])
+        // The popover and the window share the model; a new model (a
+        // relaunch) reads the closed headings back.
+        let reloaded = makeModel()
+        XCTAssertEqual(reloaded.list.collapsedSections, [.history, .recent])
+        reloaded.headingClicked(.history)
+        reloaded.headingClicked(.recent)
+        XCTAssertEqual(reloaded.list.collapsedSections, [])
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.collapsedSections) as? [String], [],
+                       "reopening is remembered too")
+    }
+
+    // MARK: - Sections and the row drag (§4.5 "collapsing sections" / "row drag")
+
+    func testAHeadingClickOnANonKeyWindowMakesItKeyAndToggles() {
+        let model = makeModel()
+        var madeKey: [MainSurface] = []
+        model.onMakeSurfaceKey = { madeKey.append($0) }
+        model.surfaceDidShow(.window)
+        spy.indexCompletions.last?(0)
+        spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
+        model.surfaceKeyChanged(surface: .window, isKey: false)
+        model.pointerDown(surface: .window, surfaceWasKey: false, searchFieldFocused: true, clickCount: 1)
+        model.headingClicked(.history)
+        XCTAssertEqual(madeKey, [.window], "the same click makes the window key")
+        XCTAssertEqual(model.list.collapsedSections, [.history], "and toggles the section")
+        XCTAssertTrue(spy.focusListSurfaces.isEmpty, "the keyboard focus stays where it was")
+    }
+
+    /// A press on a row of the popover that moves 4pt.
+    private func dragRow(_ model: MainSurfaceModel, _ key: UnifiedRowKey, clickCount: Int = 1) {
+        model.pointerDown(surface: .popover, surfaceWasKey: true, searchFieldFocused: false, clickCount: clickCount)
+        model.rowPressed(key, clickCount: clickCount, onStar: false, x: 50, y: 50)
+        model.rowPressDragged(x: 50, y: 46)
+    }
+
+    func testEscDuringARowDragCancelsTheDragAndKeepsThePopoverOpen() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a", "b"])
+        model.starClicked(sessionID: "a")
+        dragRow(model, .conversation(sessionID: "a"))
+        XCTAssertNotNil(model.list.cardDrag)
+        XCTAssertEqual(key(model, .downArrow), .consumed, "other keys do nothing during a drag")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
+        XCTAssertEqual(key(model, .escape), .consumed)
+        XCTAssertNil(model.list.cardDrag)
+        XCTAssertEqual(spy.closePopoverCount, 0, "Esc cancels the drag only")
+        XCTAssertEqual(key(model, .escape), .consumed)
+        XCTAssertEqual(spy.closePopoverCount, 1, "after the drag Esc closes the popover again")
+    }
+
+    func testADropPersistsTheOrderAndASearchCancelsADrag() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a", "b", "c"])
+        model.starClicked(sessionID: "a")
+        model.starClicked(sessionID: "b")
+        dragRow(model, .conversation(sessionID: "c"))
+        model.cardDragMoved(.element(.row(.conversation(sessionID: "a")), upperHalf: true))
+        model.cardDragEnded()
+        XCTAssertEqual(defaults.object(forKey: MainSurfaceDefaultsKeys.starredSessionList) as? [String], ["c", "a", "b"])
+        XCTAssertEqual(model.list.starredRows.map(\.sessionID), ["c", "a", "b"])
+
+        dragRow(model, .conversation(sessionID: "b"))
+        XCTAssertNotNil(model.list.cardDrag)
+        model.query = "x"
+        XCTAssertNotNil(model.list.cardDrag, "a query without a valid term starts no search")
+        model.query = "xy"
+        XCTAssertNil(model.list.cardDrag, "a search starting cancels the drag")
+        XCTAssertTrue(model.list.isSearching, "searching from the valid text, before any result")
+        model.query = ""
+        XCTAssertFalse(model.list.isSearching, "and not after it, before the empty-query result")
+    }
+
+    func testTheReasonARowCannotBeDraggedGoesAwayAfterTheScheduledTime() {
+        let model = makeModel()
+        openPopover(model, delivering: ["a"])
+        let before = spy.scheduled.count
+        dragRow(model, .conversation(sessionID: "a"))
+        XCTAssertNil(model.list.cardDrag)
+        XCTAssertEqual(model.list.dragRefusal?.text, "Click the star to add it to Starred")
+        XCTAssertEqual(spy.scheduled.count, before + 1)
+        XCTAssertEqual(spy.scheduled.last?.seconds, 2, "§9")
+        spy.scheduled.last?.action()
+        XCTAssertNil(model.list.dragRefusal)
     }
 
     func testKeepOnTopPersistsAndNotifies() {
@@ -1310,27 +1421,27 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.list.columns, .two, "800 >= 780 at 13")
         spy.indexCompletions.last?(0)
         spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
-        model.rowClicked(.history(sessionID: "b"))
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+        model.rowClicked(.conversation(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
 
         // 14: the list column is 452pt, two columns from 812pt.
         model.textSize.increase()
         XCTAssertEqual(model.list.columns, .one)
         XCTAssertEqual(model.list.page, .list, "two -> one column shows the list page")
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"), "the selection is kept")
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"), "the selection is kept")
 
         model.textSize.decrease()
         XCTAssertEqual(model.list.columns, .two)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "b"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
 
         // From the detail page, widening into two columns keeps the same
         // conversation selected.
         model.textSize.increase()
-        openDetailPage(model, .history(sessionID: "a"))
+        openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
         model.textSize.decrease()
         XCTAssertEqual(model.list.columns, .two)
-        XCTAssertEqual(model.list.selection?.key, .history(sessionID: "a"))
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
     }
 }
 

@@ -20,11 +20,13 @@ final class MainSurfaceTests: XCTestCase {
         XCTAssertEqual(MainSurfaceRefresh.elapsedIntervalSeconds, 60)
         XCTAssertEqual(MainSurfaceRefresh.endedRowSecondRefetchSeconds, 2, "§9 second refetch after a Running row ends")
         XCTAssertEqual(MessageTransient.displaySeconds, 2)
-        XCTAssertEqual(HistoryDisplayLimit.maxRows, 100, "§9 History row cap")
+        XCTAssertEqual(RecentDisplayLimit.maxRows, 100, "§9 Recent row cap")
         XCTAssertFalse(WindowKeepOnTop.defaultEnabled)
         XCTAssertEqual(MainSurfaceDefaultsKeys.popoverHeight, "cc.shiibar.popoverHeight")
         XCTAssertEqual(MainSurfaceDefaultsKeys.windowKeepOnTop, "cc.shiibar.windowKeepOnTop")
         XCTAssertEqual(MainSurfaceDefaultsKeys.starredSessionIDs, "cc.shiibar.starredSessionIDs")
+        XCTAssertEqual(MainSurfaceDefaultsKeys.starredSessionList, "cc.shiibar.starredSessionList")
+        XCTAssertEqual(MainSurfaceDefaultsKeys.collapsedSections, "cc.shiibar.collapsedSections")
         XCTAssertEqual(MainSurfaceDefaultsKeys.mainWindowFrameAutosaveName, "cc.shiibar.mainWindow")
     }
 

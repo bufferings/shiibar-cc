@@ -1,4 +1,5 @@
 import CoreGraphics
+import ShiibarCcCore
 import XCTest
 @testable import ShiibarCcApp
 
@@ -17,11 +18,19 @@ final class SurfaceScaleTests: XCTestCase {
         ("emptyStateVertical", \.emptyStateVertical, 8),
         ("hiddenRowsVertical", \.hiddenRowsVertical, 6),
         ("listBottom", \.listBottom, 8),
-        ("rowGap", \.rowGap, 6),
         ("sectionTitleFont", \.sectionTitleFont, 12),
         ("sectionCountFont", \.sectionCountFont, 11),
-        ("sectionHeaderTop", \.sectionHeaderTop, 10),
+        ("sectionHeaderTop", \.sectionHeaderTop, 8),
         ("sectionHeaderBottom", \.sectionHeaderBottom, 6),
+        ("subHeadingTop", \.subHeadingTop, 6),
+        ("subHeadingBottom", \.subHeadingBottom, 4),
+        ("sectionBandVertical", \.sectionBandVertical, 4),
+        ("sectionChevronBox", \.sectionChevronBox, 14),
+        ("sectionChevronIcon", \.sectionChevronIcon, 12),
+        ("sectionChevronLine", \.sectionChevronLine, 1.8),
+        ("runningMark", \.runningMark, 7),
+        ("refusalTipFont", \.refusalTipFont, 12),
+        ("refusalTipVertical", \.refusalTipVertical, 4),
         ("rowSymbolColumn", \.rowSymbolColumn, 28),
         ("rowSymbol", \.rowSymbol, 20),
         ("rowSymbolTop", \.rowSymbolTop, 1),
@@ -36,8 +45,8 @@ final class SurfaceScaleTests: XCTestCase {
         ("rowTitleHeight", \.rowTitleHeight, 17.55),
         ("rowLabelHeight", \.rowLabelHeight, 15.95),
         ("rowPromptHeight", \.rowPromptHeight, 15.95),
-        ("rowCardTop", \.rowCardTop, 8),
-        ("rowCardBottom", \.rowCardBottom, 9),
+        ("rowTop", \.rowTop, 8),
+        ("rowBottom", \.rowBottom, 9),
         ("statusLineFont", \.statusLineFont, 12),
         ("messageLineFont", \.messageLineFont, 11),
         ("statusLineTop", \.statusLineTop, 7),
@@ -85,7 +94,39 @@ final class SurfaceScaleTests: XCTestCase {
         }
     }
 
+    /// window-design.html "collapsing sections and the row drag": two
+    /// neighbors are apart by the larger of the upper one's space below and
+    /// the lower one's space above (band and plain headings 8 / 6, Starred
+    /// and Recent headings 6 / 4, frames none), following the text size.
+    func testTheSpaceBetweenBlocks() {
+        func heading(_ heading: ListHeading, _ style: ListHeadingStyle) -> ListBlock {
+            .heading(ListHeadingModel(heading: heading, style: style, countText: nil))
+        }
+        let frame = ListBlock.frame(ListFrameModel(id: .starred, rows: []))
+        let blocks: [ListBlock] = [
+            heading(.running, .band), frame, heading(.history, .band), heading(.starred, .sub), frame,
+            heading(.recent, .sub), frame, .moreLine("1 more"),
+        ]
+        let expected: [CGFloat] = [8, 6, 8, 6, 4, 6, 4, 0]
+        for scale in [SurfaceScale.base, SurfaceScale(ratio: 18.0 / 13.0)] {
+            let ratio = scale.sectionHeaderTop / 8
+            for (index, value) in expected.enumerated() {
+                XCTAssertEqual(ListBlockSpacing.gap(before: index, in: blocks, scale: scale), value * ratio,
+                               accuracy: 1e-9, "block \(index)")
+            }
+        }
+        let closed: [ListBlock] = [heading(.running, .band), heading(.history, .band), heading(.starred, .sub),
+                                   heading(.recent, .sub)]
+        XCTAssertEqual((0..<4).map { ListBlockSpacing.gap(before: $0, in: closed, scale: .base) }, [8, 8, 6, 6],
+                       "closed band under a band: 8; closed Starred under History: 6; Recent under a closed Starred: 6")
+        let searching: [ListBlock] = [heading(.running, .plain), frame, heading(.history, .plain), frame]
+        XCTAssertEqual((0..<4).map { ListBlockSpacing.gap(before: $0, in: searching, scale: .base) }, [8, 6, 8, 6])
+    }
+
     func testFixedValues() {
+        XCTAssertEqual(SurfaceMetrics.rowLeading, 11)
+        XCTAssertEqual(SurfaceMetrics.rowTrailing, 8)
+        XCTAssertEqual(SurfaceMetrics.rowColumnSpacing, 8, "`.row` gap")
         XCTAssertEqual(SurfaceMetrics.headerSide, 10)
         XCTAssertEqual(SurfaceMetrics.windowTrafficLightCenter, 26)
         XCTAssertEqual(SurfaceMetrics.trafficLightsWidth, 78)

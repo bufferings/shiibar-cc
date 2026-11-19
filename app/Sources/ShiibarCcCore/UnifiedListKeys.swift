@@ -76,6 +76,8 @@ public struct ListKeyContext: Equatable, Sendable {
     public var isPopover: Bool
     /// An input method has uncommitted (marked) text.
     public var hasMarkedText: Bool
+    /// A row drag is in progress (§4.5 "row drag").
+    public var cardDragging: Bool
 
     public init(
         columns: ColumnMode,
@@ -87,7 +89,8 @@ public struct ListKeyContext: Equatable, Sendable {
         branchEnabled: Bool,
         conversationPaneVisible: Bool,
         isPopover: Bool,
-        hasMarkedText: Bool
+        hasMarkedText: Bool,
+        cardDragging: Bool = false
     ) {
         self.columns = columns
         self.page = page
@@ -99,6 +102,7 @@ public struct ListKeyContext: Equatable, Sendable {
         self.conversationPaneVisible = conversationPaneVisible
         self.isPopover = isPopover
         self.hasMarkedText = hasMarkedText
+        self.cardDragging = cardDragging
     }
 }
 
@@ -142,6 +146,8 @@ public enum ListKeyCommand: Equatable, Sendable {
     case increaseTextSize
     case decreaseTextSize
     case resetTextSize
+    /// Esc during a row drag: cancel the drag only (§4.5 "row drag").
+    case cancelCardDrag
 }
 
 public enum ListKeyDecision: Equatable, Sendable {
@@ -186,8 +192,15 @@ public enum UnifiedListKeys {
     ///   otherwise);
     /// - ⌘F: with list focus only (consumed with no effect in the search
     ///   field); ⌘R / ⌘+ / ⌘− / ⌘0: always;
-    /// - any other key or modifier combination passes through.
+    /// - any other key or modifier combination passes through;
+    /// - during a row drag: Esc cancels the drag only (the popover stays
+    ///   open), and every other key of the table is consumed with no effect
+    ///   (§4.5 "row drag": cancel).
     public static func decide(key: ListKey, modifiers: ListKeyModifiers, context: ListKeyContext) -> ListKeyDecision {
+        if context.cardDragging {
+            if key == .escape && modifiers.isEmpty { return .perform(.cancelCardDrag) }
+            return isTableKey(key: key, modifiers: modifiers) ? .ignore : .passThrough
+        }
         if context.hasMarkedText {
             return .passThrough
         }
@@ -249,6 +262,29 @@ public enum UnifiedListKeys {
                 }
             }
             return .passThrough
+        }
+    }
+
+    /// Whether the key is one of the §4.5 "key operations" table's keys
+    /// (typing included).
+    public static func isTableKey(key: ListKey, modifiers: ListKeyModifiers) -> Bool {
+        if isTyping(key: key, modifiers: modifiers) { return true }
+        switch key {
+        case .upArrow, .downArrow:
+            return modifiers.isEmpty || modifiers == [.option]
+        case .leftArrow, .rightArrow, .escape:
+            return modifiers.isEmpty
+        case .returnKey:
+            return modifiers.isEmpty || modifiers == [.command]
+        case .delete:
+            return true
+        case .other(let characters):
+            return ConversationsKeyCommands.command(
+                charactersIgnoringModifiers: characters,
+                hasCommand: modifiers.contains(.command),
+                hasShift: modifiers.contains(.shift),
+                hasOtherModifiers: modifiers.contains(.option) || modifiers.contains(.control)
+            ) != nil
         }
     }
 

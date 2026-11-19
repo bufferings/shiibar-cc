@@ -6,20 +6,22 @@
 <title>shiibar-cc ポップオーバーとウィンドウ確定デザイン</title>
 <style>
   :root { --bg:#ececf0; --text:#1d1d1f; --text2:#6e6e73; --line:#d9d9de; --accent:#b45309;
-    --menu-text2:#7c7c82; --sel:#3478f6; --tint:#dce7f7; --tintline:#9db9e4; --link:#0a5fc2;
-    --graytint:#ebebec; --grayline:#bbbbbe;
+    --menu-text2:#7c7c82; --sel:#3478f6; --tint:#dce7f7; --link:#0a5fc2;
+    --graytint:#ebebec;
     --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75);
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
     --cardsbg:#f3f4f8; --cardbg:#ffffff; --cardline:#e3e3e6; --panebg:#ffffff;
     --red:#e5484d; --star:#f5b400; --star-line:#d39700;
+    --tipbg:#1d1d1f; --tipfg:#ffffff; --floatshadow:0 8px 22px rgba(0,0,0,.22);
     --shadow:0 12px 36px rgba(0,0,0,.20), 0 0 0 .5px rgba(0,0,0,.14); }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#141416; --text:#ededf0; --text2:#9b9ba3; --line:#38383d; --accent:#e8a10e;
-      --menu-text2:#a5a5ad; --tint:#1f3a5c; --tintline:#3a5a86; --link:#4c9bff;
-      --graytint:#474749; --grayline:#6c6c70;
+      --menu-text2:#a5a5ad; --tint:#1f3a5c; --link:#4c9bff;
+      --graytint:#474749;
       --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55);
       --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
       --cardsbg:#1e1f23; --cardbg:#2b2b2f; --cardline:#3a3b40; --panebg:#2b2b2f;
+      --tipbg:#ededf0; --tipfg:#1d1d1f; --floatshadow:0 8px 22px rgba(0,0,0,.6);
       --shadow:0 12px 36px rgba(0,0,0,.55), 0 0 0 .5px rgba(255,255,255,.16); }
   }
   * { box-sizing:border-box; }
@@ -70,7 +72,7 @@
   .tls { display:flex; gap:6px; padding-right:2px; flex:none; }
   .tl { width:11px; height:11px; border-radius:50%; }
   .tl.r { background:#ff5f57; } .tl.y { background:#febc2e; } .tl.g { background:#28c840; }
-  /* 検索欄: アプリが描画する地(カードの色 + 1px の枠・角丸 6px・高さ 24px = 見出し行のボタンと同じ)と
+  /* 検索欄: アプリが描画する地(行の枠と同じ色 + 1px の枠・角丸 6px・高さ 24px = 見出し行のボタンと同じ)と
      虫眼鏡のアイコン(13px)。その中に枠なしの入力欄(12px)を配置する */
   .search { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:24px; padding:0 8px;
     background:var(--cardbg); border:1px solid var(--cardline); border-radius:6px;
@@ -92,17 +94,65 @@
   .hb.chip.hov, .hb.hov { background:rgba(127,127,127,.16); }
   .hb.chip.prs, .hb.prs { background:rgba(127,127,127,.24); }
 
-  /* 一覧: 区画の見出し + カード(左に 3 行の文字 / 右に記号と時間の列) */
-  .rows { padding:0 10px 8px; flex:1; min-height:0; overflow:hidden; }
+  /* 一覧: 見出し + 行の枠(区画の行を 1 つの枠の中に並べる。行は、左に 3 行の文字 / 右に記号と時間の列) */
+  .rows { position:relative; padding:0 10px 8px; flex:1; min-height:0; overflow:hidden; }
   .sec { display:flex; align-items:baseline; gap:6px; padding:10px 4px 6px; }
   .sec b { font-size:12px; font-weight:700; }
   .sec span { font-size:11px; color:var(--menu-text2); }
-  .row { display:flex; align-items:stretch; gap:8px; padding:8px 8px 9px 11px; margin-bottom:6px;
-    background:var(--cardbg); border:1px solid var(--cardline); border-radius:10px; }
-  .row.hov { border-color:var(--tintline); }
-  .row.sel { background:var(--tint); border-color:var(--tintline); }
-  /* 検索欄にフォーカスがある間とウィンドウが key でない間の選択中のカード: 淡い灰色の地 + 灰色の枠 */
-  .row.sel.inact { background:var(--graytint); border-color:var(--grayline); }
+  /* 見出しの帯(Running と History): 左右の端は行の枠にそろえる。左から、(Running の印)、名前、行数、右端に山形。
+     上の間隔 8px・下の間隔 6px。内側は上下 4px・左 10px・右 8px、角丸 6px、要素の間隔 8px、地は灰色の 12%。
+     上下に隣り合う 2 つの要素の間隔は、上の要素の下の間隔と、下の要素の上の間隔の、大きいほうの値である(合算しない。
+     行の枠は、上下の間隔を持たない)。閉じている見出し(.closed)は、名前を二次色にする */
+  .rows .sec { align-items:center; gap:8px; margin:8px 0 6px; padding:4px 8px 4px 10px; border-radius:6px; background:rgba(127,127,127,.12); }
+  .rows .sec.closed b { color:var(--menu-text2); }
+  .rows .sec .chev { margin-left:auto; width:14px; height:14px; display:flex; align-items:center; justify-content:center; }
+  .rows .sec .chev .ic { width:12px; height:12px; stroke-width:1.8; }
+  .rows .sec .dot { width:7px; height:7px; border-radius:50%; background:var(--red); flex:none; }
+  /* 文字だけの見出し: 地が無い。内側の余白、要素の間隔、文字と山形の位置は、帯と同じ。
+     Starred と Recent の見出し(.sub)は、上の間隔 6px・下の間隔 4px。
+     検索中の Running と History の見出し(.plain)は、上下の間隔も帯と同じで、山形と Running の印を表示しない */
+  .rows .sec.sub { margin:6px 0 4px; background:none; }
+  .rows .sec.plain { background:none; }
+  /* 見出しの案内(.hint。行のドラッグ中): 山形の左に、行数と同じ 11px・セミボールド・アクセントカラーで表示する */
+  .rows .sec .hint { margin-left:auto; font-weight:600; color:var(--sel); white-space:nowrap; }
+  .rows .sec .hint + .chev { margin-left:0; }
+  /* 見出しの強調(.over。行のドラッグの移動先): 選択中の行と同じ淡い青の地 + 内側にアクセントカラーの 2px の枠 */
+  .rows .sec.over { background:var(--tint); box-shadow:inset 0 0 0 2px var(--sel); }
+  /* 行の枠(.group): 角丸 10px・1px の枠線・地。行と行の間に隙間は無い。
+     行(.row)の内側は、上 8px・下 9px・左 11px・右 8px(枠線の内側からの値)。
+     区切り線: 2 行目以降の行の、上端の 1px の範囲に描画する線(行の高さに加算しない)。
+     左端は行の文字の左端(枠線の内側から 11px)、右端は枠線の内側。色は枠線と同じ */
+  .group { background:var(--cardbg); border:1px solid var(--cardline); border-radius:10px; }
+  .row { position:relative; display:flex; align-items:stretch; gap:8px; padding:8px 8px 9px 11px; }
+  .row + .row::before { content:""; position:absolute; left:11px; right:0; top:0; height:1px; background:var(--cardline); }
+  /* 枠の最初の行と最後の行の地は、枠の角丸の内側(半径 9px)に収める */
+  .row:first-child { border-radius:9px 9px 0 0; }
+  .row:last-child { border-radius:0 0 9px 9px; }
+  .row:only-child { border-radius:9px; }
+  /* ホバー中の行(.hov): 行の全体に淡い灰色の地(灰色の 9%)。
+     選択中の行(.sel): 行の全体に淡い青の地。検索欄にフォーカスがある間とウィンドウが key でない間(.inact)は、淡い灰色の地。
+     どちらも行ごとの枠は付けない。区切り線は、ホバー中の行と選択中の行でも表示する */
+  .row.hov { background:rgba(127,127,127,.09); }
+  .row.sel { background:var(--tint); }
+  .row.sel.inact { background:var(--graytint); }
+  /* 行のドラッグ: 元の行(.lift)は不透明度 0.35、挿入位置にならない行(.dim)は不透明度 0.4。
+     ポインタに追従する画像(.ghost)は、ドラッグ中の行だけを含む行の枠と同じ形(同じ幅・角丸 10px・1px の枠線・地)で、
+     不透明度 0.92 と影で表示する(選択の地は付けない)。
+     移動先の線(.dropline)は、太さ 2px のアクセントカラーで、行の境界(区切り線の位置)を中心にして描画する。
+     左端は行の枠の左端より 3px 左で、外径 8px の輪(線 2px・中は一覧の地の色)を付ける。右端は行の枠の右端。
+     行の枠の強調(.group.over)は、アクセントカラーの 2px の枠(枠線の 1px と、その外側の 1px) */
+  .row.lift { opacity:.35; }
+  .row.dim { opacity:.4; }
+  .ghost { position:absolute; z-index:3; left:10px; right:10px; opacity:.92; background:var(--cardbg);
+    border:1px solid var(--cardline); border-radius:10px; box-shadow:var(--floatshadow); }
+  .dropline { position:absolute; z-index:2; left:-4px; right:-1px; top:-1px; height:2px; background:var(--sel); border-radius:1px; }
+  .dropline::before { content:""; position:absolute; left:-3px; top:-3px; width:8px; height:8px; box-sizing:border-box;
+    border-radius:50%; border:2px solid var(--sel); background:var(--cardsbg); }
+  .group.over { border-color:var(--sel); box-shadow:0 0 0 1px var(--sel); }
+  /* ドラッグできない理由の表示(.tip): 12px の文字、内側は上下 4px・左右 9px、角丸 6px、影。
+     地は濃い色、文字は明るい色(ダークでは、明るい地に濃い文字)。左上の角を、ポインタの位置の右 12px・下 16px に配置する */
+  .tip { position:absolute; z-index:4; background:var(--tipbg); color:var(--tipfg); font-size:12px; padding:4px 9px;
+    border-radius:6px; white-space:nowrap; box-shadow:var(--floatshadow); }
   /* 記号の枠(.sym)は 20px。状態記号は枠と同じ 20px、スターは 16px で、枠の中心に配置する */
   .sym { width:20px; height:20px; flex:none; color:var(--text); margin-top:1px; }
   .sym svg { width:100%; height:100%; display:block; overflow:visible; }
@@ -221,6 +271,7 @@
   <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 3v3h-3"/></symbol>
   <symbol id="i-pin" viewBox="0 0 16 16"><path stroke-width="1.2" d="M9.5 1.5l5 5-1.4 1.4-.7-.7-3 3 .4 2.6-1.2 1.2L5.7 11 2.5 14.2 1.3 13l3.2-3.2L1.6 6.9l1.2-1.2 2.6.4 3-3-.7-.7z"/></symbol>
   <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
   <symbol id="i-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>
   <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
   <symbol id="i-window" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6.2h12"/></symbol>
@@ -244,9 +295,9 @@
 
   <h2>デザイン原則</h2>
   <ul>
-    <li><strong>色</strong>: <strong>赤 = 未確認(unreviewed)専用</strong>、<strong>黄 = スター専用</strong>。
+    <li><strong>色</strong>: <strong>赤 = 未確認(unreviewed)と、閉じている Running の印</strong>、<strong>黄 = スター専用</strong>。
       <strong>青(アクセントカラー)</strong>は、選択・<code>You</code> のラベル・ピンの ON・主ボタン・
-      テキストボタンに使用する。
+      テキストボタン・行のドラッグの移動先の表示(線、強調の枠、見出しの案内)に使用する。
       status(waiting / working / idle)には色を使用しない — 記号と濃度で表す(DESIGN.md §3.1 / §8.49)</li>
     <li><strong>レイアウトは 1 種類</strong>: ポップオーバー、細いウィンドウ、広いウィンドウは、
       同じ構成要素(見出し行・一覧・会話ペイン・フッター)を表示する。幅によって変化するのは列の数だけである</li>
@@ -267,9 +318,9 @@
       Claude の長い発言」の繰り返しである。どの発言にも <code>You</code> / <code>Claude</code> のラベルを付け、
       自分の発言には<strong>全幅の帯の地</strong>を付ける。Claude の発言は
       <strong>Markdown を描画した本文</strong>として扱う</li>
-    <li><strong>一覧と会話ペインは背景で区別する</strong>: 一覧は淡い地にカードを並べ、
+    <li><strong>一覧と会話ペインは背景で区別する</strong>: 一覧は淡い地に行の枠を配置し、
       会話ペインは通常のウィンドウ背景にする。選択する場所と閲覧する場所を背景で判別できる</li>
-    <li><strong>History に残る実行中の会話は文字の印で示す</strong>: 1 行目(ラベル)の末尾に <code>running</code>。
+    <li><strong>Starred または Recent に残る実行中の会話は文字の印で示す</strong>: 1 行目(ラベル)の末尾に <code>running</code>。
       状態記号(スピナー・<code>!</code>)は Running の区画の行だけが使用する — <code>running</code> の印は
       最後に一覧を取得した時点の情報であり、現在の status を示さない</li>
     <li><strong>アイコンは線画の SVG</strong>(絵文字を使用しない)。状態記号の凡例は UI に配置しない
@@ -284,7 +335,7 @@
       見出し行の左端に信号機ボタンを配置する(挙動は DESIGN.md §4.5「見出し行」)</li>
     <li>検索欄のプレースホルダは <code>Search (2+ characters)</code>。先頭に虫眼鏡のアイコン(13px・二次色)</li>
     <li><strong>検索欄の形</strong>: 高さ 24px(見出し行のボタンと同じ高さで、上下の中心が揃う)・角丸 6px・
-      カードの色の地 + 1px の枠・左右の余白 8px・アイコンと文字の間隔 6px・文字 12px。
+      行の枠と同じ色の地 + 1px の枠・左右の余白 8px・アイコンと文字の間隔 6px・文字 12px。
       地とアイコンはアプリが描画し、その中に枠なしの入力欄を配置する(DESIGN.md §4.6「検索欄」)。
       フォーカスリング・最近の検索のメニューは表示しない。文字がある間だけ、右端に消去のボタン
       (12px の塗りつぶした円に ×)を表示する(DESIGN.md §4.6「検索欄」)。
@@ -349,28 +400,43 @@
     </figure>
   </div>
 
-  <h2>一覧のページ(1 列): Running と History</h2>
+  <h2>一覧のページ(1 列): Running・Starred・Recent</h2>
   <ul>
-    <li>区画は上が <strong>Running</strong>、下が <strong>History</strong>。見出しは
-      <strong>太字の区画名 + 行数</strong>(行数は二次色)。検索中の行数は、表示している行の数である。
-      History の行が上限を超えている間は、行数の位置に <code>first 100</code> を表示する(DESIGN.md §4.6「History の区画」)。
-      行が 1 つも無い区画は見出しごと表示しない(DESIGN.md §4.5「一覧は 2 つの区画」)</li>
-    <li><strong>行は 1 枚ずつのカード</strong>(角丸 10px・1px の枠・カード間 6px)。構成は両区画で共通:
-      <strong>左に 3 行の文字 / 右に記号と時間の列</strong>(幅 28px)。文字は、カードの左の余白から始まる。
+    <li>区画は上から <strong>Running</strong>、<strong>Starred</strong>(スター付きの会話)、<strong>Recent</strong>(それ以外の過去の会話)の 3 つである。
+      Starred と Recent は、<strong>History</strong> の見出しの下に表示する。本ページの「History の行」は、Starred の行と Recent の行の総称である
+      (DESIGN.md §4.5「一覧は 3 つの区画」)</li>
+    <li><strong>見出しは 2 種類</strong>: Running と History の見出しは、<strong>淡い灰色の地の帯</strong>(角丸 6px)である。
+      Starred と Recent の見出しは、<strong>地の無い、文字だけの見出し</strong>である。どの見出しも、左右の端を行の枠にそろえ、
+      左から、名前(12px・太字)、行数(二次色 11px)、右端に山形を表示する。名前の左端と山形の右端の位置は、2 種類で同じである
+      (寸法は下記「区画の開閉と行のドラッグ」)</li>
+    <li><strong>行数と、表示しない見出し</strong>: Running、Starred、Recent の見出しは、その区画の行数を表示する。
+      Recent の行が上限を超えている間は、行数の位置に <code>first 100</code> を表示する(DESIGN.md §4.6「Recent の区画」)。
+      行が 1 つも無い区画は、見出しごと表示しない。History の見出しは、Starred に行がある間は、行数を表示しない。
+      Starred に行が無い間は、Recent の見出しも表示せず、History の見出しのすぐ下に Recent の行の枠を表示する。
+      この間は、History の見出しが、Recent の見出しと同じ行数を表示する(<code>History 85</code>、<code>History first 100</code>)。
+      Starred と Recent のどちらにも行が無い間は、History の見出しも表示しない(DESIGN.md §4.5「一覧は 3 つの区画」)。
+      検索中の見出しと行数は、下記の検索中の図と「区画の開閉と行のドラッグ」の「検索中の見出し」のとおりである</li>
+    <li><strong>区画の行は、1 つの枠の中に並べる</strong>: 枠は、角丸 10px・1px の枠線・地を持つ。行と行の間に隙間は無く、
+      1px の区切り線で区切る。区切り線は、行の文字の左端(枠線の内側から 11px)から、枠の右端(枠線の内側)までの線で、
+      色は枠線と同じである。行ごとの枠は無い(DESIGN.md §4.5「一覧は 3 つの区画」)</li>
+    <li><strong>行の構成</strong>はどの区画も共通:
+      <strong>左に 3 行の文字 / 右に記号と時間の列</strong>(幅 28px)。行の内側の余白は、上 8px・下 9px・左 11px・右 8px である。
+      文字は、行の左の余白から始まる。
       3 行は、上から、<strong>ラベル(二次色 11px)/ タイトル(13px・太字)/ 最後の発話(二次色 11px)</strong>である。
       タイトルは、どの行も太字で表示する。ラベルとタイトルの間隔は 1px、タイトルと最後の発話の間隔は 4px で、
       ラベルとタイトルを 1 組にして、最後の発話と区別する(間隔は DESIGN.md §9)。
       記号と時間の列は、上に記号(状態記号は 20px、スターは 16px。20px の枠の上端は 1 行目 = ラベルの位置)、下に経過時間(ラベルと同じ二次色 11px。
       3 行目 = 最後の発話の位置)を、列の中央にそろえて表示する。3 行の文字は、どの行も列の手前で終わり、末尾を省略する(ellipsis)。
       経過時間は省略しない(列の幅に収まらない場合は、その行の列を広げる)。
-      行の中にボタンは無い(スターを除く)(DESIGN.md §4.5「一覧は 2 つの区画」)</li>
+      行の中にボタンは無い(スターを除く)(DESIGN.md §4.5「一覧は 3 つの区画」)</li>
     <li><strong>Running の行</strong>: 列の上 = 状態記号。1 行目 = ラベル、
       2 行目 = タイトル(waiting の間は許可内容)、3 行目 = 最後に自分が送った発話
       (内容の規則は DESIGN.md §4.5「Running の行」)。選択中は、下部パネルの主ボタンが Jump になる</li>
-    <li><strong>History の行</strong>: 列の上 = スター。1 行目 = フォルダラベル、
+    <li><strong>Starred と Recent の行</strong>: 列の上 = スター。1 行目 = フォルダラベル、
       2 行目 = タイトル、3 行目 = 最後に自分が送った発話。
-      選択中は、下部パネルの主ボタンが Resume になる。スター付きの行が先に並ぶ(DESIGN.md §4.6「History の区画」)</li>
-    <li><strong>History に残る実行中の会話</strong>: 1 行目(ラベル)の末尾に <code>· running</code>。
+      選択中は、下部パネルの主ボタンが Resume になる。Starred の並びは利用者が決めた順序、Recent の並びは新しい順である
+      (DESIGN.md §4.6「Starred の区画」「Recent の区画」)</li>
+    <li><strong>Starred または Recent に残る実行中の会話</strong>: 1 行目(ラベル)の末尾に <code>· running</code>。
       選択中は、下部パネルの主ボタンが <strong>disabled の Jump</strong>(ツールチップ
       <code>Running in a terminal Shiibar CC can't drive</code>)になり、Branch は通常の表示</li>
     <li><strong>未確認(unreviewed)= 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
@@ -388,15 +454,19 @@
       (⌘ を押しているかどうかは、2 回目のクリックの時点で判定する)。
       対応するボタンが disabled のときは、選択とフォーカスの移動だけを行う。行の状態(未選択・青・灰色)による違いは無い。
       ダブルクリックでは選択を解除しない。そのため、青で表示している選択中の行のクリックによる選択の解除は、
-      マウスのボタンを押してからシステムのダブルクリックの間隔が経過した時点で実行する。
+      マウスのボタンを押してからシステムのダブルクリックの間隔が経過した時点で実行する
+      (History の行でボタンを押したままの場合は、ボタンを離した時点 — DESIGN.md §4.5「行のドラッグ」)。
       3 回以上の連続したクリックは、Jump / Resume を再実行しない(DESIGN.md §4.5「行のダブルクリック」)</li>
-    <li><strong>ホバーと選択</strong>: ホバー中のカードは<strong>枠だけを淡い青</strong>にする。
-      選択中のカードは、キーの操作対象が一覧である間(ポップオーバーまたはウィンドウが key で、かつ一覧に
-      フォーカスがある間)は<strong>淡い青の地 + 淡い青の枠</strong>、検索欄にフォーカスがある間と、
-      ウィンドウが key でない間(他のアプリを操作している間など)は<strong>淡い灰色の地 + 灰色の枠</strong>にする
-      (キーの操作対象が一覧かどうかを、色で区別する。DESIGN.md §4.5「行の選択」)。選択中のカードは、ホバーしても枠の色を変更しない。文字・経過時間・状態記号・スターの色は、
+    <li><strong>ホバーと選択</strong>: どちらも、<strong>行の全体の地の色</strong>で示す(行ごとの枠は付けない)。
+      ホバー中の行は<strong>淡い灰色の地</strong>にする(どの区画の行も同じ。行のドラッグ中は付けない。DESIGN.md §4.5「行のクリック」)。
+      選択中の行は、キーの操作対象が一覧である間(ポップオーバーまたはウィンドウが key で、かつ一覧に
+      フォーカスがある間)は<strong>淡い青の地</strong>、検索欄にフォーカスがある間と、
+      ウィンドウが key でない間(他のアプリを操作している間など)は<strong>淡い灰色の地</strong>にする
+      (キーの操作対象が一覧かどうかを、色で区別する。DESIGN.md §4.5「行の選択」)。ホバーの地は、灰色の選択の地より淡い色にする。
+      選択中の行は、ホバーしても地の色を変更しない。枠の最初の行と最後の行の地は、枠の角丸の内側に収める。
+      区切り線は、ホバー中の行と選択中の行でも表示する。文字・経過時間・状態記号・スターの色は、
       選択中も変更しない。選択している行は 0 行または 1 行で、
-      利用者が行を選択するまでは、どの行も選択していない(DESIGN.md §4.5「行の選択」)。押せない部分(区画の見出し・フッター)にはホバーの表示を付けない</li>
+      利用者が行を選択するまでは、どの行も選択していない(DESIGN.md §4.5「行の選択」)。見出しとフッターにはホバーの表示を付けない</li>
     <li><strong>固定フッター</strong>(スクロールに含めない): 上から警告行、メッセージ行、<strong>下部パネル</strong>。
       下部パネルは詳細ページと同じもので、左側にキーの案内、右側に選択中の行の View、Branch、主ボタンを配置する
       (View は一覧のページだけに表示する)。
@@ -414,22 +484,29 @@
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         </div>
         <div class="rows">
-          <div class="sec"><b>Running</b><span>3</span></div>
-          <div class="row sel"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
-          <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
-          <div class="row"><span class="rt"><span class="lb">blog/draft-post</span><span class="tt">README の構成を見直して</span><span class="lp">インストール手順を先頭に移動して</span></span><span class="rc"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="tm">40m</span></span></div>
-          <div class="sec"><b>History</b><span>86</span></div>
-          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Release checklist review</span><span class="lp">plugin.json も上げる必要がある? hooks は変更していないけど</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
-          <div class="row hov"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">CI がタグ push で起動しない件</span><span class="lp">workflow の on: の部分を見せて</span></span><span class="rc"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
-          <div class="row"><span class="rt"><span class="lb">example/remote-tools · running</span><span class="tt">Remote build cache setup</span><span class="lp">Which bucket should the cache use?</span></span><span class="rc"><span class="sym"></span><span class="tm">5m</span></span></div>
+          <div class="sec"><b>Running</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+          <div class="group">
+            <div class="row sel"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
+            <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
+          </div>
+          <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+          <div class="sec sub"><b>Starred</b><span>1</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+          <div class="group">
+            <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+          </div>
+          <div class="sec sub"><b>Recent</b><span>85</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+          <div class="group">
+            <div class="row"><span class="rt"><span class="lb">example/remote-tools · running</span><span class="tt">Remote build cache setup</span><span class="lp">Which bucket should the cache use?</span></span><span class="rc"><span class="sym"></span><span class="tm">5m</span></span></div>
+            <div class="row hov"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
+          </div>
         </div>
         <div class="stat"><div class="warn">⚠ Disconnected from daemon — reconnecting…</div></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
       </div></div>
       <figcaption>ポップオーバー · 一覧のページ。Running の先頭の行(waiting + 未確認)を選択していて、
         一覧にフォーカスがある。下部パネルの主ボタンは Jump になり、その左に View と Branch を表示する。
-        History は、スター付きが先頭、2 枚目のカードはホバー中(枠が淡い青・列の上に輪郭の星)、
-        3 枚目のカードは追跡外で実行中の会話。下部パネルの上は警告行の例</figcaption>
+        History の見出しの下に、Starred(スター付きの会話)と Recent を表示する。区画ごとに、行を 1 つの枠の中に並べる。
+        Recent の 1 行目は追跡外で実行中の会話、2 行目はホバー中(淡い灰色の地・列の上に輪郭の星)。下部パネルの上は警告行の例</figcaption>
     </figure>
     <figure>
       <div class="app pop"><div class="clip">
@@ -440,29 +517,35 @@
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         </div>
         <div class="rows">
-          <div class="sec"><b>Running</b><span>1</span></div>
-          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Cut the 0.6.0 release</span><span class="lp">Create the tag after CI is green</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">2m</span></span></div>
-          <div class="sec"><b>History</b><span>3</span></div>
-          <div class="row sel inact"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Release checklist review</span><span class="lp">plugin.json も上げる必要がある? hooks は変更していないけど</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
-          <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">CI がタグ push で起動しない件</span><span class="lp">workflow の on: の部分を見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
-          <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+          <div class="sec plain"><b>Running</b><span>1</span></div>
+          <div class="group">
+            <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Archive finished tasks</span><span class="lp">Keep each tag when a task is archived</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">2m</span></span></div>
+          </div>
+          <div class="sec plain"><b>History</b><span>3</span></div>
+          <div class="group">
+            <div class="row sel inact"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+            <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+            <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+          </div>
         </div>
         <div class="actions"><div class="hints"><span><span class="k">↩</span>List</span></div><span class="btn sec ph">View<span class="kc">→</span></span><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
       </div></div>
       <figcaption>ポップオーバー · 検索中(「tag」)。行の形は検索していないときと同じで、ヒットの抜粋も件数も
-        表示しない。3 行目は最後の発話のままである。区画の見出しの行数は、表示している行の数になる。
-        History の行を選択している。検索欄にフォーカスがあるので、
-        選択中のカードは灰色で、キーの案内は <code>↩ List</code> だけで、下部パネルのボタンを表示しない</figcaption>
+        表示しない。3 行目は最後の発話のままである。Running と History の見出しは、文字だけの見出しになり、
+        山形を表示しない。History の見出しの下の 1 つの枠の中に、Starred の行(利用者が決めた順序)、Recent の行(新しい順)の順に表示し、
+        Starred と Recent の見出しは表示しない。見出しの行数は、表示している行の数である(History は、Starred の行と Recent の行の合計)。
+        スター付きの行を選択している。検索欄にフォーカスがあるので、
+        選択中の行は灰色で、キーの案内は <code>↩ List</code> だけで、下部パネルのボタンを表示しない</figcaption>
     </figure>
   </div>
 
   <h2>行の構成要素: 記号と時間の列・状態記号・スター</h2>
   <ul>
-    <li><strong>記号と時間の列</strong>(カードの右端。幅 28px): 上に記号、下に経過時間(二次色 11px)を、
-      列の中央にそろえて表示する。記号は、Running の行が状態記号(20px)、History の行がスター(16px)である。
+    <li><strong>記号と時間の列</strong>(行の右端。幅 28px): 上に記号、下に経過時間(二次色 11px)を、
+      列の中央にそろえて表示する。記号は、Running の行が状態記号(20px)、Starred と Recent の行がスター(16px)である。
       どちらも同じ位置の 20px の枠に表示し、スターの中心は枠の中心にそろえる。
       枠の上端は 1 行目(ラベル)の位置に、経過時間は 3 行目(最後の発話)の位置にそろえる。
-      カードの左端には、記号のための場所は無い(DESIGN.md §4.5「一覧は 2 つの区画」/ §9)</li>
+      行の左端には、記号のための場所は無い(DESIGN.md §4.5「一覧は 3 つの区画」/ §9)</li>
     <li><strong>状態記号</strong>(記号と時間の列の上・20px 相当。Running の行):
       <strong>薄い ✻(静止・50% 濃度)= idle</strong>(U+273B の文字グリフ。Claude Code の TUI が
       処理を終えたときに表示する「✻ Worked for Ns」のマーカーと同じ「静止している Claude」)/
@@ -476,11 +559,11 @@
       モックは静止画のため、working は循環の 1 コマ(✻)を示す(idle との差は濃度のみ)</li>
     <li><strong>赤バッジ</strong>: 状態記号の右肩に表示する塗りの円 + 細い明色のフチ(ハロー)。
       状態記号の種類によらず同じ位置</li>
-    <li><strong>スター</strong>(記号と時間の列の上・16px。状態記号より小さい。History の行):
+    <li><strong>スター</strong>(記号と時間の列の上・16px。状態記号より小さい。Starred と Recent の行):
       状態記号と同じ位置の 20px の枠の中心に表示する。クリックに反応する範囲は、20px の枠である。
       線の太さは、輪郭だけの星が 1.1px、塗りの星が 0.7px である。3 状態 —
-      <strong>なし</strong>(記号の位置は空)/ <strong>行のホバー中 = 輪郭だけの星</strong>(二次色)/
-      <strong>スター付き = 黄色の塗りの星</strong>(塗り <code>#f5b400</code>・輪郭 <code>#d39700</code>。
+      <strong>なし</strong>(Recent の行。記号の位置は空)/ <strong>Recent の行のホバー中 = 輪郭だけの星</strong>(二次色)/
+      <strong>スター付き(Starred の行)= 黄色の塗りの星</strong>(塗り <code>#f5b400</code>・輪郭 <code>#d39700</code>。
       ホバーしていなくても表示する)。スターのクリックでは行を選択しない。挙動は DESIGN.md §4.6「スター」</li>
   </ul>
   <div class="mock">
@@ -496,23 +579,201 @@
       <figcaption>状態記号の 3 種(waiting / working / idle)と、赤バッジを付けた形</figcaption>
     </figure>
     <figure>
-      <div class="app strip side" style="padding:10px 10px 4px">
-        <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
-        <div class="row hov"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
-        <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
-        <div class="row sel"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
-        <div class="row sel inact"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
+      <div class="app strip side" style="padding:10px">
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+          <div class="row hov"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
+          <div class="row sel"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
+          <div class="row sel inact"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">1w</span></span></div>
+        </div>
       </div>
-      <figcaption>カードの 5 つの表示(上から: 通常・スターなし / ホバー中: 枠が淡い青・輪郭の星 /
-        スター付き / 選択中・キーの操作対象が一覧である間: 淡い青の地と枠 /
-        選択中・検索欄にフォーカスがある間またはウィンドウが key でない間: 淡い灰色の地と灰色の枠)。右端の記号と時間の列の上がスター、下が経過時間</figcaption>
+      <figcaption>行の 5 つの表示を、1 つの枠の中に並べた図(上から: 通常・スターなし / ホバー中: 淡い灰色の地・輪郭の星 /
+        スター付き / 選択中・キーの操作対象が一覧である間: 淡い青の地 /
+        選択中・検索欄にフォーカスがある間またはウィンドウが key でない間: 淡い灰色の地)。行と行の間は区切り線で、行ごとの枠は無い。
+        右端の記号と時間の列の上がスター、下が経過時間</figcaption>
+    </figure>
+  </div>
+
+  <h2>区画の開閉と行のドラッグ</h2>
+  <ul>
+    <li>挙動の正は DESIGN.md §4.5「区画の開閉」「行のドラッグ」。ここでは形だけを示す</li>
+    <li><strong>見出しの帯</strong>(Running と History): 内側は上下 4px・左 10px・右 8px、角丸 6px、見出しの中の要素の左右の間隔 8px。
+      上の間隔(直前の要素の下端から、帯の上端まで)は 8px、下の間隔(帯の下端から、次の要素の上端まで)は 6px である。
+      地は淡い灰色(灰色の 12%。色は例示で、ダークでは、帯と行の枠を判別できる濃さにする — 下記「実装ノート」)</li>
+    <li><strong>文字だけの見出し</strong>(Starred と Recent): 地が無い。内側の余白と、見出しの中の要素の左右の間隔は、帯と同じで、
+      名前の左端と山形の右端は、帯と同じ位置になる。上の間隔は 6px、下の間隔は 4px である</li>
+    <li><strong>上下に隣り合う要素の間隔</strong>: 上下に隣り合う 2 つの要素(見出しと行の枠)の間隔は、上の要素の下の間隔と、下の要素の上の間隔の、
+      大きいほうの値である(合算しない)。行の枠は、上下の間隔を持たない。Running の行の枠の下の History の帯は 8px、
+      帯の下の行の枠は 6px、History の帯の下の Starred の見出しは 6px、Starred と Recent の見出しの下の行の枠は 4px、
+      Starred の行の枠の下の Recent の見出しは 6px、閉じている Running の帯の下の History の帯は 8px、
+      閉じている Starred の見出しの下の Recent の見出しは 6px である</li>
+    <li><strong>クリックの範囲</strong>: 見出しのどこをクリックしても開閉する。文字だけの見出しのクリックの範囲は、帯と同じ大きさである
+      (左右は行の枠の端まで、上下は内側の余白を含む)。見出しにホバーの表示は付けない</li>
+    <li><strong>山形</strong>: 見出しの右端の 14px の枠に、12px の線画(16 単位の枠での線の太さ 1.8・端と角は丸)を二次色で表示する。
+      開いているときは下向き(<code>M4 6l4 4 4-4</code>)、閉じているときは右向き(<code>M6 4l4 4-4 4</code>。どちらも 16 単位の枠)である</li>
+    <li><strong>閉じている見出し</strong>: 見出しだけを表示し、名前を二次色にする。行数は、開いているときと同じ値を表示する。開閉にアニメーションは無い。
+      History を閉じている間は、History の見出しだけを表示し、Starred と Recent の見出しと行を表示しない</li>
+    <li><strong>Running の印</strong>: Running を閉じている間、waiting または未確認の行があるときに、名前の前に直径 7px の赤い点
+      (未確認の赤バッジと同じ色)を表示する</li>
+    <li><strong>検索中の見出し</strong>: Running と History の見出しを、文字だけの見出しにして、山形と Running の印を表示しない。
+      上下の間隔、内側の余白、名前と行数の位置は、帯と同じである。Starred と Recent の見出しは表示しない。
+      行数は、表示している行の数である(History の見出しは、Starred の行と Recent の行の合計を表示する。
+      図は上記「一覧のページ」の検索中の図)</li>
+    <li><strong>文字の大きさとの連動</strong>: 見出しの上下の間隔と内側の上下、山形、Running の印、行の内側の上下は、文字の大きさに比率で連動する。
+      左右の余白、見出しの中の要素の左右の間隔、角丸、枠線と区切り線の太さは固定である(DESIGN.md §4.5「文字の大きさ」)</li>
+    <li><strong>ドラッグ中の行</strong>: 元の行は、その場に残して不透明度 0.35 で表示する。ドラッグの開始で行を選択するので、
+      元の行の地は、選択中の行の淡い青である。挿入位置にならない行(Running と Recent の行。ドラッグ中の行を除く)は、不透明度 0.4 で表示する。
+      ほかの行は移動しない。ドラッグ中は、どの行にもホバーの表示を付けない</li>
+    <li><strong>ポインタに追従する画像</strong>: ドラッグ中の行だけを含む行の枠と同じ形(同じ幅・角丸 10px・1px の枠線・地)で描画する
+      (選択の地は付けない)。不透明度 0.92 で表示し、影を付ける。押した位置との相対位置を保って、ポインタに追従する</li>
+    <li><strong>見出しの案内</strong>: Recent の行のドラッグ中は Starred の見出しに <code>Drop here to star</code> を、
+      Starred の行のドラッグ中は Recent の見出しに <code>Drop here to unstar</code> を、山形の左(間隔 8px)に表示する。
+      行数と同じ 11px のセミボールドで、色はアクセントカラーである。見出しを閉じている間も表示する</li>
+    <li><strong>移動先の線</strong>(Starred の中): 太さ 2px のアクセントカラーの線を、行の境界を中心にして表示する。
+      行と行の間では区切り線の位置、先頭では最初の行の上端、末尾では最後の行の下端である(先頭と末尾では、線の外側の 1px が、枠線の位置になる)。
+      線は、行と見出しの配置を変更しない。線の左端は、行の枠の左端より 3px 左で、外径 8px の輪(線 2px・中は一覧の地の色)を付ける。
+      右端は、行の枠の右端である。線の太さと輪の大きさは、文字の大きさに連動しない。並びが変化しない位置でも、線を表示する</li>
+    <li><strong>行の枠の強調</strong>: Recent の行のドラッグ中に、移動先を線で示している間は、Starred の行の枠を、
+      アクセントカラーの 2px の枠で強調する(枠線の 1px をアクセントカラーにして、その外側に 1px を追加する。行と見出しの配置は変更しない)。
+      Starred の行のドラッグ中は、行の枠を強調しない</li>
+    <li><strong>見出しの強調</strong>(閉じている Starred への移動と、Recent への移動): 見出しの地を、選択中の行と同じ淡い青にし、
+      内側にアクセントカラーの 2px の枠を表示する(角丸 6px。範囲は、見出しのクリックの範囲と同じである)。
+      強調の枠の太さは、文字の大きさに連動しない</li>
+    <li><strong>ドラッグできない理由の表示</strong>: ドラッグを開始しない行(Running の行、検索中のすべての行、
+      Starred に行が無い間の Recent の行)の上でマウスのボタンを押し、ドラッグの開始と同じ距離を移動した時点で、
+      ポインタの近くに、理由を 1 行で表示する(文言と、消去する条件は DESIGN.md §4.5「行のドラッグ」の「ドラッグできない行」。表示する時間は §9)。
+      形は、濃い色の地に明るい色の文字の、角丸の表示である(ダークでは、明るい地に濃い文字)。
+      文字は 12px、内側は上下 4px・左右 9px、角丸 6px で、影を付ける。左上の角を、ポインタの位置の右 12px・下 16px に配置し、
+      ポップオーバーまたはウィンドウの中に収める(ポインタからの距離は、文字の大きさに連動しない)</li>
+  </ul>
+  <div class="mock">
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec closed"><span class="dot"></span><b>Running</b><span>5</span><span class="chev"><svg class="ic"><use href="#i-chev-r"/></svg></span></div>
+        <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="sec sub"><b>Starred</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Empty state for the task list</span><span class="lp">タスクが無いときの文言を決めたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+        </div>
+        <div class="sec sub closed"><b>Recent</b><span>first 100</span><span class="chev"><svg class="ic"><use href="#i-chev-r"/></svg></span></div>
+      </div></div>
+      <figcaption>Running と Recent を閉じた状態。Running の名前の前の赤い点は、waiting または未確認の行があることを示す。閉じている見出しの名前は二次色、山形は右向き。Recent の行が上限を超えている間の <code>first 100</code> は、閉じている間も表示する</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">用語集のページを追加して</span><span class="lp">用語は五十音順に並べて</span></span><span class="rc"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="tm">40m</span></span></div>
+        </div>
+        <div class="sec closed"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev-r"/></svg></span></div>
+      </div></div>
+      <figcaption>History を閉じた状態。History の見出しだけを表示し、Starred と Recent の見出しと行を表示しない</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>1</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
+        </div>
+        <div class="sec"><b>History</b><span>85</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+        </div>
+      </div></div>
+      <figcaption>Starred に行が無い状態。Starred と Recent の見出しを表示せず、History の帯のすぐ下に Recent の行の枠を表示する。History の帯は、Recent の行数を表示する(Recent の行が上限を超えている間は <code>History first 100</code>)</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>1</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row dim"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">用語集のページを追加して</span><span class="lp">用語は五十音順に並べて</span></span><span class="rc"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="tm">40m</span></span></div>
+        </div>
+        <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="sec sub"><b>Starred</b><span>3</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Empty state for the task list</span><span class="lp">タスクが無いときの文言を決めたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
+          <div class="row"><span class="dropline"></span><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+          <div class="row sel lift"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">入門ガイドの下書き</span><span class="lp">最初の手順をもう少し短く</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">9d</span></span></div>
+        </div>
+        <div class="ghost" style="transform:translate(22px,-116px)">
+          <div class="row"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">入門ガイドの下書き</span><span class="lp">最初の手順をもう少し短く</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">9d</span></span></div>
+        </div>
+        <div class="sec sub"><b>Recent</b><span>85</span><span class="hint">Drop here to unstar</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row dim"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+          <div class="row dim"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+        </div>
+      </div></div>
+      <figcaption>Starred の 3 行目を、1 行目と 2 行目の間にドラッグしている。元の行は不透明度 0.35、Running と Recent の行は不透明度 0.4 で表示し、行の画像がポインタに追従する。移動先は、区切り線の位置の線で示す。Recent の見出しには <code>Drop here to unstar</code> を表示する</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>1</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row dim"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">用語集のページを追加して</span><span class="lp">用語は五十音順に並べて</span></span><span class="rc"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="tm">40m</span></span></div>
+        </div>
+        <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="sec sub"><b>Starred</b><span>3</span><span class="hint">Drop here to star</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group over">
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Empty state for the task list</span><span class="lp">タスクが無いときの文言を決めたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
+          <div class="row"><span class="dropline"></span><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">入門ガイドの下書き</span><span class="lp">最初の手順をもう少し短く</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">9d</span></span></div>
+        </div>
+        <div class="ghost" style="transform:translate(22px,-116px)">
+          <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+        </div>
+        <div class="sec sub"><b>Recent</b><span>85</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row sel lift"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+          <div class="row dim"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+        </div>
+      </div></div>
+      <figcaption>Recent の行を、Starred の 1 行目と 2 行目の間にドラッグしている(スターの追加)。Starred の見出しに <code>Drop here to star</code> を表示し、移動先を線で示している間は、Starred の行の枠も強調する。Running の行と、Recent のほかの行は、不透明度 0.4 で表示する</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>1</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row dim"><span class="rt"><span class="lb">example/docs-site</span><span class="tt">用語集のページを追加して</span><span class="lp">用語は五十音順に並べて</span></span><span class="rc"><span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span><span class="tm">40m</span></span></div>
+        </div>
+        <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="sec sub"><b>Starred</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Empty state for the task list</span><span class="lp">タスクが無いときの文言を決めたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">2d</span></span></div>
+          <div class="row sel lift"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+        </div>
+        <div class="sec sub over"><b>Recent</b><span>85</span><span class="hint">Drop here to unstar</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row dim"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+          <div class="row dim"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+        </div>
+        <div class="ghost" style="transform:translate(22px,-121px)">
+          <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+        </div>
+      </div></div>
+      <figcaption>Starred の行を Recent の区画にドラッグしている(スターの解除)。Recent の中の位置は新しい順で決まるので、線ではなく、Recent の見出しを強調する。見出しには <code>Drop here to unstar</code> を表示する</figcaption>
+    </figure>
+    <figure>
+      <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
+        <div class="sec"><b>Running</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
+        <div class="group">
+          <div class="row hov"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
+          <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
+        </div>
+        <div class="tip" style="left:150px; transform:translateY(-93px)">Running is ordered automatically</div>
+      </div></div>
+      <figcaption>Running の行でドラッグを試みた直後。ドラッグは開始せず、ポインタの近くに理由(<code>Running is ordered automatically</code>)を表示する。検索中の行では <code>Clear the search to reorder</code>、Starred に行が無い間の Recent の行では <code>Click the star to add it to Starred</code> である。図は、ポインタを描画していない</figcaption>
     </figure>
   </div>
 
   <h2>固定フッター: 警告行・メッセージ行・キーの案内</h2>
   <ul>
     <li><strong>警告行</strong>(表示する条件は DESIGN.md §4.5「異常の可視化」):
-      <strong>モノクロ(二次色)+ ⚠ 記号</strong>・12px。赤は使用しない(赤 = 未確認専用)。
+      <strong>モノクロ(二次色)+ ⚠ 記号</strong>・12px。赤は使用しない(赤は、未確認と、閉じている Running の印だけに使用する)。
       クリックの動作は無い</li>
     <li><strong>メッセージ行</strong>(二次色 11px・クリック不可): 表示する内容があるときだけ、
       キーの案内の上に 1 行で表示する(内容と優先順位は DESIGN.md §4.6「メッセージ行」)。
@@ -521,7 +782,7 @@
           reconcile の失敗(TCC 以外)<code>Refresh failed</code>。件数は表示しない。TCC エラーは警告行で表示する
           (結果の組み合わせは DESIGN.md §4.6「検索欄」の表)</li>
         <li>全構築中: <code>Indexing 340 of 4,200…</code>。全構築中は<strong>検索欄を無効</strong>の表示にする。
-          History は完了後に一度に表示する(徐々に行が増える表示にしない)。Running の区画は構築を待たずに
+          Starred と Recent の行は、完了後に一度に表示する(徐々に行が増える表示にしない)。Running の区画は構築を待たずに
           表示する。回転する <code>✻</code> は使用しない — グリフ循環スピナーは working を意味する</li>
       </ul></li>
     <li><strong>キーの案内</strong>(二次色 11px・常に表示する): キーの表記はモノスペースの小さなチップ、
@@ -536,12 +797,15 @@
         <li>1 列の詳細ページ(下部パネルの左側): <code>⌥↑↓ Prev / Next</code> / <code>← Back</code>
           (詳細ページを表示している間は、検索欄にフォーカスが移動しないので、フォーカスは常に一覧にある。下記「キー操作」)</li>
       </ul></li>
-    <li><strong>表示していない会話の数</strong>: History の行が上限(DESIGN.md §9)を超えたときは、
-      最後のカードの下に 1 行(二次色 12px・中央寄せ)— <code>242 more — search to narrow down</code>
-      (検索中は <code>242 more — refine your search</code>)。カードにはしない。
-      この間、区画の見出しは <code>History first 100</code> である(<code>first 100</code> は、行数と同じ二次色)</li>
-    <li><strong>空状態</strong>: Running と History の両方に行が無いときだけ、一覧の位置に 1 行
-      (二次色 12px)— 空クエリは <code>No conversations</code>、検索中は
+    <li><strong>表示していない会話の数</strong>: Recent の行が上限(DESIGN.md §9)を超えたときは、
+      Recent の行の枠の下に 1 行(二次色 12px・中央寄せ。枠の下端との間隔は 6px)— <code>242 more — search to narrow down</code>
+      (有効なクエリの結果を表示している間は <code>242 more — refine your search</code>)。この行は、枠の外に表示し、枠の中の行にしない。
+      この間、Recent の見出しは <code>Recent first 100</code> である(<code>first 100</code> は、行数と同じ二次色。
+      History の見出しが Recent の行数を表示している間は <code>History first 100</code>)。
+      検索中は、Starred の行と Recent の行を並べた枠の下に表示し、History の見出しの行数の位置は、<code>first</code> と、表示している行の数である
+      (DESIGN.md §4.6「Recent の区画」「検索の適用範囲」)</li>
+    <li><strong>空状態</strong>: どの区画にも行が無いときだけ(閉じている区画の行も、行として数える)、一覧の位置に 1 行
+      (二次色 12px)— クエリが空の結果を表示している間は <code>No conversations</code>、有効なクエリの結果を表示している間は
       <code>No matching conversations</code>(DESIGN.md §4.6「空状態」)</li>
   </ul>
   <div class="mock">
@@ -595,7 +859,7 @@
     <li>1 列では、一覧のページの下部パネルの View ボタン、または一覧にフォーカスがある間の → で、選択中の行の詳細ページを<strong>右からスライド</strong>して表示する。
       戻るボタン、または一覧にフォーカスがある間の ← で、一覧のページに戻る(DESIGN.md §4.5「幅による切り替え」「キー操作」。時間は §9)</li>
     <li><strong>ヘッダ</strong>: 左から <strong>戻るボタン</strong>(チップ)/ <strong>フォルダとタイトル</strong>
-      (1 行目 = フォルダラベル · 経過時間・二次色 11px、2 行目 = タイトル・13.5px・セミボールド。フォルダラベルは、一覧のカードのラベルと同じ文字で、<code>running</code> の印は表示しない。DESIGN.md §4.6)/
+      (1 行目 = フォルダラベル · 経過時間・二次色 11px、2 行目 = タイトル・13.5px・セミボールド。フォルダラベルは、一覧の行のラベルと同じ文字で、<code>running</code> の印は表示しない。DESIGN.md §4.6)/
       <strong>一覧の中での位置</strong>(<code>2 / 4</code>・二次色 11px)/
       <strong>前後の会話へ移動するボタン</strong>(上向きと下向きのセグメンテッドコントロール。⌥↑ / ⌥↓ と同じ)。
       ヘッダ下の区切り線は常に表示する(DESIGN.md §4.6「会話ペインの表示」)</li>
@@ -618,22 +882,22 @@
       <div class="app pop"><div class="clip"><div class="page">
         <div class="hdr">
           <span class="hb chip"><svg class="ic"><use href="#i-back"/></svg></span>
-          <div class="hx"><div class="hp">demo/menubar-app · 3h ago</div><div class="ht">Release checklist review</div></div>
+          <div class="hx"><div class="hp">demo/menubar-app · 3h ago</div><div class="ht">Filter tasks in the menu</div></div>
           <span class="pos">2 / 4</span>
           <span class="seg"><span class="nav"><svg class="ic s13"><use href="#i-up"/></svg></span><span class="nav"><svg class="ic s13"><use href="#i-chev"/></svg></span></span>
         </div>
         <div class="findbar"><span class="qs"><span>Matches for</span><span class="qt">“tag”</span></span><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
         <div class="docwrap">
           <div class="doc">
-            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
             <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-              <p>リリースコミットで 3 箇所のバージョンを揃えてからタグを作成します。</p>
-              <pre>git <span class="hl">tag</span> v0.6.0
-git push origin main --<span class="hl">tag</span>s</pre>
-              <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。<code>check-version.sh</code> が三点一致を確認します。</p></div>
-            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">plugin.json も上げる必要がある? hooks は変更していないけど</div></div>
+              <p>タスクにタグを付けてから、一覧のコマンドで絞り込みます。</p>
+              <pre>todo <span class="hl">tag</span> 42 urgent
+todo list --<span class="hl">tag</span>s urgent,work</pre>
+              <p><code>todo list</code> と <code>todo count</code> の両方で、同じ条件を指定できます。<code>todo help</code> で、指定できる条件を確認できます。</p></div>
+            <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</div></div>
             <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-              <p>はい。hooks が無変更でも <code>check-version.sh</code> による三点一致の確認があるので、<code>plugin.json</code> も 0.6.0 に上げます。そのうえで <span class="hlcur">tag</span> を作成し、push します。</p></div>
+              <p>はい。タグをカンマで区切ると、すべてのタグに一致するタスクだけを表示します。<code>todo help</code> の説明のとおり、<code>urgent,work</code> の形式で指定します。追加した <span class="hlcur">tag</span> は、次の一覧から使用できます。</p></div>
             <div class="endcap">Latest message · 3h ago</div>
           </div>
           <div class="mm">
@@ -695,7 +959,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
       (しきい値と幅は DESIGN.md §9)。列の境界は 1px の区切り線で、左右にドラッグすると、左の列の幅を
       変更できる(境界のダブルクリックで既定の幅に戻す。DESIGN.md §4.5「幅による切り替え」)</li>
     <li>ウィンドウの幅を変更して 1 列と 2 列が切り替わっても、キーの操作対象は変化しない。
-      一覧にフォーカスがある状態で切り替わった場合は、選択中のカードは青のままで、下部パネルのボタンも表示したままである。
+      一覧にフォーカスがある状態で切り替わった場合は、選択中の行は青のままで、下部パネルのボタンも表示したままである。
       検索欄にフォーカスがある状態で切り替わった場合は、検索欄にフォーカスを保持する
       (DESIGN.md §4.5「幅による切り替え」の「幅を変更したとき」)</li>
     <li>右の列のヘッダは<strong>フォルダとタイトルだけ</strong>を表示する(1 行目 = フォルダラベル · 経過時間、2 行目 = タイトル。タイトルは 15px)。
@@ -721,30 +985,34 @@ git push origin main --<span class="hl">tag</span>s</pre>
             <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
           </div>
           <div class="rows">
-            <div class="sec"><b>Running</b><span>1</span></div>
-            <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Cut the 0.6.0 release</span><span class="lp">Create the tag after CI is green</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">2m</span></span></div>
-            <div class="sec"><b>History</b><span>3</span></div>
-            <div class="row sel inact"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Release checklist review</span><span class="lp">plugin.json も上げる必要がある? hooks は変更していないけど</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
-            <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">CI がタグ push で起動しない件</span><span class="lp">workflow の on: の部分を見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
-            <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+            <div class="sec plain"><b>Running</b><span>1</span></div>
+            <div class="group">
+              <div class="row"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Archive finished tasks</span><span class="lp">Keep each tag when a task is archived</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">2m</span></span></div>
+            </div>
+            <div class="sec plain"><b>History</b><span>3</span></div>
+            <div class="group">
+              <div class="row sel inact"><span class="rt"><span class="lb">demo/menubar-app</span><span class="tt">Filter tasks in the menu</span><span class="lp">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</span></span><span class="rc"><span class="sym"><svg class="star on"><use href="#i-star"/></svg></span><span class="tm">3h</span></span></div>
+              <div class="row"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">検索の応答が遅い件</span><span class="lp">遅いクエリのログを見せて</span></span><span class="rc"><span class="sym"></span><span class="tm">2d</span></span></div>
+              <div class="row"><span class="rt"><span class="lb">example/infra</span><span class="tt">Docker image naming</span><span class="lp">Keep the registry prefix as it is</span></span><span class="rc"><span class="sym"></span><span class="tm">1w</span></span></div>
+            </div>
           </div>
           <div class="foot"><div class="hints"><span><span class="k">↩</span>List</span></div></div>
         </div>
         <div class="main">
-          <div class="hdr pad"><div class="hx"><div class="hp">demo/menubar-app · 3h ago</div><div class="ht">Release checklist review</div></div></div>
+          <div class="hdr pad"><div class="hx"><div class="hp">demo/menubar-app · 3h ago</div><div class="ht">Filter tasks in the menu</div></div></div>
           <div class="findbar"><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
           <div class="docwrap">
             <div class="doc">
-              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
               <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-                <p>リリースコミットで 3 箇所のバージョンを揃えてからタグを作成します。</p>
-                <pre>git <span class="hl">tag</span> v0.6.0
-git push origin main --<span class="hl">tag</span>s</pre>
-                <div class="tbl"><table><tr><th>File</th><th>Field</th><th>Value</th></tr><tr><td>Cargo.toml</td><td>workspace.package.version</td><td>0.6.0</td></tr><tr><td>plugin.json</td><td>version</td><td>0.6.0</td></tr></table></div>
-                <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。<code>check-version.sh</code> が三点一致を確認します。</p></div>
-              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">plugin.json も上げる必要がある? hooks は変更していないけど</div></div>
+                <p>タスクにタグを付けてから、一覧のコマンドで絞り込みます。</p>
+                <pre>todo <span class="hl">tag</span> 42 urgent
+todo list --<span class="hl">tag</span>s urgent,work</pre>
+                <div class="tbl"><table><tr><th>Command</th><th>Condition</th><th>Result</th></tr><tr><td>todo list</td><td>urgent</td><td>3 tasks</td></tr><tr><td>todo count</td><td>urgent,work</td><td>1</td></tr></table></div>
+                <p><code>todo list</code> と <code>todo count</code> の両方で、同じ条件を指定できます。<code>todo help</code> で、指定できる条件を確認できます。</p></div>
+              <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">複数のタグを同時に指定できる? 一覧が長くなってきたので絞り込みたい</div></div>
               <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-                <p>はい。hooks が無変更でも <code>check-version.sh</code> による三点一致の確認があるので、<code>plugin.json</code> も 0.6.0 に上げます。そのうえで <span class="hlcur">tag</span> を作成し、push します。</p></div>
+                <p>はい。タグをカンマで区切ると、すべてのタグに一致するタスクだけを表示します。<code>todo help</code> の説明のとおり、<code>urgent,work</code> の形式で指定します。追加した <span class="hlcur">tag</span> は、次の一覧から使用できます。</p></div>
               <div class="endcap">Latest message · 3h ago</div>
             </div>
             <div class="mm">
@@ -760,7 +1028,9 @@ git push origin main --<span class="hl">tag</span>s</pre>
         </div>
       </div>
       <figcaption>ウィンドウ · 2 列 ·「tag」で検索中。
-        検索欄にフォーカスがあるので、選択中のカードは灰色で、左の列のフッターのキーの案内は <code>↩ List</code> だけで、
+        左の列は、検索中の一覧である(Running と History は文字だけの見出しで、History の見出しの下の 1 つの枠の中に、
+        Starred の行、Recent の行の順に表示する)。
+        検索欄にフォーカスがあるので、選択中の行は灰色で、左の列のフッターのキーの案内は <code>↩ List</code> だけで、
         右の列の下部パネルにボタンを表示しない(一覧にフォーカスがある間は、<code>↑↓ Move</code> とボタンを表示する)。
         右の列の検索バー行は、カウンタと ‹ › だけを表示する</figcaption>
     </figure>
@@ -799,8 +1069,8 @@ git push origin main --<span class="hl">tag</span>s</pre>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
       </div>
-      <figcaption>1 列の一覧のページ(上から: 行を選択していない / History の会話 / Running の行にある会話 /
-        History に残る実行中の会話(追跡外)。どれも一覧にフォーカスがある状態。
+      <figcaption>1 列の一覧のページ(上から: 行を選択していない / History の行の会話 / Running の行にある会話 /
+        Starred または Recent に残る実行中の会話(追跡外)。どれも一覧にフォーカスがある状態。
         行を選択している間は、View・Branch・主ボタンを表示する。
         主ボタンが disabled の間も、ボタンの中の <code>↩</code> は表示する)</figcaption>
     </figure>
@@ -810,8 +1080,8 @@ git push origin main --<span class="hl">tag</span>s</pre>
         <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
       </div>
-      <figcaption>1 列の詳細ページ(上 = History の会話 / 中 = Running の行にある会話 /
-        下 = History に残る実行中の会話(追跡外))。View は表示しない</figcaption>
+      <figcaption>1 列の詳細ページ(上 = History の行の会話 / 中 = Running の行にある会話 /
+        下 = Starred または Recent に残る実行中の会話(追跡外))。View は表示しない</figcaption>
     </figure>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:0">
@@ -875,21 +1145,21 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <figure>
       <div class="app strip" style="width:640px; max-width:640px; padding:12px 0">
         <div class="msg ans" style="margin-top:0"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-          <p>I found two broken links (both return <code>000</code>):</p>
+          <p>Two endpoints fail the health check (both return <code>503</code>):</p>
           <div class="tbl"><table>
-            <tr><th>Post</th><th>Broken link</th><th>Status</th></tr>
-            <tr><td>postgres-indexes</td><td><code>http://wiki.postgresql.org.example/Index_Maintenance</code></td><td>Real page exists ✅</td></tr>
-            <tr><td>rust-error-handling</td><td><code>http://blog.defunct-site.example/rust-errors</code></td><td>Dead site, <strong>no snapshot</strong> ❌</td></tr>
+            <tr><th>Service</th><th>Endpoint</th><th>Status</th></tr>
+            <tr><td>orders</td><td><code>http://orders.internal.example/v2/health/readiness</code></td><td>Starts after a restart ✅</td></tr>
+            <tr><td>reports</td><td><code>http://reports.internal.example/health</code></td><td>Database is down, <strong>no replica</strong> ❌</td></tr>
           </table></div>
-          <p>The Postgres link is unambiguous — I'll fix that now.</p>
+          <p>The orders service only needs a restart — I'll do that now.</p>
         </div>
       </div>
       <figcaption>表の描画(グリッド・セル内のインラインも描画する)</figcaption>
     </figure>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:8px; overflow:hidden">
-        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
-        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-check"/></svg></span></div><div class="mt">0.6.0 のリリース手順を教えて</div></div>
+        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
+        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-check"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
       </div>
       <figcaption>コピーのボタンの反応(上 = 通常: コピーのアイコン / 下 = 押した直後: チェックマーク)</figcaption>
     </figure>
@@ -902,7 +1172,9 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <li><strong>検索は 1 つ</strong>: 見出し行の検索欄の検索文字列が、一覧の絞り込みと、会話内のヒットの両方に
       適用される</li>
     <li><strong>一覧の行の形は空クエリのときと同じ</strong>。ヒットの抜粋も件数も表示しない。
-      Running の区画も、結果に含まれる行だけになる</li>
+      Running の区画も、結果に含まれる行だけになる。検索中は、Running と History を開いた状態で表示し、見出しを文字だけにして、
+      山形と Running の印を表示しない。History の見出しの下には、Starred の行(利用者が決めた順序)と Recent の行(新しい順)を、
+      この順に、1 つの枠の中に表示し、Starred と Recent の見出しは表示しない。検索中は、行をドラッグできない</li>
     <li>ハイライトはすべての検索語を同じ色で表示し、現在位置だけ濃くする</li>
     <li>検索バー行(ヘッダの下)は macOS 標準の文書内検索の形: カウンタ <code>N of M</code> + <strong>‹ › の
       セグメンテッドコントロール</strong>(内容サイズ — バーの幅いっぱいに広げない)。
@@ -917,8 +1189,8 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <figure>
       <div class="app strip" style="width:420px; padding:12px 0">
         <div class="msg ans" style="margin-top:0"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
-          <p><code>Cargo.toml</code> と <code>plugin.json</code> を両方 0.6.0 に上げます。
-            draft を作成したあとの公開前の確認項目は… <span class="expand">Show full message <span class="cnt">2 matches</span></span></p></div>
+          <p><code>todo list</code> と <code>todo count</code> の両方で、同じ条件を指定できます。
+            条件を保存して再度使用する方法は… <span class="expand">Show full message <span class="cnt">2 matches</span></span></p></div>
       </div>
       <figcaption>畳まれた部分にヒットがある発言(展開ボタンの隣に件数バッジ)</figcaption>
     </figure>
@@ -940,7 +1212,7 @@ git push origin main --<span class="hl">tag</span>s</pre>
   </ul>
   <table class="keys">
     <tr><th>キー</th><th>検索欄にフォーカスがある間</th><th>一覧にフォーカスがある間</th></tr>
-    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>何もしない</td><td>前後の行に選択を移動する。選択なしの間は、先頭の行を選択する。1 列の詳細ページでは、会話をスクロールする(Space と Page Up / Page Down も同じ)</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>何もしない</td><td>前後の行に選択を移動する(閉じている区画の行は対象にしない)。選択なしの間は、先頭の行を選択する。1 列の詳細ページでは、会話をスクロールする(Space と Page Up / Page Down も同じ)</td></tr>
     <tr><td><kbd>⌥↑</kbd> <kbd>⌥↓</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の詳細ページで、表示する会話を前後の行の会話に切り替える(選択も移動する。スライドはしない。端では何もしない)。それ以外では何もしない</td></tr>
     <tr><td><kbd>↩</kbd></td><td>一覧にフォーカスを移す。選択なしの間は、先頭の行を選択する。行が 1 つも無いときは何もしない</td><td>Jump または Resume(下部パネルの主ボタンと同じ)</td></tr>
     <tr><td><kbd>⌘↩</kbd></td><td>何もしない</td><td>Branch(下部パネルの Branch と同じ)</td></tr>
@@ -950,11 +1222,11 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <tr><td><kbd>⌘G</kbd> <kbd>⇧⌘G</kbd></td><td>会話内の次のヒット / 前のヒット(会話ペインを表示している間だけ)</td><td>同じ</td></tr>
     <tr><td><kbd>⌘F</kbd></td><td>何もしない</td><td>検索欄にフォーカスを移す。1 列の詳細ページでは、一覧のページに戻ってから移す</td></tr>
     <tr><td><kbd>⌘=</kbd> / <kbd>⌘+</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd></td><td>文字の大きさを変更する(下記「文字の大きさ」)。どのページでも同じ</td><td>同じ</td></tr>
-    <tr><td><kbd>esc</kbd></td><td>ポップオーバーを閉じる。ウィンドウでは何もしない</td><td>同じ</td></tr>
+    <tr><td><kbd>esc</kbd></td><td>ポップオーバーを閉じる。ウィンドウでは何もしない。行のドラッグ中は、ドラッグの取り消しだけを実行する</td><td>同じ</td></tr>
   </table>
   <ul>
     <li>検索欄では文字の編集だけを行い、行の操作は一覧で行う</li>
-    <li><strong>一覧にフォーカスを移す操作</strong>: 検索欄での ↩、行のクリック。
+    <li><strong>一覧にフォーカスを移す操作</strong>: 検索欄での ↩、行のクリック、行のドラッグの開始。
       <strong>検索欄にフォーカスを移す操作</strong>: 検索欄のクリック、⌘F</li>
     <li>Tab と ⇧Tab は標準のフォーカスの移動である。1 列の詳細ページを表示している間は、
       一覧のページのビュー(検索欄など)を、Tab と ⇧Tab の移動先にしない(DESIGN.md §4.5「キー操作」)</li>
@@ -998,9 +1270,9 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <li><strong>会話ペインのメッセージ面は WKWebView</strong>(DESIGN.md §4.6「描画エンジン」/ §8.38)。本ページの
       メッセージ面の CSS(ラベル・帯・コードブロック・表・ハイライト)は紙面の例示であると同時に、
       実装のスタイルシートの元になる。会話ペインのヘッダ・検索バー行・下部パネル・一覧はネイティブ</li>
-    <li>本ページの色の CSS 値(選択の地と枠・カードの地と枠・ハイライト色・帯の明度・ホバーの濃度を含む)は
-      紙面上の例示で、実装はシステムの色に追従させる(ライトとダークの両方で、カード・選択中のカード(青と灰色)・
-      ホバー中のカード・一覧の地を判別できる値にする。アクセントカラーはシステムの設定に従う)。
+    <li>本ページの色の CSS 値(選択の地・行の枠の地と枠線・区切り線・ハイライト色・帯の明度・ホバーの濃度・ドラッグできない理由の表示の地と文字を含む)は
+      紙面上の例示で、実装はシステムの色に追従させる(ライトとダークの両方で、行の枠・区切り線・選択中の行(青と灰色)・
+      ホバー中の行・見出しの帯・一覧の地を判別できる値にする。アクセントカラーはシステムの設定に従う)。
       例外はスターの黄色と未確認の赤で、本ページの値を使用する</li>
     <li>行の状態記号は文字グリフ(<code>✻</code> は素の U+273B)と自前描画の吹き出しで構成する。
       寸法は本ページの SVG(20 単位のボックス)が正</li>
@@ -1008,8 +1280,8 @@ git push origin main --<span class="hl">tag</span>s</pre>
     <li>下部パネル(高さ不変・disabled は標準の灰色の形・Resume / Jump 同幅)の文法は
       DESIGN.md §4.6 / §8.42 / §8.48</li>
     <li>⟳ ボタンの状態と回転の規律は DESIGN.md §4.6 / §9(決定の背景は §8.42 / §8.44)</li>
-    <li>会話ペインのヘッダの 1 行目はフォルダラベル(一覧のカードのラベルと同じ文字)+ 経過時間、2 行目はタイトルである(規則と理由は DESIGN.md §4.6)</li>
-    <li>行の差分描画・選択のキーは、Running の行が target、History の行が session_id である。
+    <li>会話ペインのヘッダの 1 行目はフォルダラベル(一覧の行のラベルと同じ文字)+ 経過時間、2 行目はタイトルである(規則と理由は DESIGN.md §4.6)</li>
+    <li>行の差分描画・選択のキーは、Running の行が target、Starred と Recent の行が session_id である。
       会話ごとのスクロール位置の記憶は session_id をキーにする
       (再取得で行がちらつかず、選択が別の行へ移動しない)</li>
     <li>UI 文言は英語。行・本文の内容(タイトル・発言)は利用者のデータをそのまま表示する</li>

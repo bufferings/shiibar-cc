@@ -58,7 +58,7 @@ struct ConversationPaneView: View {
                 .help(ConversationPaneModel.backTooltip)
             }
             // §4.6: the label line above the title, in the order of the list
-            // card's label and title (§4.5).
+            // row's label and title (§4.5).
             VStack(alignment: .leading, spacing: scale.paneTitleSpacing) {
                 Text(pane.labelAndElapsed)
                     .font(.system(size: scale.paneLabelFont))
