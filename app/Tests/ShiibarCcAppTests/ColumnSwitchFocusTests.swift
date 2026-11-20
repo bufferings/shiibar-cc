@@ -461,7 +461,11 @@ final class ColumnSwitchFocusTests: XCTestCase {
                 XCTAssertEqual(model.list.columns, .two, "\(points)")
                 // The counter is its text, a gap, then the ‹ › control (the
                 // only segmented control in the window in two columns).
-                let control = frameInWindow(try XCTUnwrap(Self.find(NSSegmentedControl.self, in: contentView)))
+                // Layout places the control by its alignment rect; its frame
+                // extends past that rect by an amount that differs between
+                // macOS versions.
+                let segmented = try XCTUnwrap(Self.find(NSSegmentedControl.self, in: contentView))
+                let control = segmented.convert(segmented.alignmentRect(forFrame: segmented.bounds), to: nil)
                 let font = NSFont.systemFont(ofSize: SurfaceScale(ratio: CGFloat(points) / 13).findBarFont)
                 let text = (try XCTUnwrap(model.hitCounterText) as NSString).size(withAttributes: [.font: font]).width
                 let counterLeft = control.minX - SurfaceMetrics.headerSpacing - text
