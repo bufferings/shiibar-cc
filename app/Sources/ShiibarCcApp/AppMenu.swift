@@ -106,7 +106,7 @@ struct AppMenuCommands: Commands {
             Button("About Shiibar CC") {
                 state.willOpenAuxiliaryWindow()
                 NSApp.activate(ignoringOtherApps: true)
-                NSApp.orderFrontStandardAboutPanel(nil)
+                state.showAboutPanel()
             }
         }
         // §4.5: the app menu holds ONLY the listed items — no Services,

@@ -51,7 +51,7 @@
   .ic.s13 { width:13px; height:13px; stroke-width:1.5; }
   .ic.s14 { width:14px; height:14px; stroke-width:1.3; }
 
-  /* 器: ポップオーバー(矢印あり・幅 420)とウィンドウ(1 列 = 幅 420 / 2 列 = 幅 780 以上) */
+  /* 器: ポップオーバー(矢印あり・幅 420)とウィンドウ(1 列 = 幅 420 / 2 列 = 幅 600 以上) */
   .app { font-size:13px; line-height:1.35; color:var(--text); }
   .pop { position:relative; width:420px; height:640px; margin-top:10px; border-radius:11px; box-shadow:var(--shadow);
     background:var(--cardsbg); display:flex; flex-direction:column; }
@@ -61,7 +61,17 @@
   .pop > .clip { flex:1; min-height:0; display:flex; flex-direction:column; border-radius:11px; overflow:hidden; position:relative; }
   .win { width:420px; height:640px; border-radius:11px; box-shadow:var(--shadow); background:var(--cardsbg);
     display:flex; overflow:hidden; }
-  .win.two { width:1040px; }
+  .win.two { width:1040px; flex-direction:column; }
+  /* 2 列: 見出し行は 2 つの列にまたがる。検索欄は、次の要素(カウンタと ‹ ›、またはボタンの並び)の直前まで伸びる。ボタンは右端 */
+  /* ウィンドウの見出し行: 内容の上下の中心を信号機ボタンの中心(上端から 26px)にそろえ、上と下の余白を同じ値にする(検索欄 28px の上下に 12px ずつ。領域の高さ 52px) */
+  .win .hrow { padding-top:12px; padding-bottom:12px; }
+  /* ウィンドウの 1 列の詳細ページのヘッダも同じ規則(上と下の余白は、内容の高さから計算した同じ値。下限 6px)。内容の高さは 32px(2 行の文字の領域)で、上下の余白は 10px ずつ(領域の高さ 52px) */
+  .win:not(.two) .hdr { padding-top:10px; padding-bottom:10px; }
+  .win:not(.two) .hdr .hx { height:32px; display:flex; flex-direction:column; justify-content:center; }
+  .win.two > .hrow { border-bottom:1px solid var(--line); background:var(--cardsbg); }
+  .win.two > .hrow .cnt { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--menu-text2); }
+  .win.two > .hrow .cnt .seg .nav { width:24px; height:18px; font-size:12px; }
+  .win.two > .body { flex:1; min-height:0; display:flex; }
   .col { width:420px; flex:none; display:flex; flex-direction:column; min-height:0; background:var(--cardsbg); }
   .win.two .col { border-right:1px solid var(--line); }
   .main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--panebg); }
@@ -72,9 +82,9 @@
   .tls { display:flex; gap:6px; padding-right:2px; flex:none; }
   .tl { width:11px; height:11px; border-radius:50%; }
   .tl.r { background:#ff5f57; } .tl.y { background:#febc2e; } .tl.g { background:#28c840; }
-  /* 検索欄: アプリが描画する地(行の枠と同じ色 + 1px の枠・角丸 6px・高さ 24px = 見出し行のボタンと同じ)と
+  /* 検索欄: アプリが描画する地(行の枠と同じ色 + 1px の枠・角丸 6px・高さ 28px。見出し行のボタンは 24px で、上下の中心をそろえる。ウィンドウの見出し行は、上下の余白を同じ値にする)と
      虫眼鏡のアイコン(13px)。その中に枠なしの入力欄(12px)を配置する */
-  .search { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:24px; padding:0 8px;
+  .search { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:28px; padding:0 8px;
     background:var(--cardbg); border:1px solid var(--cardline); border-radius:6px;
     color:var(--menu-text2); font-size:12px; line-height:1; white-space:nowrap; }
   .search .q { color:var(--text); }
@@ -273,8 +283,9 @@
   <symbol id="i-chev-r" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
   <symbol id="i-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>
   <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M11.7 1.9v2.6H9.1"/></symbol>
   <symbol id="i-window" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6.2h12"/></symbol>
-  <symbol id="i-popover" viewBox="0 0 16 16"><path d="M4 5h2.5L8 3l1.5 2H12a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-popover" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2.2"/><path d="M2 5.6h12"/><path d="M8 11.6V8M6.1 9.7 8 7.8l1.9 1.9"/></symbol>
   <symbol id="i-star" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6 4.2 13.6l.7-4.3-3.1-3 4.3-.6z"/></symbol>
   <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
   <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
@@ -330,11 +341,19 @@
   <h2>見出し行</h2>
   <ul>
     <li>ポップオーバーとウィンドウの上端は<strong>見出し行</strong> 1 行である。ポップオーバーは左から
-      <strong>検索欄 / Open in window / ⌄</strong>、ウィンドウは <strong>検索欄 / Open in popover / ピン / ⌄</strong> を並べる
-      (Open in popover は、ポップオーバーの Open in window と同じく、検索欄のすぐ右にあり、ピンはその右にある)。ウィンドウはタイトルバーを表示せず、
+      <strong>検索欄 / Refresh / Open in window / ⌄</strong>、1 列のウィンドウは <strong>検索欄 / Refresh / Open in popover / ピン / ⌄</strong> を並べる
+      (Refresh は、ボタンの並びの左端にある。Open in popover は、ポップオーバーの Open in window と同じく、Refresh のすぐ右にあり、ピンはその右にある)。ウィンドウはタイトルバーを表示せず、
       見出し行の左端に信号機ボタンを配置する(挙動は DESIGN.md §4.5「見出し行」)</li>
+    <li><strong>2 列のウィンドウの見出し行</strong>は、2 つの列にまたがって、ウィンドウの幅の全体を使用する。左から、信号機ボタン / 検索欄
+      (ポップオーバーと 1 列のウィンドウと同じく、次の要素の直前まで伸びる — DESIGN.md §4.5「見出し行」)/ 会話の中のヒットのカウンタと ‹ ›(検索中で、選択中の会話にヒットがある間だけ。表示している間は、その幅と間隔の分だけ、検索欄が短くなる)/
+      Refresh / Open in popover / ピン / ⌄ を並べる。見出し行の下に、区切り線を表示する(図は下記「2 列」)</li>
+    <li><strong>Refresh</strong> のボタン: ほかの見出し行のボタンと同じ 24×24 で、アイコンは時計回りの円弧の矢印。ツールチップは <code>Refresh (⌘R)</code>。
+      実行中は、アイコンが時計回りに回転し(1 秒で 1 回転)、ボタンは押せず、不透明度 40% で表示する(ツールチップは <code>Refreshing…</code>)。
+      「視差効果を減らす」が ON の間は、回転しない(挙動は DESIGN.md §4.5「見出し行」/ §4.6)</li>
+    <li><strong>全画面のウィンドウ</strong>: 見出し行を画面の上端に表示する。信号機ボタンが無いので、その分の左の空きを取らず、検索欄は左端の余白から始まる。
+      そのほかの並びと余白は、全画面でないウィンドウと同じ(挙動は DESIGN.md §4.5「見出し行」)</li>
     <li>検索欄のプレースホルダは <code>Search (2+ characters)</code>。先頭に虫眼鏡のアイコン(13px・二次色)</li>
-    <li><strong>検索欄の形</strong>: 高さ 24px(見出し行のボタンと同じ高さで、上下の中心が揃う)・角丸 6px・
+    <li><strong>検索欄の形</strong>: 高さ 28px(見出し行のボタンは 24px で、上下の中心をそろえる。ウィンドウの見出し行は、検索欄の上と下の余白を同じ値にする — 12px ずつ。DESIGN.md §4.5「文字の大きさ」)・角丸 6px・
       行の枠と同じ色の地 + 1px の枠・左右の余白 8px・アイコンと文字の間隔 6px・文字 12px。
       地とアイコンはアプリが描画し、その中に枠なしの入力欄を配置する(DESIGN.md §4.6「検索欄」)。
       フォーカスリング・最近の検索のメニューは表示しない。文字がある間だけ、右端に消去のボタン
@@ -342,8 +361,8 @@
       地のどこをクリックしても、入力欄にフォーカスが移る</li>
     <li><strong>Open in window</strong>(ポップオーバーの見出し行。ツールチップ <code>Open in window</code>): ウィンドウの枠のアイコン。
       静止時は背景なし。ホバーでグレーの背景を表示し、押下で一段濃くする</li>
-    <li><strong>Open in popover</strong>(ウィンドウの見出し行。ツールチップ <code>Open in popover</code>): 上の辺に矢印の突起がある
-      角丸の四角(ポップオーバーの輪郭)のアイコン。大きさ、線の太さ、背景の表示は、Open in window と同じである
+    <li><strong>Open in popover</strong>(ウィンドウの見出し行。ツールチップ <code>Open in popover</code>): 上の辺の近くにメニューバーの線があり、
+      その下に上向きの矢印がある角丸の四角のアイコン。大きさ、線の太さ、背景の表示は、Open in window と同じである
       (どちらのボタンも、表示の形を変更する。DESIGN.md §4.5「表示の形」)</li>
     <li><strong>ピン</strong>(ツールチップ <code>Keep on top</code>): 斜めに傾いた画びょう(16 の格子・線の太さ 1.2)。
       <strong>OFF = 輪郭だけ・二次色 /
@@ -357,6 +376,7 @@
     <figure>
       <div class="app strip side"><div class="hrow">
         <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+        <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
         <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
         <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
       </div></div>
@@ -366,6 +386,7 @@
       <div class="app strip side"><div class="hrow">
         <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
         <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+        <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
         <span class="hb"><svg class="ic"><use href="#i-popover"/></svg></span>
         <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
         <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
@@ -391,27 +412,19 @@
         <span>Settings…</span>
         <span>Setup Check…</span>
         <span class="note">───</span>
-        <span class="rowc"><span>Refresh</span><span class="note">⌘R</span></span>
         <span>Clear badges</span>
         <span class="note">───</span>
         <span>Quit</span>
       </div>
-      <figcaption>⌄ メニューの項目(─── はセパレーター。Refresh の右に、ショートカットの ⌘R を表示する。
+      <figcaption>⌄ メニューの項目(─── はセパレーター。
         構成と各項目の挙動の正は DESIGN.md §4.5「⌄ メニュー」)</figcaption>
     </figure>
     <figure>
-      <div class="app strip" style="width:240px; gap:4px">
-        <span>About Shiibar CC</span>
-        <span class="note">───</span>
-        <span>Settings…</span>
-        <span>Setup Check…</span>
-        <span class="note">───</span>
-        <span class="rowc" style="opacity:.4"><span>Refreshing…</span><span class="note">⌘R</span></span>
-        <span>Clear badges</span>
-        <span class="note">───</span>
-        <span>Quit</span>
-      </div>
-      <figcaption>Refresh の実行中に開いた ⌄ メニュー(項目の名前が <code>Refreshing…</code> になり、disabled になる)</figcaption>
+      <div class="app strip side" style="width:auto"><div class="hrow" style="padding:10px">
+        <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
+        <span class="hb" style="opacity:.4"><svg class="ic" style="transform:rotate(120deg)"><use href="#i-refresh"/></svg></span>
+      </div></div>
+      <figcaption>Refresh のボタン(左: 通常 / 右: 実行中 — アイコンが回転し、押せない。不透明度 40%)</figcaption>
     </figure>
   </div>
 
@@ -494,6 +507,7 @@
       <div class="app pop"><div class="clip">
         <div class="hrow">
           <span class="search"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+          <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
           <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         </div>
@@ -526,6 +540,7 @@
       <div class="app pop"><div class="clip">
         <div class="hrow">
           <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span><span class="clr"></span></span>
+          <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
           <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         </div>
@@ -791,7 +806,7 @@
     <li><strong>メッセージ行</strong>(二次色 11px・クリック不可): 表示する内容があるときだけ、
       キーの案内の上に 1 行で表示する(内容と優先順位は DESIGN.md §4.6「メッセージ行」)。
       <ul>
-        <li>Refresh(⌄ メニューの Refresh / ⌘R): 実行中 <code>Refreshing…</code> / 正常終了後 <code>✓ Refresh done</code> /
+        <li>Refresh(見出し行の Refresh のボタン / ⌘R): 実行中 <code>Refreshing…</code> / 正常終了後 <code>✓ Refresh done</code> /
           reconcile の失敗(TCC 以外)<code>Refresh failed</code>。件数は表示しない。TCC エラーは警告行で表示する
           (結果の組み合わせは DESIGN.md §4.6「検索欄」の表)。
           実行中の <code>Refreshing…</code> は、索引の進捗とエラーより優先して表示する</li>
@@ -848,6 +863,7 @@
       <div class="app strip side">
         <div class="hrow">
           <span class="search dis"><svg class="ic s13"><use href="#i-search"/></svg>Search (2+ characters)</span>
+          <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
           <span class="hb"><svg class="ic"><use href="#i-window"/></svg></span>
           <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
         </div>
@@ -964,9 +980,9 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     </figure>
   </div>
 
-  <h2>2 列(文字の大きさ 13 のとき、ウィンドウの幅が 780pt 以上)</h2>
+  <h2>2 列(ウィンドウの幅が 600pt 以上)</h2>
   <ul>
-    <li>左の列は一覧のページと同じ構成要素(見出し行・一覧・固定フッター)で、幅は、ウィンドウの幅を変更しても変化しない(右の列の最小の幅を確保できない場合を除く)。
+    <li>左の列は、一覧と固定フッターで構成し、幅は、ウィンドウの幅を変更しても変化しない(右の列の最小の幅 320pt を確保できない幅のウィンドウでは、右の列を 320pt にして、残りを左の列にする)。
       ただし、固定フッターにはキーの案内だけを表示する(実行のボタンは右の列の下部パネルにある)。
       右の列は会話ペインで、ウィンドウの幅を変更すると右の列だけが伸縮する
       (しきい値と幅は DESIGN.md §9)。列の境界は 1px の区切り線で、左右にドラッグすると、左の列の幅を
@@ -977,7 +993,7 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       (DESIGN.md §4.5「幅による切り替え」の「幅を変更したとき」)</li>
     <li>右の列のヘッダは<strong>フォルダとタイトルだけ</strong>を表示する(1 行目 = フォルダラベル · 経過時間、2 行目 = タイトル。タイトルは 15px)。
       戻るボタン・位置・前後の移動は配置しない(左の列が同じ役割を持つ)</li>
-    <li>検索バー行は、カウンタと ‹ › だけを表示する。検索欄が表示されているので、検索文字列は表示しない</li>
+    <li>見出し行は、2 つの列にまたがる。右の列に検索バー行は無く、カウンタと ‹ › は、見出し行の検索欄と Refresh のボタンの間に表示する</li>
     <li>下部パネルの左側には何も配置しない(キーの案内は左の列のフッターにある)。View は表示しない
       (選択中の会話は右の列に表示している)</li>
     <li>行を選択していない間は、右の列にヘッダも下部パネルも表示せず、中央に
@@ -989,14 +1005,17 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
   <div class="mock">
     <figure>
       <div class="app win two" style="height:720px">
+        <div class="hrow">
+          <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
+          <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span><span class="clr"></span></span>
+          <span class="cnt"><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></span>
+          <span class="hb"><svg class="ic"><use href="#i-refresh"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-popover"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
+          <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="body">
         <div class="col">
-          <div class="hrow">
-            <span class="tls"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></span>
-            <span class="search"><svg class="ic s13"><use href="#i-search"/></svg><span><span class="q">tag</span><span class="caret"></span></span><span class="clr"></span></span>
-            <span class="hb"><svg class="ic"><use href="#i-popover"/></svg></span>
-            <span class="hb"><svg class="ic"><use href="#i-pin"/></svg></span>
-            <span class="hb chip"><svg class="ic" style="stroke-width:1.6"><use href="#i-chev"/></svg></span>
-          </div>
           <div class="rows">
             <div class="sec plain"><b>Running</b><span>1</span></div>
             <div class="group">
@@ -1013,7 +1032,6 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
         </div>
         <div class="main">
           <div class="hdr pad"><div class="hx"><div class="hp">demo/menubar-app · 3h ago</div><div class="ht">Filter tasks in the menu</div></div></div>
-          <div class="findbar"><span>3 of 3</span><span class="seg"><span class="nav">‹</span><span class="nav">›</span></span></div>
           <div class="docwrap">
             <div class="doc">
               <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
@@ -1039,13 +1057,14 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
           </div>
           <div class="actions"><span class="sp"></span><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
         </div>
+        </div>
       </div>
       <figcaption>ウィンドウ · 2 列 ·「tag」で検索中。
         左の列は、検索中の一覧である(Running と History は文字だけの見出しで、History の見出しの下の 1 つの枠の中に、
         Starred の行、Recent の行の順に表示する)。
         検索欄にフォーカスがあるので、選択中の行は灰色で、左の列のフッターのキーの案内は <code>↩ List</code> だけで、
         右の列の下部パネルにボタンを表示しない(一覧にフォーカスがある間は、<code>↑↓ Move</code> とボタンを表示する)。
-        右の列の検索バー行は、カウンタと ‹ › だけを表示する</figcaption>
+        見出し行は 2 つの列にまたがり、検索欄は、会話の中のヒットのカウンタと ‹ › の直前まで伸びる(カウンタを表示していない間は、Refresh のボタンの直前まで)。検索欄と Refresh のボタンの間に、会話の中のヒットのカウンタと ‹ › を表示する</figcaption>
     </figure>
   </div>
 
@@ -1191,7 +1210,7 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     <li>ハイライトはすべての検索語を同じ色で表示し、現在位置だけ濃くする</li>
     <li>検索バー行(ヘッダの下)は macOS 標準の文書内検索の形: カウンタ <code>N of M</code> + <strong>‹ › の
       セグメンテッドコントロール</strong>(内容サイズ — バーの幅いっぱいに広げない)。
-      N は、会話の先頭のヒットを 1 として数える。2 列では、カウンタと ‹ › を左寄せにする。
+      N は、会話の先頭のヒットを 1 として数える。2 列では、検索バー行を表示せず、カウンタと ‹ › を見出し行の検索欄と Refresh のボタンの間に配置する。
       1 列の詳細ページでは、左端に <code>Matches for “tag”</code> の文を表示し(<code>Matches for</code> は二次色、
       引用符で囲んだ検索文字列は通常の色。長い検索文字列は途中を省略する)、カウンタと ‹ › を右端に配置する。
       この文は表示だけで、入力欄と区別できるように地・枠・虫眼鏡のアイコンを付けない</li>
@@ -1263,10 +1282,11 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       設定として表示する場所は Settings の General の <strong>Text size</strong>(数値の入力欄とステッパー)。
       範囲と既定は DESIGN.md §9、挙動は同 §4.5「文字の大きさ」/ §4.6「会話ペインの文字の大きさ」</li>
     <li><strong>対象はポップオーバーとウィンドウの全体</strong>(一覧、見出し行、下部パネル、会話ペイン)。
-      本ページの寸法は、文字の大きさが 13 のときの値である。文字の大きさ、行の高さ、上下の余白、アイコン、
+      本ページの寸法は、文字の大きさが 13 のときの値である。文字の大きさ、行の高さ、上下の余白、アイコン、検索欄の高さ、
+      見出し行のボタンと会話ペインのヘッダの戻るボタン(大きさとアイコン)、
       行の記号と時間の列の幅、
       ポップオーバーの幅と 2 列のときの一覧の列の既定の幅は、13 に対する比率で連動する。左右の余白、角の半径、
-      枠線の太さ、見出し行のボタンと会話ペインのヘッダの戻るボタン、ミニマップの幅は固定である</li>
+      枠線の太さ、ボタンの左右の間隔、ミニマップの幅は固定である</li>
     <li>フォントの切り替えは持たない — Markdown の描画により、コードは常にモノスペースで表示されるため</li>
   </ul>
 

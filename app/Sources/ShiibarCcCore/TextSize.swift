@@ -21,10 +21,6 @@ public struct TextSize: Equatable, Hashable, Sendable {
     /// §4.5 / §9: the popover width and the two-column list column width at
     /// the base size.
     public static let surfaceWidthAtBase: Double = 420
-    /// §4.5 / §9: the two-column threshold is the list column width plus
-    /// this (780pt at the base size). It is the right column's minimum
-    /// width, the same value as the window's minimum width.
-    public static let twoColumnPaneAllowance: Double = 360
 
     /// The body text size in points, always within `minimum...maximum`.
     public let points: Int
@@ -115,7 +111,4 @@ public struct TextSize: Equatable, Hashable, Sendable {
     /// §4.5 / §9: the default list column width in two columns, the same
     /// value as the popover width.
     public var listColumnWidth: Double { popoverWidth }
-
-    /// §4.5 / §9: the window shows two columns at or above this width.
-    public var twoColumnMinimumWidth: Double { listColumnWidth + Self.twoColumnPaneAllowance }
 }

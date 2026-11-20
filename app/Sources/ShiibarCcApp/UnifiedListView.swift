@@ -12,21 +12,17 @@ import Combine
 import ShiibarCcCore
 import SwiftUI
 
-/// Header row + list + footer. One column: the footer is the warning rows,
+/// List + footer (the header row above it is `HeaderRowView`, placed by
+/// `MainSurfaceView`). One column: the footer is the warning rows,
 /// the message line and the bottom panel (key hints + the selected row's
 /// buttons — §4.6 "bottom panel"). Two columns (the left column): the fixed
 /// footer with the key hints only (§4.5 "fixed footer").
 struct ListPageView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
-    /// One column with the detail page open: the page stays mounted
-    /// underneath it, and its views are no Tab / Shift-Tab targets (§4.5
-    /// "key operations").
-    let isCoveredByDetailPage: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderRowView(model: model, surface: surface, isCoveredByDetailPage: isCoveredByDetailPage)
             ListBodyView(model: model, surface: surface)
             if let panel = model.list.listBottomPanel {
                 PanelStatusLinesView(model: model)
@@ -43,6 +39,7 @@ struct ListPageView: View {
 /// One button of the header row, right of the search field (§4.5 "header
 /// row").
 enum HeaderRowButton: Equatable, Hashable {
+    case refresh
     case openInWindow
     case openInPopover
     case pin
@@ -51,6 +48,7 @@ enum HeaderRowButton: Equatable, Hashable {
     /// The tooltip; nil = none (the ⌄ chip has none).
     var tooltip: String? {
         switch self {
+        case .refresh: return RefreshButtonState.idle.tooltip
         case .openInWindow: return "Open in window"
         case .openInPopover: return "Open in popover"
         case .pin: return "Keep on top"
@@ -59,31 +57,146 @@ enum HeaderRowButton: Equatable, Hashable {
     }
 
     /// The buttons right of the search field, left to right (§4.5 "header
-    /// row"): popover = `Open in window` / ⌄; window = `Open in popover` /
-    /// pin / ⌄. Refresh is not here — it is the ⌄ menu's item and ⌘R.
+    /// row"): popover = Refresh / `Open in window` / ⌄; window = Refresh /
+    /// `Open in popover` / pin / ⌄. Refresh is always the leftmost.
     static func buttons(for surface: MainSurface) -> [HeaderRowButton] {
         switch surface {
-        case .popover: return [.openInWindow, .menu]
-        case .window: return [.openInPopover, .pin, .menu]
+        case .popover: return [.refresh, .openInWindow, .menu]
+        case .window: return [.refresh, .openInPopover, .pin, .menu]
         }
     }
 }
 
-/// Search field, then `HeaderRowButton.buttons(for:)`.
+/// The Refresh button's state (§4.5 "header row", §4.6 Refresh): enabled
+/// while idle; while a Refresh runs it is disabled (no second trigger),
+/// its tooltip reads `Refreshing…`, and its icon turns unless Reduce Motion
+/// is on.
+struct RefreshButtonState: Equatable {
+    let isEnabled: Bool
+    let tooltip: String
+    let spins: Bool
+    /// window-design.html: the disabled button is drawn at 40%, turning or
+    /// not.
+    let opacity: Double
+
+    static let idle = RefreshButtonState(isRefreshing: false, reduceMotion: false)
+
+    init(isRefreshing: Bool, reduceMotion: Bool) {
+        isEnabled = !isRefreshing
+        // The idle tooltip is the one place on screen that names the ⌘R shortcut (§4.5 "header row").
+        tooltip = isRefreshing ? "Refreshing\u{2026}" : "Refresh (\u{2318}R)"
+        spins = isRefreshing && !reduceMotion
+        opacity = isRefreshing ? 0.4 : 1
+    }
+
+    /// The accessibility name, whatever the state.
+    static let accessibilityLabel = "Refresh"
+}
+
+/// What the header row shows for a surface and column mode (§4.5 "header
+/// row"). In every case the search field fills the row up to the next
+/// element; in two columns the hit counter with ‹ › follows it while it is
+/// shown, so the field gets shorter by the counter and a gap. One and two
+/// columns differ only by the counter.
+struct HeaderRowLayout: Equatable {
+    enum Element: Hashable {
+        case trafficLightSpace
+        case searchField
+        case hitCounter
+        case button(HeaderRowButton)
+    }
+
+    let showsTrafficLightSpace: Bool
+    let showsHitCounter: Bool
+    let buttons: [HeaderRowButton]
+
+    /// `hitCounterAvailable`: the conversation pane shows a conversation
+    /// with hits (the counter's own condition, `hitCounterAvailable(...)`).
+    /// `fullScreen`: the window is in full screen, where no traffic lights
+    /// sit at the row's leading edge, so the search field starts at the
+    /// normal padding.
+    init(surface: MainSurface, columns: ColumnMode, hitCounterAvailable: Bool, fullScreen: Bool = false) {
+        showsTrafficLightSpace = surface == .window && !fullScreen
+        showsHitCounter = surface == .window && columns == .two && hitCounterAvailable
+        buttons = HeaderRowButton.buttons(for: surface)
+    }
+
+    /// Left to right.
+    var elements: [Element] {
+        var result: [Element] = []
+        if showsTrafficLightSpace { result.append(.trafficLightSpace) }
+        result.append(.searchField)
+        if showsHitCounter { result.append(.hitCounter) }
+        result += buttons.map(Element.button)
+        return result
+    }
+
+    /// The counter shows while a conversation's messages are shown with at
+    /// least one hit and no load error (§4.6 "hit navigation").
+    /// `conversationShowsMessages`: nil while the pane shows no
+    /// conversation.
+    static func hitCounterAvailable(conversationShowsMessages: Bool?, hitCount: Int, hasLoadError: Bool) -> Bool {
+        conversationShowsMessages == true && hitCount > 0 && !hasLoadError
+    }
+}
+
+/// The header row (`HeaderRowLayout`). The search field stays at one place
+/// in the view tree in every column mode, so a column switch never builds
+/// a new one (it would take the latest focus request and move the focus).
 struct HeaderRowView: View {
     @ObservedObject var model: MainSurfaceModel
     let surface: MainSurface
-    /// The list page is under the one-column detail page (`ListPageView`).
+    let columns: ColumnMode
+    /// The header row is under the one-column detail page.
     let isCoveredByDetailPage: Bool
     @State private var menuAnchor: NSView?
     @Environment(\.surfaceScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var layout: HeaderRowLayout {
+        HeaderRowLayout(
+            surface: surface,
+            columns: columns,
+            hitCounterAvailable: HeaderRowLayout.hitCounterAvailable(
+                conversationShowsMessages: conversationShowsMessages, hitCount: model.hits.count,
+                hasLoadError: model.paneLoadError != nil),
+            fullScreen: model.isFullScreen(surface))
+    }
+
+    private var conversationShowsMessages: Bool? {
+        guard case .conversation(let pane) = model.list.paneContent else { return nil }
+        return pane.showsMessages
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if surface == .window {
-                // The traffic lights sit here (hidden title bar, §4.5).
-                Color.clear.frame(width: SurfaceMetrics.trafficLightsWidth - 8, height: 1)
+        let layout = self.layout
+        // Rendered from `elements`, so the tested order is the drawn one.
+        // ForEach identifies each element by its value: the search field is
+        // `.searchField` in every column mode, so the same field stays when
+        // the hit counter comes and goes. The row's background drags the
+        // window from its empty parts (paddings, gaps, the traffic-light
+        // space); the search field takes its own clicks.
+        HStack(spacing: SurfaceMetrics.headerSpacing) {
+            ForEach(layout.elements, id: \.self) { element in
+                headerElement(element)
             }
+        }
+        .padding(.horizontal, SurfaceMetrics.headerSide)
+        .frame(height: scale.headerRowHeight)
+        // The window: equal space above and below, the row on the traffic
+        // lights (§4.5 "header row"). The popover keeps its own paddings.
+        .padding(.top, surface == .window ? scale.windowHeaderPadding : scale.headerTop)
+        .padding(.bottom, surface == .window ? scale.windowHeaderPadding : scale.headerBottom)
+        .background(surface == .window ? WindowDragArea() : nil)
+    }
+
+    @ViewBuilder
+    private func headerElement(_ element: HeaderRowLayout.Element) -> some View {
+        switch element {
+        case .trafficLightSpace:
+            // The traffic lights sit here (hidden title bar, §4.5).
+            Color.clear.frame(width: SurfaceMetrics.trafficLightsWidth - SurfaceMetrics.headerSpacing, height: 1)
+        case .searchField:
             ConversationsSearchField(
                 text: $model.query,
                 isEnabled: !model.list.isFullBuild,
@@ -91,31 +204,57 @@ struct HeaderRowView: View {
                 isKeyViewLoopMember: !isCoveredByDetailPage,
                 scale: scale
             )
-            // window-design.html `.search`: 24pt tall at 13, level with the
-            // 24pt header buttons; it follows the text size, the buttons do
-            // not, and the row centers both (§4.5 "text size").
+            // window-design.html `.search`: 28pt tall at 13; it and the
+            // buttons (24pt at 13) follow the text size, and the row
+            // centers both (§4.5 "text size").
+            // The field fills the row up to the next element and is the
+            // part that gives way, so the counter and the buttons keep
+            // their sizes and stay inside the window.
+            .frame(minWidth: 0, maxWidth: .infinity)
             .frame(height: scale.searchFieldHeight)
             // window-design.html `.search.dis`: faded while a full index
             // build disables the field (§4.6).
             .opacity(model.list.isFullBuild ? 0.5 : 1)
-            ForEach(HeaderRowButton.buttons(for: surface), id: \.self) { button in
-                headerButton(button)
+        case .hitCounter:
+            // §4.6 "hit navigation": the same counter and ‹ › as the
+            // one-column find bar.
+            HStack(spacing: SurfaceMetrics.headerSpacing) {
+                Text(model.hitCounterText ?? "")
+                    .foregroundStyle(SurfaceColors.secondary)
+                    .fixedSize()
+                FindNavigationControl(
+                    onPrevious: { model.navigateToOlderHit() },
+                    onNext: { model.navigateToNewerHit() }
+                )
+                .fixedSize()
             }
+            .font(.system(size: scale.findBarFont))
+        case .button(let button):
+            headerButton(button)
         }
-        .padding(.horizontal, SurfaceMetrics.headerSide)
-        .frame(height: scale.headerRowHeight)
-        .padding(.top, surface == .window ? scale.windowHeaderTop : scale.headerTop)
-        .padding(.bottom, scale.headerBottom)
-        .background(surface == .window ? WindowDragArea() : nil)
     }
 
     @ViewBuilder
     private func headerButton(_ button: HeaderRowButton) -> some View {
         switch button {
+        case .refresh:
+            // The same Refresh as ⌘R (§4.6). The turning icon is a layer
+            // animation inside its own view, so the row is not laid out
+            // again while it turns.
+            let state = RefreshButtonState(isRefreshing: model.isRefreshing, reduceMotion: reduceMotion)
+            Button { model.refresh() } label: {
+                RefreshIconView(spins: state.spins, iconSize: scale.headerIcon, lineWidth: scale.headerIconLine)
+                    .frame(width: scale.headerButton, height: scale.headerButton)
+            }
+            .buttonStyle(HoverChipButtonStyle(isEnabled: state.isEnabled))
+            .opacity(state.opacity)
+            .disabled(!state.isEnabled)
+            .help(state.tooltip)
+            .accessibilityLabel(RefreshButtonState.accessibilityLabel)
         case .openInWindow:
             Button { model.openInWindowClicked() } label: {
-                SurfaceIconView(icon: .window)
-                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+                SurfaceIconView(icon: .window, size: scale.headerIcon, lineWidth: scale.headerIconLine)
+                    .frame(width: scale.headerButton, height: scale.headerButton)
             }
             .buttonStyle(HoverChipButtonStyle())
             .foregroundStyle(SurfaceColors.secondary)
@@ -124,8 +263,8 @@ struct HeaderRowView: View {
             // window-design.html `i-popover`: the same size, line width and
             // grounds as `Open in window`.
             Button { model.openInPopoverClicked() } label: {
-                SurfaceIconView(icon: .popover)
-                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+                SurfaceIconView(icon: .popover, size: scale.headerIcon, lineWidth: scale.headerIconLine)
+                    .frame(width: scale.headerButton, height: scale.headerButton)
             }
             .buttonStyle(HoverChipButtonStyle())
             .foregroundStyle(SurfaceColors.secondary)
@@ -136,8 +275,8 @@ struct HeaderRowView: View {
             // accent fill on an accent ground (window-design.html
             // `i-pin`, `.hb.on`).
             Button { model.keepOnTopClicked() } label: {
-                SurfaceIconView(icon: .pin, lineWidth: 1.2, filled: model.keepOnTop)
-                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+                SurfaceIconView(icon: .pin, size: scale.headerIcon, lineWidth: scale.pinIconLine, filled: model.keepOnTop)
+                    .frame(width: scale.headerButton, height: scale.headerButton)
             }
             .buttonStyle(HoverChipButtonStyle(onTint: model.keepOnTop ? Color.accentColor : nil))
             .foregroundStyle(model.keepOnTop ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(SurfaceColors.secondary))
@@ -146,8 +285,8 @@ struct HeaderRowView: View {
             Button {
                 if let menuAnchor { model.menuClicked(anchor: menuAnchor, surface: surface) }
             } label: {
-                SurfaceIconView(icon: .chevronDown, lineWidth: 1.6)
-                    .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+                SurfaceIconView(icon: .chevronDown, size: scale.headerIcon, lineWidth: scale.menuChevronLine)
+                    .frame(width: scale.headerButton, height: scale.headerButton)
             }
             .buttonStyle(HoverChipButtonStyle(restingOpacity: 0.10))
             .foregroundStyle(SurfaceColors.secondary)
@@ -1364,4 +1503,122 @@ struct WholeItemsRow: Layout {
             if fits { x += size.width + spacing }
         }
     }
+}
+
+/// The Refresh icon (`SurfaceIcon.refresh` at the header icon size and line
+/// width, in the secondary label color) on a layer of its own: while
+/// `spins`, the layer turns clockwise once a second about the icon's
+/// center; when it stops, the icon is back at rest.
+struct RefreshIconView: NSViewRepresentable {
+    let spins: Bool
+    let iconSize: CGFloat
+    let lineWidth: CGFloat
+
+    func makeNSView(context: Context) -> RefreshIconNSView {
+        RefreshIconNSView()
+    }
+
+    func updateNSView(_ nsView: RefreshIconNSView, context: Context) {
+        nsView.iconSize = iconSize
+        nsView.lineWidth = lineWidth
+        nsView.spins = spins
+    }
+}
+
+final class RefreshIconNSView: NSView {
+    /// §9: one turn per second.
+    static let turnSeconds: CFTimeInterval = 1
+    static let animationKey = "cc.shiibar.refresh.spin"
+    private let shape = CAShapeLayer()
+    /// The icon's side and line width (the header icon's, at the text size).
+    var iconSize: CGFloat = 15 {
+        didSet { if iconSize != oldValue { updateShapeGeometry() } }
+    }
+    var lineWidth: CGFloat = 1.4 {
+        didSet { if lineWidth != oldValue { updateShapeGeometry() } }
+    }
+
+    var spins = false {
+        didSet {
+            guard spins != oldValue else { return }
+            updateSpin()
+        }
+    }
+
+    /// The icon's path is drawn with y down.
+    override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        shape.fillColor = nil
+        shape.lineWidth = lineWidth
+        shape.lineCap = .round
+        shape.lineJoin = .round
+        layer?.addSublayer(shape)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layout() {
+        super.layout()
+        updateShapeGeometry()
+    }
+
+    /// The icon layer at the icon size, centered in the view (the turn is
+    /// about its center). Set without implicit animations, so a text size
+    /// change does not animate the icon's size.
+    private func updateShapeGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let rect = CGRect(x: 0, y: 0, width: iconSize, height: iconSize)
+        shape.bounds = rect
+        shape.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        shape.path = SurfaceIcon.refresh.path(in: rect).cgPath
+        shape.lineWidth = lineWidth
+        CATransaction.commit()
+    }
+
+    /// The icon layer's bounds and position (for tests).
+    var iconLayerBounds: CGRect { shape.bounds }
+    var iconLayerPosition: CGPoint { shape.position }
+
+    /// The color resolves for the current light / dark appearance.
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            shape.strokeColor = NSColor.secondaryLabelColor.cgColor
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // An animation does not survive leaving the window.
+        updateSpin()
+    }
+
+    /// The icon passes clicks to the button around it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    private func updateSpin() {
+        shape.removeAnimation(forKey: Self.animationKey)
+        guard spins, window != nil else { return }
+        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+        animation.fromValue = 0
+        // In this flipped view a positive angle turns clockwise on screen.
+        animation.toValue = 2 * Double.pi
+        animation.duration = Self.turnSeconds
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+        shape.add(animation, forKey: Self.animationKey)
+    }
+
+    /// Whether the turning animation is installed (for tests).
+    var isAnimating: Bool { shape.animation(forKey: Self.animationKey) != nil }
 }

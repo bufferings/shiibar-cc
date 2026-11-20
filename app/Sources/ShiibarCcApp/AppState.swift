@@ -71,6 +71,9 @@ final class AppState: ObservableObject {
     var willOpenAuxiliaryWindow: () -> Void = {}
     /// Set by `MainSurfaceController`: Dock click / reopen raises the window.
     var raiseMainWindow: () -> Void = {}
+    /// Set by `MainSurfaceController`: shows the About panel and gives it
+    /// the level the window pin calls for (`AuxiliaryWindowLevel`).
+    var showAboutPanel: () -> Void = { NSApp.orderFrontStandardAboutPanel(nil) }
 
     init(helpersDirectory: URL?) {
         self.helpersDirectory = helpersDirectory

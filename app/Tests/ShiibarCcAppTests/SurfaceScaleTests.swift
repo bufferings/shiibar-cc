@@ -9,7 +9,14 @@ final class SurfaceScaleTests: XCTestCase {
     private static let valuesAtBase: [(String, KeyPath<SurfaceScale, CGFloat>, CGFloat)] = [
         ("headerTop", \.headerTop, 10),
         ("headerBottom", \.headerBottom, 8),
-        ("searchFieldHeight", \.searchFieldHeight, 24),
+        ("searchFieldHeight", \.searchFieldHeight, 28),
+        ("headerButton", \.headerButton, 24),
+        ("headerIcon", \.headerIcon, 15),
+        ("headerIconLine", \.headerIconLine, 1.4),
+        ("pinIconLine", \.pinIconLine, 1.2),
+        ("menuChevronLine", \.menuChevronLine, 1.6),
+        ("headerRowHeight", \.headerRowHeight, 28),
+        ("windowDetailPaneHeaderRowHeight", \.windowDetailPaneHeaderRowHeight, 32),
         ("searchFieldFont", \.searchFieldFont, 12),
         ("searchIcon", \.searchIcon, 13),
         ("searchIconLine", \.searchIconLine, 1.4),
@@ -87,10 +94,11 @@ final class SurfaceScaleTests: XCTestCase {
     }
 
     func testEveryValueFollowsTheRatioUnrounded() {
-        let ratio: CGFloat = 18.0 / 13.0
-        let large = SurfaceScale(ratio: ratio)
-        for (name, path, value) in Self.valuesAtBase {
-            XCTAssertEqual(large[keyPath: path], value * ratio, accuracy: 1e-9, name)
+        for ratio: CGFloat in [9.0 / 13.0, 18.0 / 13.0] {
+            let scale = SurfaceScale(ratio: ratio)
+            for (name, path, value) in Self.valuesAtBase {
+                XCTAssertEqual(scale[keyPath: path], value * ratio, accuracy: 1e-9, "\(name) at \(ratio * 13)")
+            }
         }
     }
 
@@ -130,22 +138,52 @@ final class SurfaceScaleTests: XCTestCase {
         XCTAssertEqual(SurfaceMetrics.headerSide, 10)
         XCTAssertEqual(SurfaceMetrics.windowTrafficLightCenter, 26)
         XCTAssertEqual(SurfaceMetrics.trafficLightsWidth, 78)
-        XCTAssertEqual(SurfaceMetrics.headerButton, 24)
+        XCTAssertEqual(SurfaceMetrics.headerSpacing, 8, "`.hrow` gap")
+        XCTAssertEqual(SurfaceMetrics.windowHeaderMinimumPadding, 6)
     }
 
-    func testWindowHeaderTopsKeepTheirCenters() {
-        let base = SurfaceScale.base
-        XCTAssertEqual(base.headerRowHeight, 24)
-        XCTAssertEqual(base.windowHeaderTop, 14)
-        XCTAssertEqual(base.windowPaneHeaderTop(isDetailPage: true), 10)
-        XCTAssertEqual(base.windowPaneHeaderTop(isDetailPage: false), 11)
+    /// The search field is 28pt at 13 and follows the text size.
+    func testSearchFieldHeightAtEachTextSize() {
         for points in [9.0, 13.0, 18.0] {
-            let scale = SurfaceScale(ratio: CGFloat(points / 13))
-            XCTAssertEqual(scale.windowHeaderTop + scale.headerRowHeight / 2, 26, accuracy: 1e-9, "\(points)")
-            XCTAssertEqual(scale.windowPaneHeaderTop(isDetailPage: false) + scale.paneTitleBlockHeight / 2, 27,
+            XCTAssertEqual(SurfaceScale(ratio: CGFloat(points / 13)).searchFieldHeight, CGFloat(28 * points / 13),
                            accuracy: 1e-9, "\(points)")
         }
-        // At 9 the 24pt header buttons are taller than the search field.
-        XCTAssertEqual(SurfaceScale(ratio: 9.0 / 13.0).headerRowHeight, 24)
+        XCTAssertEqual(SurfaceScale(ratio: 9.0 / 13.0).searchFieldHeight, 252.0 / 13.0, accuracy: 1e-9)
+    }
+
+    /// The window header row (search field and buttons, both scaled) is
+    /// centered on the traffic lights with equal space above and below:
+    /// 52pt in all at every text size here, since the row stays under
+    /// 52 − 2 × 6.
+    func testWindowHeaderIsSymmetricAboutTheTrafficLights() {
+        let cases: [(Double, CGFloat)] = [(9, 26 - 14 * 9 / 13), (13, 12), (18, 26 - 14 * 18 / 13)]
+        for (points, padding) in cases {
+            let scale = SurfaceScale(ratio: CGFloat(points / 13))
+            XCTAssertEqual(scale.headerRowHeight, max(scale.searchFieldHeight, scale.headerButton), "\(points)")
+            XCTAssertEqual(scale.windowHeaderPadding, padding, accuracy: 1e-9, "\(points)")
+            XCTAssertEqual(scale.windowHeaderPadding + scale.headerRowHeight / 2, 26, accuracy: 1e-9,
+                           "\(points): centered on the traffic lights")
+            XCTAssertEqual(2 * scale.windowHeaderPadding + scale.headerRowHeight, 52, accuracy: 1e-9,
+                           "\(points): 52pt header")
+        }
+    }
+
+    /// The detail page's header row (32pt title block at 13) follows the
+    /// same rule; at 18 (44.3pt) the 6pt minimum holds and the header grows.
+    func testWindowDetailPaneHeaderFollowsTheSameRule() {
+        let base = SurfaceScale.base
+        XCTAssertEqual(base.windowDetailPaneHeaderPadding, 10)
+        let small = SurfaceScale(ratio: 9.0 / 13.0)
+        XCTAssertEqual(small.windowDetailPaneHeaderPadding, 26 - 16 * 9.0 / 13.0, accuracy: 1e-9)
+        let large = SurfaceScale(ratio: 18.0 / 13.0)
+        XCTAssertEqual(large.windowDetailPaneHeaderRowHeight, 32 * 18.0 / 13.0, accuracy: 1e-9)
+        XCTAssertEqual(large.windowDetailPaneHeaderPadding, 6, "the minimum: the header grows")
+        XCTAssertGreaterThan(2 * large.windowDetailPaneHeaderPadding + large.windowDetailPaneHeaderRowHeight, 52)
+    }
+
+    func testWindowHeaderPaddingRule() {
+        XCTAssertEqual(SurfaceScale.windowHeaderPadding(contentHeight: 28), 12)
+        XCTAssertEqual(SurfaceScale.windowHeaderPadding(contentHeight: 40), 6, "exactly the minimum")
+        XCTAssertEqual(SurfaceScale.windowHeaderPadding(contentHeight: 50), 6, "taller: the minimum, the header grows")
     }
 }

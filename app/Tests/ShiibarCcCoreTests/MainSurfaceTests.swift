@@ -31,6 +31,41 @@ final class MainSurfaceTests: XCTestCase {
         XCTAssertEqual(MainSurfaceDefaultsKeys.surfaceForm, "cc.shiibar.surfaceForm")
     }
 
+    // MARK: - Window minimum size (§9)
+
+    /// Width and height clamp independently: below the minimum rises to it,
+    /// at or above it stays.
+    func testClampedFrameSize() {
+        let minimum = CGSize(width: 360, height: 352)
+        let cases: [(String, CGSize, CGSize)] = [
+            ("both below", CGSize(width: 80, height: 90), CGSize(width: 360, height: 352)),
+            ("width below", CGSize(width: 359, height: 500), CGSize(width: 360, height: 500)),
+            ("height below", CGSize(width: 500, height: 351), CGSize(width: 500, height: 352)),
+            ("at the minimum", CGSize(width: 360, height: 352), CGSize(width: 360, height: 352)),
+            ("above", CGSize(width: 900, height: 700), CGSize(width: 900, height: 700)),
+        ]
+        for (name, proposed, expected) in cases {
+            XCTAssertEqual(MainWindowMetrics.clampedFrameSize(proposed, minimumFrameSize: minimum), expected, name)
+        }
+    }
+
+    /// A remembered frame below the minimum grows to it with its top-left
+    /// corner in place (AppKit's origin is the bottom left); one that fits
+    /// stays as it is.
+    func testFrameRaisedToMinimumKeepsTheTopLeftCorner() {
+        let minimum = CGSize(width: 360, height: 352)
+        let small = CGRect(x: 100, y: 500, width: 90, height: 200)
+        let raised = MainWindowMetrics.frameRaisedToMinimum(small, minimumFrameSize: minimum)
+        XCTAssertEqual(raised.size, minimum)
+        XCTAssertEqual(raised.minX, small.minX)
+        XCTAssertEqual(raised.maxY, small.maxY, "the top edge stays")
+        let narrow = CGRect(x: 10, y: 20, width: 200, height: 640)
+        XCTAssertEqual(MainWindowMetrics.frameRaisedToMinimum(narrow, minimumFrameSize: minimum),
+                       CGRect(x: 10, y: 20, width: 360, height: 640))
+        let fits = CGRect(x: 10, y: 20, width: 420, height: 640)
+        XCTAssertEqual(MainWindowMetrics.frameRaisedToMinimum(fits, minimumFrameSize: minimum), fits)
+    }
+
     // MARK: - Surface form (§4.5 "surface form")
 
     func testSurfaceFormDefaultsToThePopover() {
@@ -59,9 +94,9 @@ final class MainSurfaceTests: XCTestCase {
     }
 
     func testColumnModeThreshold() {
-        let cases: [(Double, ColumnMode)] = [(360, .one), (779.5, .one), (780, .two), (1400, .two)]
+        let cases: [(Double, ColumnMode)] = [(360, .one), (599.5, .one), (600, .two), (780, .two), (1400, .two)]
         for (width, mode) in cases {
-            XCTAssertEqual(ColumnMode.forWindowWidth(width, textSize: .default), mode, "\(width)")
+            XCTAssertEqual(ColumnMode.forWindowWidth(width), mode, "\(width)")
         }
     }
 

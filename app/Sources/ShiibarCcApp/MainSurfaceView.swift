@@ -21,8 +21,13 @@ struct MainSurfaceView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            // In full screen a title bar the system keeps on screen would
+            // cover the header row: the content starts below it (0 in every
+            // other case).
+            let topInset = CGFloat(model.topInset(for: surface))
             content(width: geometry.size.width)
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                .frame(width: geometry.size.width, height: max(0, geometry.size.height - topInset))
+                .padding(.top, topInset)
                 .onAppear { reportWidth(geometry.size.width) }
                 .onChange(of: geometry.size.width) { _, width in reportWidth(width) }
         }
@@ -32,8 +37,7 @@ struct MainSurfaceView: View {
 
     private func reportWidth(_ width: CGFloat) {
         guard surface == .window else { return }
-        // The model decides the column mode; it decides again when the text
-        // size moves the threshold (§9).
+        // The model decides the column mode from the width (§9).
         model.windowWidthChanged(Double(width))
     }
 
@@ -50,15 +54,17 @@ struct MainSurfaceView: View {
     /// This view sets the environment value, so it computes its own copy.
     private var scale: SurfaceScale { SurfaceScale(ratio: CGFloat(textSize.size.ratio)) }
 
-    /// One layout for both column modes, so the list page keeps one view
-    /// identity when the column count changes (§4.5 "when the width
-    /// changes": the key target stays). A list page built anew would bring a
-    /// new search field, and a new field honors the surface's latest focus
-    /// request on its first update (`ConversationsSearchField`), which would
-    /// move the focus to it; the list's scroll position also stays.
+    /// One layout for both column modes, so the header row and the list page
+    /// keep their view identities when the column count changes (§4.5 "when
+    /// the width changes": the key target stays). A header row built anew
+    /// would bring a new search field, and a new field honors the surface's
+    /// latest focus request on its first update (`ConversationsSearchField`),
+    /// which would move the focus to it; a list page built anew would lose
+    /// the list's scroll position.
     private func content(width: CGFloat) -> some View {
-        // One column: the list page stays mounted underneath (its scroll
-        // position and search field survive), the detail page slides over it.
+        // One column: the header row and the list page stay mounted
+        // underneath (the search field and the scroll position survive), the
+        // detail page slides over them.
         let detailPane: ConversationPaneModel? = {
             guard columns == .one, model.list.columns == .one,
                   case .conversation(let pane) = model.list.paneContent else { return nil }
@@ -69,8 +75,18 @@ struct MainSurfaceView: View {
             columns: columns,
             textSize: textSize.size,
             windowWidth: width,
+            header: {
+                // One column: the list page's top row, covered by the detail
+                // page with it. Two columns: across the window, above both
+                // columns (§4.5 "header row").
+                HeaderRowView(model: model, surface: surface, columns: columns,
+                              isCoveredByDetailPage: detailPane != nil)
+                    .background(listBackground)
+                    .allowsHitTesting(detailPane == nil)
+                    .accessibilityHidden(detailPane != nil)
+            },
             listPage: {
-                ListPageView(model: model, surface: surface, isCoveredByDetailPage: detailPane != nil)
+                ListPageView(model: model, surface: surface)
                     .background(listBackground)
                     .allowsHitTesting(detailPane == nil)
                     .accessibilityHidden(detailPane != nil)
@@ -113,19 +129,23 @@ struct MainSurfaceView: View {
 
 }
 
-/// The columns of the surface (§4.5). One column: the list page at the full
-/// width, with the detail page (when open) over it. Two columns: the list
-/// column, the 1pt boundary line, and the pane; the boundary's drag area
-/// lies over both columns. The list page sits at the same place in the view
-/// tree in both modes, so it keeps its identity — its search field, focus,
-/// scroll position and selection — when the column count or its width
-/// changes. Only this view observes the column width, so a drag re-lays out
-/// the columns without re-evaluating the rest of the surface.
-private struct SurfaceColumns<ListPage: View, RightColumn: View, DetailPage: View>: View {
+/// The columns of the surface (§4.5). The header row is on top at the full
+/// width in both modes (in two columns with a line under it across the
+/// window). One column: the list page at the full width, with the detail
+/// page (when open) over it and the header. Two columns: the list column,
+/// the 1pt boundary line, and the pane, under the header; the boundary's
+/// drag area lies over both columns below the header. The header and the
+/// list page sit at the same places in the view tree in both modes, so they
+/// keep their identity — the search field, focus, scroll position and
+/// selection — when the column count or the column width changes. Only
+/// this view observes the column width, so a drag re-lays out the columns
+/// without re-evaluating the rest of the surface.
+private struct SurfaceColumns<Header: View, ListPage: View, RightColumn: View, DetailPage: View>: View {
     @ObservedObject var columnWidth: ListColumnWidthStore
     let columns: ColumnMode
     let textSize: TextSize
     let windowWidth: CGFloat
+    @ViewBuilder let header: Header
     @ViewBuilder let listPage: ListPage
     @ViewBuilder let rightColumn: RightColumn
     @ViewBuilder let detailPage: DetailPage
@@ -136,31 +156,38 @@ private struct SurfaceColumns<ListPage: View, RightColumn: View, DetailPage: Vie
             ? CGFloat(columnWidth.shownWidth(windowWidth: Double(windowWidth), textSize: textSize))
             : windowWidth
         ZStack {
-            HStack(spacing: 0) {
-                listPage
-                    .frame(width: listWidth)
+            VStack(spacing: 0) {
+                header
+                    .frame(width: windowWidth)
                 if twoColumns {
-                    Rectangle().fill(SurfaceColors.line).frame(width: 1)
-                    rightColumn
+                    Rectangle().fill(SurfaceColors.line).frame(height: 1)
                 }
-            }
-            // §4.5 / §9: the drag area is centered on the boundary line (4pt
-            // on each side of its center) and sits above both columns, so it
-            // takes the mouse before the list, the pane, or the header row's
-            // window drag. Outside its 8pt nothing is covered: the leading
-            // padding has no content and is not hit-tested.
-            .overlay(alignment: .topLeading) {
-                if twoColumns {
-                    ColumnBoundaryDragArea(
-                        onBegin: { columnWidth.beginDrag(windowWidth: Double(windowWidth), textSize: textSize) },
-                        onDrag: { delta in columnWidth.updateDrag(delta: delta, windowWidth: Double(windowWidth)) },
-                        onEnd: { columnWidth.endDrag() },
-                        onCancel: { columnWidth.cancelDrag() },
-                        onDoubleClick: { columnWidth.resetToDefault() }
-                    )
-                    .frame(width: CGFloat(ListColumnWidth.dragAreaWidth))
-                    .frame(maxHeight: .infinity)
-                    .padding(.leading, listWidth + 0.5 - CGFloat(ListColumnWidth.dragAreaWidth) / 2)
+                HStack(spacing: 0) {
+                    listPage
+                        .frame(width: listWidth)
+                    if twoColumns {
+                        Rectangle().fill(SurfaceColors.line).frame(width: 1)
+                        rightColumn
+                    }
+                }
+                // §4.5 / §9: the drag area is centered on the boundary line (4pt
+                // on each side of its center), starts below the header row, and
+                // sits above both columns, so it takes the mouse before the list
+                // or the pane. Outside its 8pt nothing is covered: the leading
+                // padding has no content and is not hit-tested.
+                .overlay(alignment: .topLeading) {
+                    if twoColumns {
+                        ColumnBoundaryDragArea(
+                            onBegin: { columnWidth.beginDrag(windowWidth: Double(windowWidth), textSize: textSize) },
+                            onDrag: { delta in columnWidth.updateDrag(delta: delta, windowWidth: Double(windowWidth)) },
+                            onEnd: { columnWidth.endDrag() },
+                            onCancel: { columnWidth.cancelDrag() },
+                            onDoubleClick: { columnWidth.resetToDefault() }
+                        )
+                        .frame(width: CGFloat(ListColumnWidth.dragAreaWidth))
+                        .frame(maxHeight: .infinity)
+                        .padding(.leading, listWidth + 0.5 - CGFloat(ListColumnWidth.dragAreaWidth) / 2)
+                    }
                 }
             }
             detailPage

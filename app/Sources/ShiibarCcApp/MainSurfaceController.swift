@@ -38,6 +38,14 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// operations"), the key hints and the bottom panel's buttons.
     private var popoverFocusObservation: NSKeyValueObservation?
     private var windowFocusObservation: NSKeyValueObservation?
+    /// The main window's `contentLayoutRect`: the title bar height over the
+    /// full-screen content follows it (`WindowFullScreenInset`).
+    private var contentLayoutObservation: NSKeyValueObservation?
+    /// The window has finished entering full screen and has not started
+    /// leaving it: only then does a title bar over the content count as
+    /// the top inset (during a transition the frame and the title bar are
+    /// still changing).
+    private var fullScreenSettled = false
     /// When the popover last closed: the status-item click that caused a
     /// transient close arrives right after it and must not reopen it.
     private var lastPopoverClose: Date = .distantPast
@@ -58,9 +66,15 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// `refreshTrayImage`).
     private var trayImageGate = TrayImageGate()
     /// Opens the Settings / Setup Check `Window` scenes (captured from a
-    /// SwiftUI view — see `SceneOpenerView`).
+    /// SwiftUI view on whichever surface appeared first — see
+    /// `surfaceRootView`).
     var openSceneWindow: ((String) -> Void)?
     private lazy var menuHandler = HeaderMenuHandler(controller: self)
+    /// Applies the pin's level to Settings / Setup Check as they become key.
+    private var auxiliaryKeyObserver: NSObjectProtocol?
+    /// The About panel, once shown: the panel the About call brought on
+    /// screen (AppKit gives it no public handle).
+    private weak var aboutPanel: NSWindow?
     /// Closes the popover when the app stops being active (§4.5 "popover",
     /// §8.58).
     private var deactivationCloser: PopoverDeactivationCloser?
@@ -90,7 +104,22 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         model.onCloseWindowForPopover = { [weak self] in self?.closeWindowForPopover() }
         model.onShowPopoverFromWindow = { [weak self] in self?.showPopoverFromWindow() }
         model.onPresentMenu = { [weak self] anchor, surface in self?.presentMenu(anchor: anchor, surface: surface) }
-        model.onKeepOnTopChanged = { [weak self] _ in self?.applyWindowLevel() }
+        model.onKeepOnTopChanged = { [weak self] _ in
+            self?.applyWindowLevel()
+            self?.applyAuxiliaryWindowLevels()
+        }
+        state.showAboutPanel = { [weak self] in self?.showAboutPanel() }
+        // Settings / Setup Check open from the ⌄ menus, the app menu and ⌘,
+        // and SwiftUI can create them after `openWindow` returns: each one
+        // takes the pin's level whenever it becomes key.
+        auxiliaryKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: nil
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let window = notification.object as? NSWindow else { return }
+                self.applyAuxiliaryLevel(to: window)
+            }
+        }
         model.onFocusList = { [weak self] surface in self?.focusList(on: surface) }
         model.onMakeSurfaceKey = { [weak self] surface in self?.makeKey(surface) }
         state.closeKeySurface = { [weak self] in self?.closeKeySurface() }
@@ -221,8 +250,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private func setUpPopover() {
         let initialHeight = PopoverHeight.heightToOpen(stored: storedPopoverHeight(), maximum: maximumPopoverHeight())
         let size = NSSize(width: popoverWidth(model.textSize.size), height: initialHeight)
-        let hosting = NSHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .popover)
-            .background(SceneOpenerView { [weak self] open in self?.openSceneWindow = open }))
+        let hosting = NSHostingView(rootView: Self.surfaceRootView(model: model, surface: .popover) { [weak self] open in
+            self?.openSceneWindow = open
+        })
         hosting.sizingOptions = []
         // Same layout contract as the window: no safe area reaches the views.
         hosting.safeAreaRegions = []
@@ -366,6 +396,10 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         self.window = window
         applyWindowLevel()
         if opening {
+            // The model forgot the full-screen state when the window closed;
+            // read it from the window again (and the toolbar with it).
+            syncFullScreenState(of: window)
+            raiseFrameToMinimum(window)
             // The open itself is the trigger (§4.6); the key event that
             // follows must not run index -> search a second time.
             skipNextWindowKey = true
@@ -385,6 +419,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         if focus == .initial {
             model.requestInitialFocus()
         }
+        // Open Settings / Setup Check / About now float over the pinned
+        // window.
+        applyAuxiliaryWindowLevels()
     }
 
     /// `Open in popover`, first step (§4.5 "header row"): close the window
@@ -441,9 +478,14 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // §4.5: a window on another Space moves to the current one when
         // raised (no Space switch); it never joins all Spaces.
         window.collectionBehavior = [.moveToActiveSpace]
-        window.contentMinSize = NSSize(width: MainWindowMetrics.minimumWidth, height: MainWindowMetrics.minimumHeight)
+        // Kept for AppKit's own resize limits; the hosting content view
+        // resets it to zero once the window is shown, so
+        // `windowWillResize(_:to:)` enforces the minimum.
+        window.contentMinSize = Self.minimumContentSize
         window.delegate = self
-        let hosting = FirstMouseHostingView(rootView: MainSurfaceView(model: model, textSize: model.textSize, surface: .window))
+        let hosting = FirstMouseHostingView(rootView: Self.surfaceRootView(model: model, surface: .window) { [weak self] open in
+            self?.openSceneWindow = open
+        })
         hosting.sizingOptions = []
         // The layout places the header row under the hidden title bar itself
         // (`SurfaceMetrics.windowTrafficLightCenter`). Without this, the
@@ -459,12 +501,146 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         }
         window.setFrameAutosaveName(MainSurfaceDefaultsKeys.mainWindowFrameAutosaveName)
         windowFocusObservation = observeFocus(of: window, surface: .window)
+        contentLayoutObservation = window.observe(\.contentLayoutRect) { [weak self] window, _ in
+            MainActor.assumeIsolated { self?.reportTopInset(of: window) }
+        }
         return window
+    }
+
+    /// The root view of either surface: the shared layout plus the
+    /// zero-size `SceneOpenerView` that hands over SwiftUI's `openWindow`
+    /// for the ⌄ menu's Settings… / Setup Check…. Both surfaces carry it,
+    /// because either can be the first to appear after launch (the window
+    /// form opens the window without the popover ever showing).
+    static func surfaceRootView(
+        model: MainSurfaceModel,
+        surface: MainSurface,
+        onSceneOpener: @escaping (@escaping (String) -> Void) -> Void
+    ) -> some View {
+        MainSurfaceView(model: model, textSize: model.textSize, surface: surface)
+            .background(SceneOpenerView(onResolve: onSceneOpener))
     }
 
     /// §4.5: the pin changes the window level only.
     private func applyWindowLevel() {
         window?.level = model.keepOnTop ? .floating : .normal
+    }
+
+    /// Settings, Setup Check and the About panel float while the pin is ON
+    /// and the window is open, so they open in front of the pinned window
+    /// (`AuxiliaryWindowLevel`).
+    /// `windowOpen` overrides the window's state for the close path: in
+    /// `windowWillClose` the window is still on screen.
+    private func applyAuxiliaryWindowLevels(windowOpen: Bool? = nil) {
+        for window in NSApp.windows {
+            applyAuxiliaryLevel(to: window, windowOpen: windowOpen)
+        }
+    }
+
+    private func applyAuxiliaryLevel(to window: NSWindow, windowOpen: Bool? = nil) {
+        let isAboutPanel = aboutPanel.map { $0 === window } ?? false
+        guard AuxiliaryWindowLevel.isAuxiliary(title: window.title, isAboutPanel: isAboutPanel) else { return }
+        let level = AuxiliaryWindowLevel.level(keepOnTop: model.keepOnTop, windowOpen: windowOpen ?? isWindowOpen)
+        if window.level != level { window.level = level }
+    }
+
+    /// Shows the standard About panel (⌄ menu and app menu) with the pin's
+    /// level. The panel is the window the call brings on screen (or, when it
+    /// was already shown, the one remembered from before).
+    private func showAboutPanel() {
+        let visibleBefore = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+        NSApp.orderFrontStandardAboutPanel(nil)
+        if let shown = NSApp.windows.first(where: { $0.isVisible && !visibleBefore.contains(ObjectIdentifier($0)) }) {
+            aboutPanel = shown
+        }
+        if let aboutPanel {
+            applyAuxiliaryLevel(to: aboutPanel)
+        }
+    }
+
+    /// §9: the minimum content size of the window.
+    static let minimumContentSize = NSSize(width: MainWindowMetrics.minimumWidth, height: MainWindowMetrics.minimumHeight)
+
+    /// The frame size of `minimumContentSize` for this window's style.
+    private static func minimumFrameSize(of window: NSWindow) -> NSSize {
+        window.frameRect(forContentRect: NSRect(origin: .zero, size: minimumContentSize)).size
+    }
+
+    /// §9: a user resize never goes below the minimum size.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard sender === window else { return frameSize }
+        return MainWindowMetrics.clampedFrameSize(frameSize, minimumFrameSize: Self.minimumFrameSize(of: sender))
+    }
+
+    /// A frame smaller than the minimum (a remembered one) grows to it,
+    /// keeping the top-left corner.
+    private func raiseFrameToMinimum(_ window: NSWindow) {
+        let frame = MainWindowMetrics.frameRaisedToMinimum(window.frame, minimumFrameSize: Self.minimumFrameSize(of: window))
+        if frame != window.frame { window.setFrame(frame, display: false) }
+    }
+
+    // MARK: - Full screen
+
+    /// The layout switches as the transition starts, so the header row
+    /// already has its full-screen form while the window grows and no
+    /// change is left for the moment the animation ends. The toolbar is
+    /// hidden for the same span: in full screen the system draws it as an
+    /// opaque band over the header row.
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        guard let window, (notification.object as? NSWindow) === window else { return }
+        applyFullScreen(true, to: window, settled: false)
+    }
+
+    /// The title bar over the content is measured once the window has its
+    /// full-screen frame.
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        guard let window, (notification.object as? NSWindow) === window else { return }
+        applyFullScreen(true, to: window, settled: true)
+    }
+
+    /// The windowed layout and the toolbar come back as the transition
+    /// starts: the traffic lights reappear at the end of it at the height
+    /// of the unified title bar, with their space already in the header
+    /// row. Restoring them after the exit would move the traffic lights
+    /// and the header row once the window is back.
+    func windowWillExitFullScreen(_ notification: Notification) {
+        guard let window, (notification.object as? NSWindow) === window else { return }
+        applyFullScreen(false, to: window, settled: false)
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        guard window === self.window else { return }
+        applyFullScreen(false, to: window, settled: false)
+    }
+
+    /// The window stays in full screen: back to its full-screen form.
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        guard window === self.window else { return }
+        applyFullScreen(true, to: window, settled: true)
+    }
+
+    /// The window's current full-screen state, read from its style mask
+    /// (outside a transition).
+    private func syncFullScreenState(of window: NSWindow) {
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        applyFullScreen(fullScreen, to: window, settled: fullScreen)
+    }
+
+    private func applyFullScreen(_ fullScreen: Bool, to window: NSWindow, settled: Bool) {
+        fullScreenSettled = fullScreen && settled
+        if let toolbar = window.toolbar, toolbar.isVisible == fullScreen {
+            toolbar.isVisible = !fullScreen
+        }
+        model.windowFullScreenChanged(fullScreen)
+        reportTopInset(of: window)
+    }
+
+    private func reportTopInset(of window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+        model.windowTopInsetChanged(WindowFullScreenInset.topInset(
+            fullScreen: fullScreenSettled,
+            contentHeight: Double(contentView.bounds.height),
+            contentLayoutHeight: Double(window.contentLayoutRect.height)))
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -495,8 +671,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === window else { return }
         hotKeyListFocus.clear()
+        fullScreenSettled = false
         model.surfaceDidHide(.window)
         state.noteRegularWindowClosed(forOpenInPopover: closingWindowForPopover)
+        // With the window closed they go back to the normal level.
+        applyAuxiliaryWindowLevels(windowOpen: false)
     }
 
     /// App menu Close Window (§4.5): the popover closes while it is key;
@@ -753,8 +932,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // The titles and enabled flags are decided now, from the state at
         // the moment the menu opens, and do not change while it is open
         // (§4.5 "⌄ menu").
-        let menu = menuHandler.menu(for: HeaderMenu.entries(
-            isRefreshing: model.isRefreshing, hasUnreviewed: state.hasUnreviewed))
+        let menu = menuHandler.menu(for: HeaderMenu.entries(hasUnreviewed: state.hasUnreviewed))
         guard let hostWindow = anchor.window else { return }
         let screenRect = hostWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
         menu.popUp(positioning: nil, at: NSPoint(x: screenRect.minX, y: screenRect.minY - 4), in: nil)
@@ -767,7 +945,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     fileprivate func showAbout(from surface: MainSurface) {
         if surface == .popover { closePopover() }
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.orderFrontStandardAboutPanel(nil)
+        showAboutPanel()
     }
 
     fileprivate func openScene(_ id: String, title: String, from surface: MainSurface) {
@@ -777,15 +955,50 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // `openWindow` can create the window after this call returns, and
         // re-opening an existing one does not always make it key: on the
         // next turn, bring the scene's window to the front as key.
-        DispatchQueue.main.async {
-            if let window = NSApp.windows.first(where: { $0.title == title && $0.isVisible }) {
-                Self.raise(window)
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                if let window = NSApp.windows.first(where: { $0.title == title && $0.isVisible }) {
+                    // Before the raise, so it comes up in front of a pinned
+                    // window.
+                    self?.applyAuxiliaryLevel(to: window)
+                    Self.raise(window)
+                }
             }
         }
     }
 
     fileprivate var appState: AppState { state }
-    fileprivate var surfaceModel: MainSurfaceModel { model }
+}
+
+/// The window level of the auxiliary windows — Settings, Setup Check and
+/// the About panel (§4.5 "pin (Keep on Top)"): floating while the pin is ON
+/// and the main window is open (minimized counts as open), so they open in
+/// front of the pinned window; normal while the pin is OFF or the main
+/// window is closed (the popover form included). The main window's own
+/// level is `applyWindowLevel`'s.
+enum AuxiliaryWindowLevel {
+    static func level(keepOnTop: Bool, windowOpen: Bool) -> NSWindow.Level {
+        keepOnTop && windowOpen ? .floating : .normal
+    }
+
+    /// Settings and Setup Check by their scene titles; the About panel by
+    /// the handle taken when it was shown.
+    static func isAuxiliary(title: String, isAboutPanel: Bool) -> Bool {
+        isAboutPanel || title == SettingsWindow.title || title == SetupCheckWindow.title
+    }
+}
+
+/// The space the main window's content leaves at its top for a title bar
+/// the system keeps over it in full screen (for example while the menu bar
+/// stays shown in full screen): the part of the content view that
+/// `contentLayoutRect` excludes, never negative. Outside full screen it is
+/// 0, because the layout draws the header row under the hidden title bar on
+/// purpose (`SurfaceMetrics.windowTrafficLightCenter`).
+enum WindowFullScreenInset {
+    static func topInset(fullScreen: Bool, contentHeight: Double, contentLayoutHeight: Double) -> Double {
+        guard fullScreen else { return 0 }
+        return max(0, contentHeight - contentLayoutHeight)
+    }
 }
 
 /// What started a tray-click branch (§4.5 "tray icon click" / "global
@@ -857,7 +1070,6 @@ struct HeaderMenuItem: Equatable {
         case about
         case settings
         case setupCheck
-        case refresh
         case clearBadges
         case quit
     }
@@ -865,32 +1077,21 @@ struct HeaderMenuItem: Equatable {
     let command: Command
     let title: String
     let isEnabled: Bool
-    /// The key shown at the item's right with ⌘ (nil = none).
-    var commandKey: String?
 }
 
 /// The ⌄ menu's entries (§4.5 "⌄ menu"): About Shiibar CC / — / Settings… /
-/// Setup Check… / — / Refresh (⌘R) / Clear badges / — / Quit.
+/// Setup Check… / — / Clear badges / — / Quit. Refresh is the header row's
+/// button and ⌘R.
 enum HeaderMenu {
-    static let refreshTitle = "Refresh"
-    static let refreshingTitle = "Refreshing\u{2026}"
-
-    /// `isRefreshing` and `hasUnreviewed` are the state when the menu
-    /// opens: while a Refresh runs, its item reads `Refreshing…` and is
-    /// disabled; Clear badges is disabled when nothing is unreviewed
-    /// (§8.24).
-    static func entries(isRefreshing: Bool, hasUnreviewed: Bool) -> [HeaderMenuEntry] {
+    /// `hasUnreviewed` is the state when the menu opens: Clear badges is
+    /// disabled when nothing is unreviewed (§8.24).
+    static func entries(hasUnreviewed: Bool) -> [HeaderMenuEntry] {
         [
             .item(HeaderMenuItem(command: .about, title: "About Shiibar CC", isEnabled: true)),
             .separator,
             .item(HeaderMenuItem(command: .settings, title: "Settings\u{2026}", isEnabled: true)),
             .item(HeaderMenuItem(command: .setupCheck, title: "Setup Check\u{2026}", isEnabled: true)),
             .separator,
-            .item(HeaderMenuItem(
-                command: .refresh,
-                title: isRefreshing ? refreshingTitle : refreshTitle,
-                isEnabled: !isRefreshing,
-                commandKey: "r")),
             .item(HeaderMenuItem(command: .clearBadges, title: "Clear badges", isEnabled: hasUnreviewed)),
             .separator,
             .item(HeaderMenuItem(command: .quit, title: "Quit", isEnabled: true)),
@@ -922,10 +1123,7 @@ final class HeaderMenuHandler: NSObject {
             case .separator:
                 menu.addItem(.separator())
             case .item(let item):
-                let menuItem = NSMenuItem(title: item.title, action: Self.selector(for: item.command), keyEquivalent: item.commandKey ?? "")
-                if item.commandKey != nil {
-                    menuItem.keyEquivalentModifierMask = [.command]
-                }
+                let menuItem = NSMenuItem(title: item.title, action: Self.selector(for: item.command), keyEquivalent: "")
                 menuItem.target = self
                 menuItem.isEnabled = item.isEnabled
                 menu.addItem(menuItem)
@@ -939,7 +1137,6 @@ final class HeaderMenuHandler: NSObject {
         case .about: return #selector(showAbout(_:))
         case .settings: return #selector(openSettings(_:))
         case .setupCheck: return #selector(openSetupCheck(_:))
-        case .refresh: return #selector(refresh(_:))
         case .clearBadges: return #selector(clearBadges(_:))
         case .quit: return #selector(quit(_:))
         }
@@ -957,8 +1154,6 @@ final class HeaderMenuHandler: NSObject {
         openedWindow = true
         controller?.openScene(SetupCheckWindow.id, title: SetupCheckWindow.title, from: surface)
     }
-    /// The same Refresh as ⌘R (§4.6).
-    @objc func refresh(_ sender: Any?) { controller?.surfaceModel.refresh() }
     @objc func clearBadges(_ sender: Any?) { controller?.appState.clearBadges() }
     @objc func quit(_ sender: Any?) { controller?.appState.quit() }
 }

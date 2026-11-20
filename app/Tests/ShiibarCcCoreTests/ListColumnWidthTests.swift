@@ -9,7 +9,10 @@ final class ListColumnWidthTests: XCTestCase {
 
     func testConstantsMatchSection9() {
         XCTAssertEqual(ListColumnWidth.minimum, 280)
-        XCTAssertEqual(ListColumnWidth.paneMinimum, 360)
+        XCTAssertEqual(ListColumnWidth.paneMinimum, 320)
+        XCTAssertNotEqual(ListColumnWidth.paneMinimum, MainWindowMetrics.minimumWidth,
+                          "the right column's minimum is its own value")
+        XCTAssertEqual(ColumnMode.twoColumnMinimumWidth, ListColumnWidth.minimum + ListColumnWidth.paneMinimum)
         XCTAssertEqual(ListColumnWidth.dragAreaWidth, 8)
         XCTAssertEqual(ListColumnWidth.defaultWidth(textSize: .default), 420)
         XCTAssertEqual(MainSurfaceDefaultsKeys.listColumnWidth, "cc.shiibar.listColumnWidth")
@@ -19,7 +22,20 @@ final class ListColumnWidthTests: XCTestCase {
 
     func testNoRememberedWidthShowsTheDefault() {
         XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 1400, textSize: .default), 420)
-        XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 780, textSize: .default), 420)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 740, textSize: .default), 420,
+                       "420 + 320: the default fits exactly")
+    }
+
+    /// Between 600pt and the list width + 320 the right column is exactly
+    /// 320pt and the list column takes the rest.
+    func testBetweenTheThresholdAndTheDefaultTheRightColumnKeepsItsMinimum() {
+        for windowWidth in [600.0, 650, 739] {
+            let shown = ListColumnWidth.shown(remembered: nil, windowWidth: windowWidth, textSize: .default)
+            XCTAssertEqual(shown, windowWidth - 320, "\(windowWidth)")
+            XCTAssertEqual(windowWidth - shown, 320, "\(windowWidth): the right column")
+        }
+        XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 600, textSize: .default), 280,
+                       "at the threshold the list column is at its minimum")
     }
 
     func testRememberedWidthIsShownInsideTheRange() {
@@ -34,17 +50,17 @@ final class ListColumnWidthTests: XCTestCase {
     }
 
     func testNarrowWindowKeepsThePaneMinimum() {
-        // 700 + 360 > 1000: the list column gives way, the right column
-        // (the 1pt line included) keeps 360.
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 1000, textSize: .default), 640)
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 780, textSize: .default), 420)
+        // 700 + 320 > 1000: the list column gives way, the right column
+        // (the 1pt line included) keeps 320.
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 1000, textSize: .default), 680)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 700, windowWidth: 780, textSize: .default), 460)
         // Exactly fitting is shown as is.
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 640, windowWidth: 1000, textSize: .default), 640)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 680, windowWidth: 1000, textSize: .default), 680)
     }
 
     func testShownWidthDoesNotRewriteTheRememberedWidth() {
         let remembered = 700.0
-        XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1000, textSize: .default), 640)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1000, textSize: .default), 680)
         // Widening the window again shows the remembered width.
         XCTAssertEqual(ListColumnWidth.shown(remembered: remembered, windowWidth: 1400, textSize: .default), 700)
     }
@@ -62,27 +78,25 @@ final class ListColumnWidthTests: XCTestCase {
         }
     }
 
-    func testTwoColumnThresholdIgnoresTheRememberedWidth() {
-        // §8.53: the threshold comes from the default width only. The
-        // column mode takes no remembered width, so a remembered list column
-        // (wide or narrow) cannot move it.
-        let cases: [(Int, Double)] = [(9, 651), (13, 780), (18, 942)]
-        for (points, threshold) in cases {
+    func testTwoColumnThresholdIgnoresTheRememberedWidthAndTheTextSize() {
+        // The column mode takes neither a remembered width nor a text size.
+        XCTAssertEqual(ColumnMode.forWindowWidth(600), .two)
+        XCTAssertEqual(ColumnMode.forWindowWidth(599), .one)
+        // At the threshold any remembered width shows the list minimum
+        // (600 − 320 = 280), whatever the text size.
+        for points in [9, 13, 18] {
             let size = TextSize(clamping: points)
-            XCTAssertEqual(size.twoColumnMinimumWidth, threshold, "\(points)")
-            XCTAssertEqual(ColumnMode.forWindowWidth(threshold, textSize: size), .two, "\(points)")
-            XCTAssertEqual(ColumnMode.forWindowWidth(threshold - 1, textSize: size), .one, "\(points)")
-            // At the threshold, a wider remembered width shows the default
-            // width: the column cannot be wider than the default there.
-            XCTAssertEqual(ListColumnWidth.shown(remembered: 900, windowWidth: threshold, textSize: size), size.listColumnWidth, "\(points)")
+            XCTAssertEqual(ListColumnWidth.shown(remembered: 900, windowWidth: 600, textSize: size), 280, "\(points)")
+            XCTAssertEqual(ListColumnWidth.shown(remembered: nil, windowWidth: 600, textSize: size), 280, "\(points)")
         }
     }
 
     func testMinimumWinsWhenTheRangeIsEmpty() {
-        // 600 − 360 = 240 < 280.
-        XCTAssertEqual(ListColumnWidth.clamp(500, windowWidth: 600), 280)
-        XCTAssertEqual(ListColumnWidth.clamp(100, windowWidth: 600), 280)
-        XCTAssertEqual(ListColumnWidth.shown(remembered: 500, windowWidth: 600, textSize: .default), 280)
+        // 560 − 320 = 240 < 280 (a width below the two-column threshold,
+        // as during the switch to one column).
+        XCTAssertEqual(ListColumnWidth.clamp(500, windowWidth: 560), 280)
+        XCTAssertEqual(ListColumnWidth.clamp(100, windowWidth: 560), 280)
+        XCTAssertEqual(ListColumnWidth.shown(remembered: 500, windowWidth: 560, textSize: .default), 280)
     }
 
     // MARK: - Stored value
@@ -128,9 +142,9 @@ final class ListColumnWidthTests: XCTestCase {
         drag.update(dragDelta: -100, windowWidth: 1400)
         XCTAssertEqual(drag.width, 320, "after overshooting, the boundary follows the pointer again")
         drag.update(dragDelta: 2000, windowWidth: 1400)
-        XCTAssertEqual(drag.width, 1040, "window width minus the right column minimum")
-        drag.update(dragDelta: 620, windowWidth: 1400)
-        XCTAssertEqual(drag.width, 1040, "exactly the maximum")
+        XCTAssertEqual(drag.width, 1080, "window width minus the right column minimum (320)")
+        drag.update(dragDelta: 660, windowWidth: 1400)
+        XCTAssertEqual(drag.width, 1080, "exactly the maximum")
         drag.update(dragDelta: 400, windowWidth: 1400)
         XCTAssertEqual(drag.width, 820, "after overshooting, the boundary follows the pointer again")
     }
@@ -140,21 +154,21 @@ final class ListColumnWidthTests: XCTestCase {
         drag.update(dragDelta: 300, windowWidth: 1400)
         XCTAssertEqual(drag.width, 720)
         drag.update(dragDelta: 300, windowWidth: 1000)
-        XCTAssertEqual(drag.width, 640)
+        XCTAssertEqual(drag.width, 680)
     }
 
     func testDragStartingFromAClampedShownWidth() {
-        // Remembered 700 in a 900pt window shows 540; the drag starts there,
+        // Remembered 700 in a 900pt window shows 580; the drag starts there,
         // not at the remembered value.
         let shown = ListColumnWidth.shown(remembered: 700, windowWidth: 900, textSize: .default)
         var drag = ListColumnWidthDrag(startWidth: shown)
-        XCTAssertEqual(drag.width, 540)
+        XCTAssertEqual(drag.width, 580)
         XCTAssertNil(drag.widthToPersist, "a click on a clamped column does not store the clamped value")
         drag.update(dragDelta: -40, windowWidth: 900)
-        XCTAssertEqual(drag.width, 500)
-        XCTAssertEqual(drag.widthToPersist, 500)
+        XCTAssertEqual(drag.width, 540)
+        XCTAssertEqual(drag.widthToPersist, 540)
         drag.update(dragDelta: 10, windowWidth: 900)
-        XCTAssertEqual(drag.width, 540, "held at the maximum")
+        XCTAssertEqual(drag.width, 580, "held at the maximum")
         XCTAssertNil(drag.widthToPersist, "ending where it began stores nothing")
     }
 

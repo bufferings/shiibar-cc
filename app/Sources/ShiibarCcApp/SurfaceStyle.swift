@@ -72,9 +72,10 @@ enum SurfaceColors {
     static let starLine = Color(red: 0xD3 / 255, green: 0x97 / 255, blue: 0x00 / 255)
 }
 
-/// Dimensions that do not follow the text size (DESIGN.md §4.5 "text size":
-/// horizontal paddings and gaps, corner radii, border widths, the header
-/// row's buttons and their icons, and parts the OS draws).
+/// Dimensions that do not follow the text size (DESIGN.md §4.5 "text size"):
+/// horizontal paddings and gaps (the gaps between the header buttons
+/// included), corner radii (the header buttons' hover ground included),
+/// border widths, and parts the OS draws.
 enum SurfaceMetrics {
     /// `.hrow` horizontal padding 10.
     static let headerSide: CGFloat = 10
@@ -85,8 +86,14 @@ enum SurfaceMetrics {
     static let windowTrafficLightCenter: CGFloat = 26
     /// Space the traffic lights take at the leading edge of a header.
     static let trafficLightsWidth: CGFloat = 78
-    /// `.hb`: 24×24, radius 7.
-    static let headerButton: CGFloat = 24
+    /// The window header's smallest space above and below its row: the
+    /// header grows (its row's center moves below the traffic lights') only
+    /// when the row is too tall for the 52pt title bar area with this
+    /// space.
+    static let windowHeaderMinimumPadding: CGFloat = 6
+    /// `.hrow` gap between its items (fixed; the buttons' corner radius 7 is
+    /// fixed too — `HoverChipButtonStyle`).
+    static let headerSpacing: CGFloat = 8
     /// The section heading band (`.rows .sec`): inner left 10 / right 8,
     /// 8 between its parts, radius 6. Its edges are the row frames' edges.
     static let sectionBandLeading: CGFloat = 10
@@ -127,7 +134,9 @@ enum SurfaceMetrics {
 /// Dimensions that follow the text size (DESIGN.md §4.5 "text size"): each
 /// property is its window-design.html value at text size 13 times `ratio`.
 /// Font sizes, row heights, vertical paddings and gaps, icons and symbols,
-/// the search field height and the primary button's minimum width. Views
+/// the search field height, the header buttons and the pane header's back
+/// button with their icons (line widths included), and the primary
+/// button's minimum width. Views
 /// read it from the environment (`\.surfaceScale`), which the two roots set
 /// from the text size.
 struct SurfaceScale: Equatable {
@@ -144,8 +153,17 @@ struct SurfaceScale: Equatable {
     var headerTop: CGFloat { scaled(10) }
     /// `.hrow` bottom padding (8).
     var headerBottom: CGFloat { scaled(8) }
-    /// `.search`: 24pt tall at 13, level with the 24pt header buttons.
-    var searchFieldHeight: CGFloat { scaled(24) }
+    /// `.search`: 28pt tall at 13; the header buttons are centered on it.
+    var searchFieldHeight: CGFloat { scaled(28) }
+    /// `.hb`: the header buttons (and the pane header's back button), 24pt
+    /// square at 13.
+    var headerButton: CGFloat { scaled(24) }
+    /// `.ic`: their icons, 15pt at 13, and the icons' line widths (1.4; the
+    /// pin 1.2; the ⌄ chevron 1.6).
+    var headerIcon: CGFloat { scaled(15) }
+    var headerIconLine: CGFloat { scaled(1.4) }
+    var pinIconLine: CGFloat { scaled(1.2) }
+    var menuChevronLine: CGFloat { scaled(1.6) }
     /// `.search` text.
     var searchFieldFont: CGFloat { scaled(12) }
     /// `.search` magnifier and its stroke.
@@ -155,14 +173,20 @@ struct SurfaceScale: Equatable {
     var searchClearButton: CGFloat { scaled(12) }
 
     /// The header row's height: the taller of the search field and the
-    /// fixed header buttons.
-    var headerRowHeight: CGFloat { max(searchFieldHeight, SurfaceMetrics.headerButton) }
+    /// header buttons.
+    var headerRowHeight: CGFloat { max(searchFieldHeight, headerButton) }
 
-    /// The header row's top padding in the window: its vertical center on
-    /// the traffic lights' center.
-    var windowHeaderTop: CGFloat {
-        SurfaceMetrics.windowTrafficLightCenter - headerRowHeight / 2
+    /// The space above and the equal space below a window header whose row
+    /// is `contentHeight` tall: the row centered on the traffic lights
+    /// (52pt in all) — or, when that leaves less than the minimum, the
+    /// minimum on both sides (the header grows; its row sits as close to
+    /// the traffic lights' center as it can).
+    static func windowHeaderPadding(contentHeight: CGFloat) -> CGFloat {
+        max(SurfaceMetrics.windowTrafficLightCenter - contentHeight / 2, SurfaceMetrics.windowHeaderMinimumPadding)
     }
+
+    /// The window's header row: the space above and below it.
+    var windowHeaderPadding: CGFloat { Self.windowHeaderPadding(contentHeight: headerRowHeight) }
 
     // MARK: List
 
@@ -284,19 +308,17 @@ struct SurfaceScale: Equatable {
     /// a load error).
     var centeredLineFont: CGFloat { scaled(12) }
 
-    /// The pane header's top padding in the window. The one-column detail
-    /// page centers its row on the traffic lights; in two columns the right
-    /// column's header keeps the center it has at 13 (`.hdr.pad` 11 over a
-    /// 32pt title block), so it stays level with the list column's header
-    /// row at any text size.
-    func windowPaneHeaderTop(isDetailPage: Bool) -> CGFloat {
-        if isDetailPage {
-            let rowHeight = max(paneTitleBlockHeight, SurfaceMetrics.headerButton, stepperSegmentHeight)
-            return SurfaceMetrics.windowTrafficLightCenter - rowHeight / 2
-        }
-        let base = SurfaceScale.base
-        let centerAtBase = base.paneHeaderTopColumn + base.paneTitleBlockHeight / 2
-        return centerAtBase - paneTitleBlockHeight / 2
+    /// The one-column detail page's header row in the window: the title
+    /// block, the back button and the stepper side by side.
+    var windowDetailPaneHeaderRowHeight: CGFloat {
+        max(paneTitleBlockHeight, headerButton, stepperSegmentHeight)
+    }
+
+    /// The space above and below it, by the window header rule. (In two
+    /// columns the pane header sits under the window-wide header row and
+    /// uses `paneHeaderTopColumn` / `paneHeaderBottom`.)
+    var windowDetailPaneHeaderPadding: CGFloat {
+        Self.windowHeaderPadding(contentHeight: windowDetailPaneHeaderRowHeight)
     }
 }
 
@@ -315,7 +337,7 @@ extension EnvironmentValues {
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)
 
 enum SurfaceIcon {
-    case search, pin, chevronDown, chevronUp, chevronRight, back, window, popover, star
+    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, popover, star
 
     /// The icon's outline on a 16-unit box, y down.
     func path(in rect: CGRect) -> Path {
@@ -341,6 +363,18 @@ enum SurfaceIcon {
         case .search:
             circle(&path, 7, 7, 4.5)
             polyline(&path, [(10.5, 10.5), (14, 14)])
+        case .refresh:
+            // `i-refresh`: an arc of radius 5 around (8, 8), clockwise on
+            // screen (y down) from (13, 8) round to (11.5, 4.4), and the
+            // arrow head (11.7, 1.9) → (11.7, 4.5) → (9.1, 4.5) at that end.
+            let end = atan2(4.4 - 8.0, 11.5 - 8.0) + 2 * Double.pi
+            let steps = 48
+            for i in 0...steps {
+                let angle = Double(i) / Double(steps) * end
+                let point = p(8 + 5 * CGFloat(cos(angle)), 8 + 5 * CGFloat(sin(angle)))
+                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+            }
+            polyline(&path, [(11.7, 1.9), (11.7, 4.5), (9.1, 4.5)])
         case .pin:
             // `i-pin`: a push pin tilted 45°, head at the top right, needle
             // to the bottom left, as one closed outline.
@@ -361,21 +395,12 @@ enum SurfaceIcon {
             roundedRect(&path, 2, 3, 12, 10, 2)
             polyline(&path, [(2, 6.2), (14, 6.2)])
         case .popover:
-            // `i-popover`: a rounded rectangle (corner radius 2) with an
-            // arrow notch on its top edge — the popover's outline.
-            path.move(to: p(4, 5))
-            path.addLine(to: p(6.5, 5))
-            path.addLine(to: p(8, 3))
-            path.addLine(to: p(9.5, 5))
-            path.addLine(to: p(12, 5))
-            path.addArc(tangent1End: p(14, 5), tangent2End: p(14, 7), radius: 2 * s)
-            path.addLine(to: p(14, 11.5))
-            path.addArc(tangent1End: p(14, 13.5), tangent2End: p(12, 13.5), radius: 2 * s)
-            path.addLine(to: p(4, 13.5))
-            path.addArc(tangent1End: p(2, 13.5), tangent2End: p(2, 11.5), radius: 2 * s)
-            path.addLine(to: p(2, 7))
-            path.addArc(tangent1End: p(2, 5), tangent2End: p(4, 5), radius: 2 * s)
-            path.closeSubpath()
+            // `i-popover`: a rounded square with the menu bar line near its
+            // top and an upward arrow under it.
+            roundedRect(&path, 2, 2.5, 12, 11, 2.2)
+            polyline(&path, [(2, 5.6), (14, 5.6)])
+            polyline(&path, [(8, 11.6), (8, 8)])
+            polyline(&path, [(6.1, 9.7), (8, 7.8), (9.9, 9.7)])
         case .star:
             polyline(&path, [
                 (8, 1.8), (9.9, 5.7), (14.2, 6.3), (11.1, 9.3), (11.8, 13.6),
@@ -386,7 +411,9 @@ enum SurfaceIcon {
     }
 }
 
-/// A stroked line-art icon (`.ic`: 15px, stroke 1.4, round caps / joins).
+/// A stroked line-art icon (`.ic`: 15px, stroke 1.4, round caps / joins, at
+/// text size 13; the header buttons pass the scaled `headerIcon` /
+/// `headerIconLine`).
 struct SurfaceIconView: View {
     let icon: SurfaceIcon
     var size: CGFloat = 15
@@ -457,14 +484,18 @@ struct HoverChipButtonStyle: ButtonStyle {
 struct MenuAnchorView: NSViewRepresentable {
     let onResolve: (NSView) -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
+    func makeNSView(context: Context) -> MenuAnchorNSView {
+        let view = MenuAnchorNSView(frame: .zero)
         DispatchQueue.main.async { onResolve(view) }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: MenuAnchorNSView, context: Context) {}
 }
+
+/// The ⌄ button's anchor view: it takes the button's frame, so the menu
+/// opens under the button (and tests can find the button's place).
+final class MenuAnchorNSView: NSView {}
 
 /// Lets the empty parts of a header row drag the window (§4.5: the window
 /// has no visible title bar; the header row's empty area moves it). A

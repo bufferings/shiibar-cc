@@ -27,7 +27,9 @@ struct ConversationPaneView: View {
             header
             // §4.6: the hairline under the header shows always.
             Rectangle().fill(SurfaceColors.line).frame(height: 1)
-            if pane.showsMessages, !model.hits.isEmpty, model.paneLoadError == nil {
+            // Two columns: the counter and ‹ › sit in the window-wide header
+            // row instead (`HeaderRowLayout`).
+            if isDetailPage, pane.showsMessages, !model.hits.isEmpty, model.paneLoadError == nil {
                 findBar
                 Rectangle().fill(SurfaceColors.line).frame(height: 1)
             }
@@ -44,14 +46,15 @@ struct ConversationPaneView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 8) {
-            if isDetailPage && surface == .window {
-                Color.clear.frame(width: SurfaceMetrics.trafficLightsWidth - 8, height: 1)
+        HStack(spacing: SurfaceMetrics.headerSpacing) {
+            // The traffic lights' place; in full screen there are none there.
+            if isDetailPage && surface == .window && !model.isFullScreen(surface) {
+                Color.clear.frame(width: SurfaceMetrics.trafficLightsWidth - SurfaceMetrics.headerSpacing, height: 1)
             }
             if pane.showsBackButton {
                 Button { model.backClicked() } label: {
-                    SurfaceIconView(icon: .back)
-                        .frame(width: SurfaceMetrics.headerButton, height: SurfaceMetrics.headerButton)
+                    SurfaceIconView(icon: .back, size: scale.headerIcon, lineWidth: scale.headerIconLine)
+                        .frame(width: scale.headerButton, height: scale.headerButton)
                 }
                 .buttonStyle(HoverChipButtonStyle(restingOpacity: 0.10))
                 .foregroundStyle(SurfaceColors.secondary)
@@ -86,44 +89,55 @@ struct ConversationPaneView: View {
                 )
             }
         }
+        // The window's detail page: the row is at least its nominal height,
+        // so the equal space above and below centers it on the traffic
+        // lights.
+        .frame(minHeight: isWindowDetailPage ? scale.windowDetailPaneHeaderRowHeight : nil)
         .padding(.leading, isDetailPage ? 10 : 16)
         .padding(.trailing, 10)
         .padding(.top, headerTopPadding)
-        .padding(.bottom, scale.paneHeaderBottom)
-        .background(surface == .window ? WindowDragArea() : nil)
+        .padding(.bottom, headerBottomPadding)
+        // Only the window's detail page has no header row above it, so its
+        // pane header is the place to drag the window; in two columns the
+        // window-wide header row is.
+        .background(surface == .window && isDetailPage ? WindowDragArea() : nil)
     }
 
-    /// `.hdr` 9pt (`.hdr.pad` 11pt in two columns) at text size 13. In the
-    /// window the header keeps its vertical center at any text size: on the
-    /// traffic lights on the detail page, level with the list column's
-    /// header row in two columns (§4.5 "text size").
+    private var isWindowDetailPage: Bool { surface == .window && isDetailPage }
+
+    /// `.hdr` 9pt (`.hdr.pad` 11pt in two columns) at text size 13. The
+    /// window's detail page follows the window header rule: its row on the
+    /// traffic lights with equal space above and below (§4.5 "header
+    /// row"); in two columns the header sits under the window-wide header
+    /// row.
     private var headerTopPadding: CGFloat {
-        if surface == .window {
-            return scale.windowPaneHeaderTop(isDetailPage: isDetailPage)
+        if isWindowDetailPage {
+            return scale.windowDetailPaneHeaderPadding
         }
         return isDetailPage ? scale.paneHeaderTopDetail : scale.paneHeaderTopColumn
     }
 
+    private var headerBottomPadding: CGFloat {
+        isWindowDetailPage ? scale.windowDetailPaneHeaderPadding : scale.paneHeaderBottom
+    }
+
     // MARK: Find bar (§4.6 "hit navigation")
 
-    /// Two columns: the counter and the ‹ › control, content-sized and
-    /// left-aligned. One-column detail page: `Matches for “tag”` at the left
-    /// end (no ground, border or icon — it is not an input), the counter and
-    /// the control at the right end.
+    /// One-column detail page only: `Matches for “tag”` at the left end (no
+    /// ground, border or icon — it is not an input), the counter and the
+    /// control at the right end.
     private var findBar: some View {
         HStack(spacing: 8) {
-            if pane.showsQueryInFindBar {
-                HStack(spacing: 4) {
-                    Text(FindBarQueryText.prefix)
-                        .foregroundStyle(SurfaceColors.secondary)
-                        .fixedSize()
-                    Text(FindBarQueryText.quotedTerm(model.query))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Text(FindBarQueryText.prefix)
+                    .foregroundStyle(SurfaceColors.secondary)
+                    .fixedSize()
+                Text(FindBarQueryText.quotedTerm(model.query))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+            Spacer(minLength: 8)
             Text(model.hitCounterText ?? "")
                 .foregroundStyle(SurfaceColors.secondary)
                 .fixedSize()
@@ -132,9 +146,6 @@ struct ConversationPaneView: View {
                 onNext: { model.navigateToNewerHit() }
             )
             .fixedSize()
-            if !pane.showsQueryInFindBar {
-                Spacer(minLength: 0)
-            }
         }
         .font(.system(size: scale.findBarFont))
         .padding(.horizontal, 16)
@@ -292,9 +303,10 @@ private struct ConversationStepper: View {
     }
 }
 
-/// The find bar's ‹ › control: the native momentary segmented control from
-/// the kit (content-sized, per-segment tooltips — §4.6 / §8.38(8)).
-private struct FindNavigationControl: NSViewRepresentable {
+/// The hit navigation's ‹ › control (the one-column find bar and the
+/// two-column header row): the native momentary segmented control from the
+/// kit (content-sized, per-segment tooltips — §4.6 / §8.38(8)).
+struct FindNavigationControl: NSViewRepresentable {
     let onPrevious: () -> Void
     let onNext: () -> Void
 

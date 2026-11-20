@@ -187,7 +187,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertNil(model.messageError)
     }
 
-    // MARK: - Refresh: the ⌄ menu's Refresh and ⌘R (§4.6 / §8.61 / §9)
+    // MARK: - Refresh: the header row's Refresh button and ⌘R (§4.6 / §9)
 
     /// The `shiibar-cc` runs Refresh started (the row verbs go through the
     /// same runner).
@@ -230,7 +230,7 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(model.messageText, "\u{2713} Refresh done")
     }
 
-    /// §4.6: a Refresh (from the menu item or ⌘R) while one runs starts
+    /// §4.6: a Refresh (from the button or ⌘R) while one runs starts
     /// nothing.
     func testRefreshIgnoresARefreshInFlight() {
         let model = makeModel()
@@ -323,10 +323,10 @@ final class MainSurfaceModelTests: XCTestCase {
         }
     }
 
-    /// §4.5 "key operations": ⌘R runs the same Refresh as the ⌄ menu's
-    /// item — with the search field focused, with the list focused, on the
-    /// detail page, and in the window.
-    func testCommandRRunsTheSameRefreshAsTheMenuItem() {
+    /// §4.5 "key operations": ⌘R runs the same Refresh as the header row's
+    /// button (`MainSurfaceModel.refresh`) — with the search field focused,
+    /// with the list focused, on the detail page, and in the window.
+    func testCommandRRunsTheSameRefreshAsTheButton() {
         struct Case {
             let name: String
             let surface: MainSurface
@@ -1502,6 +1502,40 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertTrue(makeModel().keepOnTop)
     }
 
+    func testFullScreenStateIsTheWindowsOnly() {
+        let model = makeModel()
+        XCTAssertFalse(model.windowFullScreen, "default: not full screen")
+        XCTAssertEqual(model.windowFullScreenTopInset, 0)
+        model.windowTopInsetChanged(28)
+        XCTAssertEqual(model.topInset(for: .window), 0, "no inset outside full screen")
+
+        model.windowFullScreenChanged(true)
+        model.windowTopInsetChanged(28)
+        XCTAssertTrue(model.isFullScreen(.window))
+        XCTAssertFalse(model.isFullScreen(.popover), "the popover is never full screen")
+        XCTAssertEqual(model.topInset(for: .window), 28)
+        XCTAssertEqual(model.topInset(for: .popover), 0)
+        model.windowTopInsetChanged(-4)
+        XCTAssertEqual(model.topInset(for: .window), 0, "never negative")
+
+        model.windowTopInsetChanged(28)
+        model.windowFullScreenChanged(false)
+        XCTAssertFalse(model.isFullScreen(.window))
+        XCTAssertEqual(model.topInset(for: .window), 0, "leaving full screen drops the inset")
+    }
+
+    /// A window closed while in full screen reports no exit: the state
+    /// resets with the close.
+    func testClosingTheWindowResetsTheFullScreenState() {
+        let model = makeModel()
+        model.surfaceDidShow(.window)
+        model.windowFullScreenChanged(true)
+        model.windowTopInsetChanged(28)
+        model.surfaceDidHide(.window)
+        XCTAssertFalse(model.windowFullScreen)
+        XCTAssertEqual(model.windowFullScreenTopInset, 0)
+    }
+
     func testWarningsAreStoredForTheFooter() {
         let model = makeModel()
         model.setWarnings([.disconnected, .automationPermission])
@@ -1562,32 +1596,34 @@ final class MainSurfaceModelTests: XCTestCase {
         }
     }
 
-    func testTextSizeChangeThatFlipsTheColumnsFollowsTheWidthRules() {
+    /// §9: the two-column threshold is fixed at 600pt, so a text size
+    /// change never changes the column count; the width alone does, with
+    /// the switching rules unchanged.
+    func testTextSizeChangeKeepsTheColumnsAndTheWidthFlipsThem() {
         let model = makeModel()
-        model.windowWidthChanged(800)
+        model.windowWidthChanged(600)
         model.windowDidBecomeKey()
-        XCTAssertEqual(model.list.columns, .two, "800 >= 780 at 13")
+        XCTAssertEqual(model.list.columns, .two, "600 is two columns")
         spy.indexCompletions.last?(0)
         spy.searches.last?.completion(ok(resultJSON(["a", "b"])))
         model.rowClicked(.conversation(sessionID: "b"))
-        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
 
-        // 14: the list column is 452pt, two columns from 812pt.
-        model.textSize.increase()
+        for _ in 0..<5 { model.textSize.increase() }
+        XCTAssertEqual(model.list.columns, .two, "18: still two columns")
+        for _ in 0..<9 { model.textSize.decrease() }
+        XCTAssertEqual(model.list.columns, .two, "9: still two columns")
+        model.textSize.reset()
+
+        model.windowWidthChanged(599)
         XCTAssertEqual(model.list.columns, .one)
         XCTAssertEqual(model.list.page, .list, "two -> one column shows the list page")
         XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"), "the selection is kept")
 
-        model.textSize.decrease()
-        XCTAssertEqual(model.list.columns, .two)
-        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "b"))
-
         // From the detail page, widening into two columns keeps the same
         // conversation selected.
-        model.textSize.increase()
         openDetailPage(model, .conversation(sessionID: "a"))
         XCTAssertEqual(model.list.page, .detail)
-        model.textSize.decrease()
+        model.windowWidthChanged(600)
         XCTAssertEqual(model.list.columns, .two)
         XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
     }

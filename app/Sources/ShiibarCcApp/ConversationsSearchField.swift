@@ -134,7 +134,7 @@ final class SearchTextField: NSTextField {
 }
 
 /// The drawn search field (window-design.html `.search`): at text size 13,
-/// 24pt tall, the 13pt magnifier, the 12pt text and the 12pt clear button;
+/// 28pt tall, the 13pt magnifier, the 12pt text and the 12pt clear button;
 /// those follow the text size (`scale`, §4.5 "text size"). Radius 6, the
 /// card color with a 1pt border, 8pt horizontal padding, 6pt from the
 /// magnifier to the text and from the text to the clear button stay fixed.

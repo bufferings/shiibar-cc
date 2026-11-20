@@ -65,9 +65,9 @@ final class ListColumnWidthStore: ObservableObject {
         }
     }
 
-    /// The layout left two columns during a drag (a text size change, for
-    /// example), or the window or the drag area went away: the drag ends and
-    /// nothing is remembered (§4.5).
+    /// The layout left two columns during a drag (the window narrowed below
+    /// the two-column width), or the window or the drag area went away: the
+    /// drag ends and nothing is remembered (§4.5).
     func cancelDrag() {
         guard drag != nil else { return }
         drag = nil

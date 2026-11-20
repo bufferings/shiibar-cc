@@ -27,10 +27,11 @@ final class ColumnSwitchFocusTests: XCTestCase {
     private var focusObservation: NSKeyValueObservation?
     private var searches: [@MainActor (CLIRunResult) -> Void] = []
     private var indexCompletions: [@MainActor (Int32) -> Void] = []
+    private var shows: [@MainActor (CLIRunResult) -> Void] = []
 
     private let height: CGFloat = 640
     private var oneColumnWidth: CGFloat { CGFloat(MainWindowMetrics.initialWidth) }
-    private var twoColumnWidth: CGFloat { CGFloat(TextSize.default.twoColumnMinimumWidth) + 200 }
+    private var twoColumnWidth: CGFloat { CGFloat(ColumnMode.twoColumnMinimumWidth) + 200 }
 
     override func setUp() {
         super.setUp()
@@ -66,7 +67,10 @@ final class ColumnSwitchFocusTests: XCTestCase {
                 self?.searches.append(completion)
                 return ConversationsProcess(process: Process())
             },
-            show: { _, _, _ in ConversationsProcess(process: Process()) },
+            show: { [weak self] _, _, completion in
+                self?.shows.append(completion)
+                return ConversationsProcess(process: Process())
+            },
             index: { [weak self] _, _, _, completion in
                 self?.indexCompletions.append(completion)
                 return ConversationsProcess(process: Process())
@@ -327,6 +331,150 @@ final class ColumnSwitchFocusTests: XCTestCase {
         XCTAssertEqual(field.stringValue, "abc")
         XCTAssertEqual(field.currentEditor()?.selectedRange, caret)
         XCTAssertEqual(model.query, "abc")
+    }
+
+    private func frameInWindow(_ view: NSView) -> NSRect {
+        view.convert(view.bounds, to: nil)
+    }
+
+    /// The Refresh button's frame: its icon view takes the button's size.
+    private func refreshButtonFrame(in window: NSWindow) throws -> NSRect {
+        frameInWindow(try XCTUnwrap(Self.find(RefreshIconNSView.self, in: try XCTUnwrap(window.contentView))))
+    }
+
+    /// The header row spans the window in two columns and sits on the list
+    /// page in one: the same search field stays (with its focus) across the
+    /// 600pt threshold, its left edge stays, and its width changes only by
+    /// the window width's change (the field fills the row in both modes).
+    func testHeaderSearchFieldIsKeptAndFillsTheRowAcrossColumnChanges() throws {
+        let narrow = CGFloat(ColumnMode.twoColumnMinimumWidth) - 1
+        let wide = CGFloat(ColumnMode.twoColumnMinimumWidth)
+        let (model, window) = try openWindow(width: narrow)
+        XCTAssertEqual(model.list.columns, .one)
+        let field = try searchField(in: window)
+        let host = try XCTUnwrap(field.superview)
+        let oneColumn = frameInWindow(host)
+        XCTAssertGreaterThan(oneColumn.width, 0)
+
+        resize(window, model: model, to: wide, expecting: .two)
+        pump()
+        XCTAssertTrue(try searchField(in: window) === field, "the header keeps its search field")
+        XCTAssertTrue(MainSurfaceController.isSearchFieldFocused(in: window))
+        let twoColumns = frameInWindow(host)
+        XCTAssertEqual(twoColumns.minX, oneColumn.minX, accuracy: 0.5, "the left edge stays")
+        XCTAssertEqual(twoColumns.width - oneColumn.width, wide - narrow, accuracy: 0.5,
+                       "the width changes by the window's change")
+
+        resize(window, model: model, to: oneColumnWidth, expecting: .one)
+        pump()
+        XCTAssertTrue(try searchField(in: window) === field)
+        XCTAssertTrue(MainSurfaceController.isSearchFieldFocused(in: window))
+        XCTAssertEqual(frameInWindow(host).minX, oneColumn.minX, accuracy: 0.5)
+    }
+
+    /// Two columns without the counter: the field ends one gap left of the
+    /// Refresh button, and the ⌄ button stays inside the window, at 600 and
+    /// 1200pt and at text sizes 9, 13 and 18.
+    func testTwoColumnFieldFillsUpToTheButtons() throws {
+        for width in [CGFloat(ColumnMode.twoColumnMinimumWidth), 1200] {
+            let (model, window) = try openWindow(width: width)
+            XCTAssertEqual(model.list.columns, .two)
+            let host = try XCTUnwrap(try searchField(in: window).superview)
+            let anchor = try XCTUnwrap(Self.find(MenuAnchorNSView.self, in: try XCTUnwrap(window.contentView)))
+            for points in [9, 13, 18] {
+                setTextSize(model, points)
+                let refresh = try refreshButtonFrame(in: window)
+                XCTAssertEqual(frameInWindow(host).maxX, refresh.minX - SurfaceMetrics.headerSpacing, accuracy: 0.5,
+                               "\(width) at \(points): one gap before Refresh")
+                XCTAssertLessThanOrEqual(frameInWindow(anchor).maxX, width - SurfaceMetrics.headerSide + 0.5,
+                                         "\(width) at \(points): ⌄ inside the window")
+            }
+            window.orderOut(nil)
+        }
+    }
+
+    /// At the window's 360pt minimum (one column) the search field takes
+    /// what the traffic-light space and the four buttons (following the
+    /// text size) leave, the ⌄ button stays inside the window, and the row
+    /// stays centered on the traffic lights.
+    func testOneColumnHeaderFitsAtTheWindowMinimum() throws {
+        let width = CGFloat(MainWindowMetrics.minimumWidth)
+        let (model, window) = try openWindow(width: width)
+        XCTAssertEqual(model.list.columns, .one)
+        let host = try XCTUnwrap(try searchField(in: window).superview)
+        let anchor = try XCTUnwrap(Self.find(MenuAnchorNSView.self, in: try XCTUnwrap(window.contentView)))
+        for points in [9, 13, 18] {
+            setTextSize(model, points)
+            let button = SurfaceScale(ratio: CGFloat(points) / 13).headerButton
+            // 360 − 2 × 10 − 70 − 4 buttons − 5 × 8: 134 at 13.
+            XCTAssertEqual(host.frame.width, 230 - 4 * button, accuracy: 0.5, "\(points)")
+            XCTAssertEqual(anchor.frame.width, button, accuracy: 0.5, "\(points): the button follows the text size")
+            // §4.5 "header row": the row is centered on the traffic lights,
+            // 26pt below the window's top, at every text size.
+            let contentHeight = try XCTUnwrap(window.contentView).frame.height
+            XCTAssertEqual(contentHeight - host.convert(host.bounds, to: nil).midY, 26, accuracy: 0.5, "\(points)")
+            XCTAssertEqual(contentHeight - anchor.convert(anchor.bounds, to: nil).midY, 26, accuracy: 0.5,
+                           "\(points): the buttons are centered on the field")
+            XCTAssertLessThanOrEqual(anchor.convert(anchor.bounds, to: nil).maxX,
+                                     width - SurfaceMetrics.headerSide + 0.5, "\(points)")
+        }
+    }
+
+    private func setTextSize(_ model: MainSurfaceModel, _ points: Int) {
+        model.textSize.reset()
+        for _ in 0..<abs(points - 13) {
+            if points > 13 { model.textSize.increase() } else { model.textSize.decrease() }
+        }
+        pump()
+        XCTAssertEqual(model.textSize.size.points, points)
+    }
+
+    /// Two columns with the hit counter shown: the field ends one gap left
+    /// of the counter, the counter ends one gap left of Refresh, and the ⌄
+    /// button stays inside the window, at 600 and 1200pt and at text sizes
+    /// 9, 13 and 18.
+    func testTwoColumnFieldFillsUpToTheHitCounter() throws {
+        for width in [CGFloat(ColumnMode.twoColumnMinimumWidth), 1200] {
+            let (model, window) = try openWindow(width: width)
+            XCTAssertEqual(model.list.columns, .two)
+            let searchesBefore = searches.count
+            model.query = "needle"
+            pump(until: { self.searches.count > searchesBefore })
+            try XCTUnwrap(searches.last)(CLIRunResult(
+                exitCode: 0,
+                stdout: #"{"conversations":[{"session_id":"s1","cwd":"/Users/example/demo","title":"t","updated_at":100,"live":false,"last_prompt":null}]}"#,
+                stderr: ""))
+            model.rowClicked(.conversation(sessionID: "s1"))
+            pump(until: { !self.shows.isEmpty })
+            try XCTUnwrap(shows.last)(CLIRunResult(
+                exitCode: 0,
+                stdout: #"{"session_id":"s1","cwd":"/Users/example/demo","title":"t","messages":[{"seq":0,"role":"user","text":"a needle here"},{"seq":1,"role":"assistant","text":"needle and needle"}]}"#,
+                stderr: ""))
+            pump(until: { !model.hits.isEmpty })
+            XCTAssertNotNil(model.hitCounterText, "the counter is shown")
+
+            let contentView = try XCTUnwrap(window.contentView)
+            let host = try XCTUnwrap(try searchField(in: window).superview)
+            let anchor = try XCTUnwrap(Self.find(MenuAnchorNSView.self, in: contentView))
+            for points in [9, 13, 18] {
+                setTextSize(model, points)
+                XCTAssertEqual(model.list.columns, .two, "\(points)")
+                // The counter is its text, a gap, then the ‹ › control (the
+                // only segmented control in the window in two columns).
+                let control = frameInWindow(try XCTUnwrap(Self.find(NSSegmentedControl.self, in: contentView)))
+                let font = NSFont.systemFont(ofSize: SurfaceScale(ratio: CGFloat(points) / 13).findBarFont)
+                let text = (try XCTUnwrap(model.hitCounterText) as NSString).size(withAttributes: [.font: font]).width
+                let counterLeft = control.minX - SurfaceMetrics.headerSpacing - text
+                XCTAssertEqual(frameInWindow(host).maxX, counterLeft - SurfaceMetrics.headerSpacing, accuracy: 1,
+                               "\(width) at \(points): one gap before the counter")
+                XCTAssertEqual(control.maxX, try refreshButtonFrame(in: window).minX - SurfaceMetrics.headerSpacing,
+                               accuracy: 0.5, "\(width) at \(points): the counter, a gap, then Refresh")
+                XCTAssertLessThanOrEqual(frameInWindow(anchor).maxX, width - SurfaceMetrics.headerSide + 0.5,
+                                         "\(width) at \(points): ⌄ inside the window")
+                XCTAssertGreaterThan(host.frame.width, 0, "\(width) at \(points)")
+            }
+            window.orderOut(nil)
+        }
     }
 
     // MARK: - Conversation pane focus

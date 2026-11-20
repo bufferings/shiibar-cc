@@ -114,11 +114,11 @@ final class MainSurfaceModel: ObservableObject {
         )
     }
 
-    // MARK: - Refresh: the ⌄ menu's Refresh and ⌘R (§4.5 / §4.6 / §8.61)
+    // MARK: - Refresh: the header row's Refresh button and ⌘R (§4.5 / §4.6)
 
     /// From the start of a Refresh until both its search and its reconcile
-    /// have finished. The ⌄ menu reads it when it opens (`Refreshing…`,
-    /// disabled).
+    /// have finished. The header row's Refresh button is disabled and turns
+    /// meanwhile (`RefreshButtonState`).
     @Published private(set) var isRefreshing = false
 
     // MARK: - Conversation pane
@@ -167,6 +167,15 @@ final class MainSurfaceModel: ObservableObject {
     private(set) var windowColumns: ColumnMode = .one
     /// Window pin (§4.5 "pin (Keep on Top)"), persisted.
     @Published private(set) var keepOnTop: Bool
+    /// The window is in macOS full screen (reported by the controller from
+    /// the window's full-screen transitions; false while the window is
+    /// closed). The popover is never full screen: read it through
+    /// `isFullScreen(_:)`.
+    @Published private(set) var windowFullScreen = false
+    /// The height of a title bar the system keeps over the full-screen
+    /// window's content (`WindowFullScreenInset`); always 0 outside full
+    /// screen, where the layout draws under the title bar on purpose.
+    @Published private(set) var windowFullScreenTopInset: Double = 0
     /// The surface form (§4.5 "surface form"), persisted. Changed only by
     /// `Open in window` and `Open in popover`.
     @Published private(set) var surfaceForm: SurfaceForm
@@ -223,9 +232,6 @@ final class MainSurfaceModel: ObservableObject {
     /// The window's two-column list column width (DESIGN.md §4.5 "column
     /// boundary drag"), persisted in the same defaults as the rest.
     let listColumnWidth: ListColumnWidthStore
-    /// The window's last reported content width: a text size change moves
-    /// the two-column threshold, so the column mode is decided again.
-    private var windowContentWidth: Double?
 
     // MARK: - Private pipeline state
 
@@ -289,12 +295,10 @@ final class MainSurfaceModel: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] size in
+                // The column count does not follow the text size (the
+                // two-column threshold is fixed — §9); the list column's
+                // width does, in `SurfaceColumns`.
                 guard let self else { return }
-                // A changed threshold follows the same rules as a changed
-                // width (§4.5 "text size" / "switching by width").
-                if let width = self.windowContentWidth {
-                    self.windowColumnsChanged(ColumnMode.forWindowWidth(width, textSize: size))
-                }
                 if self.webPaneCreated {
                     self.webPane.setTextSize(Double(size.points))
                 }
@@ -375,6 +379,9 @@ final class MainSurfaceModel: ObservableObject {
         // mouse is held ends the drag without remembering the width.
         if surface == .window {
             listColumnWidth.cancelDrag()
+            // A window closed while in full screen reports no exit; the
+            // controller reads the state again when it reopens.
+            windowFullScreenChanged(false)
         }
         guard visibleSurface == surface else { return }
         visibleSurface = nil
@@ -384,10 +391,9 @@ final class MainSurfaceModel: ObservableObject {
     }
 
     /// The window's content width changed (§4.5 "switching by width"): the
-    /// column mode for it at the current text size.
+    /// column mode for it.
     func windowWidthChanged(_ width: Double) {
-        windowContentWidth = width
-        windowColumnsChanged(ColumnMode.forWindowWidth(width, textSize: textSize.size))
+        windowColumnsChanged(ColumnMode.forWindowWidth(width))
     }
 
     /// The window's width class changed (§4.5 "switching by width").
@@ -478,6 +484,31 @@ final class MainSurfaceModel: ObservableObject {
     }
 
     func menuClicked(anchor: NSView, surface: MainSurface) { onPresentMenu(anchor, surface) }
+
+    /// Whether `surface` is in full screen: only the window can be.
+    func isFullScreen(_ surface: MainSurface) -> Bool {
+        surface == .window && windowFullScreen
+    }
+
+    /// The space `surface` leaves at its top for a title bar kept on
+    /// screen in full screen (0 for the popover and outside full screen).
+    func topInset(for surface: MainSurface) -> Double {
+        surface == .window ? windowFullScreenTopInset : 0
+    }
+
+    /// The window entered or left full screen. Leaving it also drops the
+    /// top inset.
+    func windowFullScreenChanged(_ fullScreen: Bool) {
+        if windowFullScreen != fullScreen { windowFullScreen = fullScreen }
+        if !fullScreen { windowTopInsetChanged(0) }
+    }
+
+    /// The title bar height over the full-screen window's content
+    /// (`WindowFullScreenInset.topInset`); ignored outside full screen.
+    func windowTopInsetChanged(_ inset: Double) {
+        let value = windowFullScreen ? max(0, inset) : 0
+        if windowFullScreenTopInset != value { windowFullScreenTopInset = value }
+    }
 
     func keepOnTopClicked() {
         keepOnTop.toggle()
@@ -586,10 +617,10 @@ final class MainSurfaceModel: ObservableObject {
 
     // MARK: - Refresh
 
-    /// Refresh (§4.6), from the ⌄ menu's Refresh and from ⌘R: re-run the
-    /// search with the same query (History) and run `shiibar-cc reconcile`
-    /// (Running), then wait for both. A Refresh while one is in flight does
-    /// nothing.
+    /// Refresh (§4.6), from the header row's Refresh button and from ⌘R:
+    /// re-run the search with the same query (History) and run `shiibar-cc
+    /// reconcile` (Running), then wait for both. A Refresh while one is in
+    /// flight does nothing.
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true

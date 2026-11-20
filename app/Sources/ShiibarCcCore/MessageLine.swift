@@ -107,8 +107,8 @@ public enum MessageLine {
     /// The line to show, or nil to hide the line. Priority (§4.6 "message
     /// line"): `Refreshing…` while a Refresh runs, then index progress, then
     /// an error, then a finished Refresh's transient. `Refreshing…` wins
-    /// over progress and errors because the message line is the only
-    /// feedback a Refresh gives (§8.61); the finished transients do not.
+    /// over progress and errors (§4.6 "message line"); the finished
+    /// transients do not.
     public static func text(indexProgress: (done: Int, total: Int)?, error: MessageLineError?, transient: MessageTransient?) -> String? {
         if transient == .refreshing {
             return MessageTransient.refreshing.text

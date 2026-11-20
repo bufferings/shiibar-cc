@@ -1194,7 +1194,6 @@ final class UnifiedListStateTests: XCTestCase {
         guard case .conversation(let pane) = state.paneContent else { return XCTFail("expected a pane") }
         XCTAssertNil(pane.positionText)
         XCTAssertFalse(pane.showsBackButton)
-        XCTAssertFalse(pane.showsQueryInFindBar)
         XCTAssertEqual(pane.hints, [])
     }
 
@@ -1227,7 +1226,6 @@ final class UnifiedListStateTests: XCTestCase {
         XCTAssertFalse(first.canGoPrevious)
         XCTAssertTrue(first.canGoNext)
         XCTAssertTrue(first.showsBackButton)
-        XCTAssertTrue(first.showsQueryInFindBar)
         XCTAssertTrue(first.showsButtons)
         XCTAssertEqual(first.hints, [.prevNext, .back])
         XCTAssertEqual(first.primaryButton.kind, .jump)

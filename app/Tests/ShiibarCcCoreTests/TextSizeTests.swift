@@ -12,8 +12,6 @@ final class TextSizeTests: XCTestCase {
         XCTAssertEqual(TextSize.base, 13)
         XCTAssertEqual(TextSize.default.points, 13)
         XCTAssertEqual(TextSize.surfaceWidthAtBase, 420)
-        XCTAssertEqual(TextSize.twoColumnPaneAllowance, 360)
-        XCTAssertEqual(TextSize.twoColumnPaneAllowance, MainWindowMetrics.minimumWidth, "§9: the window's minimum width")
     }
 
     func testRatio() {
@@ -100,18 +98,19 @@ final class TextSizeTests: XCTestCase {
             let size = TextSize(clamping: points)
             XCTAssertEqual(size.popoverWidth, width, "\(points)")
             XCTAssertEqual(size.listColumnWidth, width, "\(points)")
-            XCTAssertEqual(size.twoColumnMinimumWidth, width + 360, "\(points)")
         }
     }
 
-    func testTwoColumnThresholdBoundaries() {
-        let cases: [(Int, Double, ColumnMode)] = [
-            (13, 779.5, .one), (13, 780, .two),
-            (18, 941.5, .one), (18, 942, .two),
-            (9, 650.5, .one), (9, 651, .two),
-        ]
-        for (points, width, mode) in cases {
-            XCTAssertEqual(ColumnMode.forWindowWidth(width, textSize: TextSize(clamping: points)), mode, "\(points) at \(width)")
+    /// §9: the threshold is 600pt at every text size (the column mode
+    /// takes no text size).
+    func testTwoColumnThresholdDoesNotFollowTheTextSize() {
+        XCTAssertEqual(ColumnMode.twoColumnMinimumWidth, 600)
+        for points in [9, 13, 18] {
+            let size = TextSize(clamping: points)
+            XCTAssertGreaterThan(size.listColumnWidth + ListColumnWidth.paneMinimum, 600,
+                                 "\(points): the default list width does not set the threshold")
         }
+        XCTAssertEqual(ColumnMode.forWindowWidth(599.5), .one)
+        XCTAssertEqual(ColumnMode.forWindowWidth(600), .two)
     }
 }

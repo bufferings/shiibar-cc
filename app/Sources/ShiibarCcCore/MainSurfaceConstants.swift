@@ -3,6 +3,7 @@
 // firing haptics and the UserDefaults IO live in the app target; the values
 // and the decisions live here so tests can pin them to §9.
 
+import CoreGraphics
 import Foundation
 
 /// UserDefaults keys and the window frame autosave name (M44 brief, global
@@ -88,11 +89,17 @@ public enum ColumnMode: Equatable, Sendable {
     /// List column on the left, conversation pane on the right.
     case two
 
-    /// The column mode for a window content width (§4.5/§9: two columns at
-    /// the default list column width + 360pt or wider — 780pt at text size
-    /// 13 — one column below; a remembered width does not move it). The popover never calls this — it is always `.one`.
-    public static func forWindowWidth(_ width: Double, textSize: TextSize) -> ColumnMode {
-        width >= textSize.twoColumnMinimumWidth ? .two : .one
+    /// §4.5 / §9: the window shows two columns at or above this content
+    /// width: the list column's minimum plus the right column's minimum
+    /// (280 + 320 = 600pt). Neither the text size nor a remembered list
+    /// column width moves it.
+    public static let twoColumnMinimumWidth: Double = ListColumnWidth.minimum + ListColumnWidth.paneMinimum
+
+    /// The column mode for a window content width (two columns at
+    /// `twoColumnMinimumWidth` or wider, one column below). The popover
+    /// never calls this — it is always `.one`.
+    public static func forWindowWidth(_ width: Double) -> ColumnMode {
+        width >= twoColumnMinimumWidth ? .two : .one
     }
 }
 
@@ -106,6 +113,25 @@ public enum MainWindowMetrics {
     public static let minimumHeight: Double = 300
     /// §9: page slide duration (ease-in-out) in one-column mode.
     public static let pageSlideSeconds: Double = 0.22
+
+    /// A proposed window frame size clamped to the frame size of the minimum
+    /// content size (§9), width and height independently. The window
+    /// delegate applies it to every user resize, so the minimum holds
+    /// whatever resets the window's `contentMinSize`.
+    public static func clampedFrameSize(_ proposed: CGSize, minimumFrameSize: CGSize) -> CGSize {
+        CGSize(width: max(proposed.width, minimumFrameSize.width),
+               height: max(proposed.height, minimumFrameSize.height))
+    }
+
+    /// A frame (AppKit coordinates, origin at the bottom left) grown to at
+    /// least `minimumFrameSize`, keeping its top-left corner: a remembered
+    /// frame smaller than the minimum opens at the minimum. A frame that
+    /// already fits is returned unchanged.
+    public static func frameRaisedToMinimum(_ frame: CGRect, minimumFrameSize: CGSize) -> CGRect {
+        let size = clampedFrameSize(frame.size, minimumFrameSize: minimumFrameSize)
+        guard size != frame.size else { return frame }
+        return CGRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height)
+    }
 }
 
 /// Popover height rules (§4.5 "popover", §9). The width follows the text
@@ -197,16 +223,16 @@ public struct PopoverHeightDrag: Equatable, Sendable {
 /// The two-column list column width (§4.5 "switching by width" / "column
 /// boundary drag", §8.53, §9). Without a remembered width the column takes
 /// the default width, which follows the text size; a remembered width wins
-/// over the text size. The two-column threshold stays on the default width
-/// (`ColumnMode.forWindowWidth`) whatever is remembered. Everything here is
-/// used in two columns only.
+/// over the text size. The two-column threshold
+/// (`ColumnMode.twoColumnMinimumWidth`) depends on neither. Everything here
+/// is used in two columns only.
 public enum ListColumnWidth {
     /// §9: the narrowest list column.
     public static let minimum: Double = 280
     /// §9: the right column keeps at least this width, the 1pt boundary
     /// line included, so the widest list column is the window width minus
-    /// this.
-    public static let paneMinimum: Double = TextSize.twoColumnPaneAllowance
+    /// this. Independent of the window's minimum width.
+    public static let paneMinimum: Double = 320
     /// §9: the drag area's width, centered on the 1pt boundary line (4pt
     /// on each side).
     public static let dragAreaWidth: Double = 8
@@ -240,13 +266,14 @@ public enum ListColumnWidth {
         return value
     }
 
-    /// The width to show (§4.5): the remembered width clamped into the
-    /// range for the window width, or the default width when nothing is
-    /// remembered. No side effects: the clamped value is never persisted,
-    /// so widening the window brings the remembered width back.
+    /// The width to show (§4.5): the remembered width, or the default width
+    /// when nothing is remembered, clamped into the range for the window
+    /// width (between the two-column threshold and the default width + the
+    /// right column's minimum, the default gives way too). No side effects:
+    /// the clamped value is never persisted, so widening the window brings
+    /// the remembered or default width back.
     public static func shown(remembered: Double?, windowWidth: Double, textSize: TextSize) -> Double {
-        guard let remembered else { return defaultWidth(textSize: textSize) }
-        return clamp(remembered, windowWidth: windowWidth)
+        clamp(remembered ?? defaultWidth(textSize: textSize), windowWidth: windowWidth)
     }
 }
 

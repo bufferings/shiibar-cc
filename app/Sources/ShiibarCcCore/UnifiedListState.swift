@@ -263,7 +263,7 @@ public enum UnifiedListEffect: Equatable, Sendable {
     case scheduleDragRefusalDismiss(id: Int, afterSeconds: Double)
     case closePopover
     /// Run Refresh (§4.6: the search and `shiibar-cc reconcile`), the same
-    /// as the ⌄ menu's Refresh.
+    /// as the header row's Refresh button.
     case refresh
     case nextMatch
     case previousMatch
@@ -376,9 +376,6 @@ public struct ConversationPaneModel: Equatable, Sendable {
     /// The detail header's prev / next buttons (disabled at the ends).
     public let canGoPrevious: Bool
     public let canGoNext: Bool
-    /// One column: the find bar shows `Matches for “term”` at its left end
-    /// and the counter / control at its right end (§4.6; `FindBarQueryText`).
-    public let showsQueryInFindBar: Bool
     /// Bottom panel, right end: Resume or Jump (or the disabled Jump).
     public let primaryButton: RowButton
     /// Bottom panel, left of the primary button.
@@ -778,7 +775,6 @@ public struct UnifiedListState: Equatable, Sendable {
             positionText: (oneColumn ? index : nil).map { "\($0 + 1) / \(rows.count)" },
             canGoPrevious: oneColumn && (index.map { $0 > 0 } ?? false),
             canGoNext: oneColumn && (index.map { $0 < rows.count - 1 } ?? false),
-            showsQueryInFindBar: oneColumn,
             primaryButton: row.primaryButton,
             branchButton: row.branchButton,
             hints: KeyHints.bottomPanel(columns: columns),
