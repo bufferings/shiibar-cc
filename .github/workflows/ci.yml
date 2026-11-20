@@ -76,14 +76,17 @@ jobs:
           PY
           done
 
-      - name: Cask template check (brew style --cask)
+      - name: Cask template check (brew style)
         # Renders packaging/homebrew/shiibar-cc.rb with dummy placeholder
-        # values and runs it through `brew style --cask` so a Ruby syntax
+        # values and runs it through `brew style` so a Ruby syntax
         # error in the template fails CI immediately, instead of only
         # surfacing when bump-cask.yml renders it for real on a release
-        # (macos-15 runners ship Homebrew preinstalled). `brew style --cask`
-        # requires the cask to live inside a tap directory, so this renders
-        # into a throwaway one under Homebrew's own Taps directory.
+        # (macos-15 runners ship Homebrew preinstalled). The rendered file
+        # goes into a throwaway tap directory under Homebrew's own Taps
+        # directory and is passed as a path without `--cask`: with `--cask`,
+        # the runner's Homebrew rejects a path ("Loading casks from paths,
+        # URLs or Ruby source is not supported; use a cask name", seen in
+        # this step's log on 2026-11-20).
         run: |
           tapdir="$(brew --repository)/Library/Taps/bufferings/homebrew-shiibar-cc-ci"
           mkdir -p "$tapdir/Casks"
@@ -93,7 +96,7 @@ jobs:
             -e "s/{{SHA256}}/$dummy_sha256/g" \
             packaging/homebrew/shiibar-cc.rb \
             > "$tapdir/Casks/shiibar-cc.rb"
-          brew style --cask "$tapdir/Casks/shiibar-cc.rb"
+          brew style "$tapdir/Casks/shiibar-cc.rb"
 
   deny:
     runs-on: ubuntu-latest

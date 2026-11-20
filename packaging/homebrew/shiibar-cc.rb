@@ -4,7 +4,7 @@
 # placeholders substituted by .github/workflows/bump-cask.yml when it renders
 # this file into Casks/shiibar-cc.rb in the bufferings/homebrew-tap repository
 # on every published (non-prerelease) GitHub Release. ci.yml renders it with
-# dummy values and runs `brew style --cask` on the result so a syntax error
+# dummy values and runs `brew style` on the result so a syntax error
 # here fails CI instead of surfacing only at bump time.
 #
 # arm64-only: there is no Intel build (no Intel Mac or CI runner to verify one
@@ -136,7 +136,7 @@ cask "shiibar-cc" do
   # `uninstall_postflight_steps`, which runs after the uninstall artifacts
   # are processed (the steps form of "Stanza: *flight" on the same page; see
   # `postflight_steps` above for why steps). (`Cask/StanzaOrder` in
-  # `brew style --cask` requires this block to appear before `uninstall` in
+  # `brew style` requires this block to appear before `uninstall` in
   # the file.)
   #
   # Same pattern and `-xf` reasoning as scripts/dev-uninstall.sh: verified

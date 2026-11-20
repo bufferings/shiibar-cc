@@ -59,7 +59,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 - push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
   cargo test / clippy(いずれも `--locked`)と swift build / swift test(いずれも警告をエラーにする)と cask テンプレートの
-  `brew style --cask` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
+  `brew style` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
 - **push 後の結果確認は、必ずコミット SHA で run を特定する**。SHA は**フル(40 桁)が必須** —
   `--commit` に短縮 SHA を渡すとエラーにならず黙って 0 件が返り、「run が無い」と誤診する
   (2026-07-08 実例)。run の登録は push から数秒〜十数秒遅れるので、登録待ちと完了待ちを分ける:
