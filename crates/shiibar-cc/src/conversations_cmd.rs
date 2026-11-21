@@ -30,12 +30,16 @@ struct ConversationJson<'a> {
     last_prompt: Option<&'a str>,
 }
 
-/// §4.4: `{"session_id","cwd","title","messages":[{"seq","role","text"}]}`.
+/// §4.4: `{"session_id","cwd","title","updated_at","messages":[{"seq","role","text"}]}`.
 #[derive(Serialize)]
 struct ShowJson<'a> {
     session_id: &'a str,
     cwd: Option<&'a str>,
     title: Option<&'a str>,
+    /// Equal to `search`'s `updated_at` for the same conversation, so the
+    /// conversation pane can age the end marker without re-running search
+    /// (§4.4).
+    updated_at: i64,
     messages: Vec<MessageJson<'a>>,
 }
 
@@ -180,6 +184,7 @@ pub fn run_show(
             session_id: &result.session_id,
             cwd: result.cwd.as_deref(),
             title: result.title.as_deref(),
+            updated_at: result.updated_at,
             messages: result
                 .messages
                 .iter()

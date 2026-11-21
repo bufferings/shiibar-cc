@@ -570,6 +570,33 @@ final class ListSectionsTests: XCTestCase {
         }
     }
 
+    /// §4.5 "collapsing sections": the closed Running mark is orange when
+    /// a row is waiting (reviewed or not), else the accent color when a
+    /// row is unreviewed, else absent — waiting wins when both are present.
+    func testRunningMarkColor() {
+        struct Case {
+            let name: String
+            let rows: [(AgentStatus, Bool)]
+            let expected: StateDot?
+        }
+        let cases: [Case] = [
+            Case(name: "waiting reviewed", rows: [(.waiting, false), (.idle, false)], expected: .waiting),
+            Case(name: "waiting unreviewed", rows: [(.waiting, true)], expected: .waiting),
+            Case(name: "waiting and another unreviewed", rows: [(.waiting, false), (.idle, true)], expected: .waiting),
+            Case(name: "unreviewed only", rows: [(.idle, true), (.working, false)], expected: .unreviewed),
+            Case(name: "neither", rows: [(.idle, false), (.working, false)], expected: nil),
+        ]
+        for c in cases {
+            var state = UnifiedListState(home: UL.home, now: UL.now, collapsedSections: [.running])
+            state.handle(.agentsUpdated(c.rows.enumerated().map { index, row in
+                UL.agent("t\(index)", status: row.0, session: "s\(index)", unreviewed: row.1)
+            }))
+            state.handle(.historyDelivered([UL.summary("h")], isFiltered: false))
+            XCTAssertEqual(state.runningAttentionMark, c.expected, c.name)
+            XCTAssertEqual(heading(state, .running)?.attentionMark, c.expected, c.name)
+        }
+    }
+
     // MARK: - Stored closed headings
 
     func testStoredClosedHeadingsAreReadDefensively() {

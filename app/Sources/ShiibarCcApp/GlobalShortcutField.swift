@@ -13,18 +13,13 @@ import SwiftUI
 struct GlobalShortcutRow: View {
     @ObservedObject var hotKey: GlobalHotKeyModel
 
-    static let label = "Global shortcut"
+    static let label = SettingsRow.globalShortcut.label
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            LabeledContent(Self.label) {
-                GlobalShortcutField(hotKey: hotKey)
-            }
-            if let hint = hotKey.recorder.hint {
-                Text(hint.text)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
+        // The guidance line (`Add ⌃, ⌥, or ⌘ to the shortcut`, `This
+        // shortcut is already in use`) shows under the description.
+        SettingsRowView(row: .globalShortcut, message: hotKey.recorder.hint?.text) {
+            GlobalShortcutField(hotKey: hotKey)
         }
     }
 }
@@ -65,9 +60,9 @@ struct GlobalShortcutField: View {
                     lineWidth: recorder.isRecording ? 2 : 1)
         )
         // The click is taken by an AppKit view over the whole field, not a
-        // SwiftUI tap gesture: in the grouped Form, SwiftUI puts a text
-        // interaction view over the field's text that swallows the click
-        // before a tap gesture sees it.
+        // SwiftUI tap gesture: SwiftUI can put a text interaction view over
+        // the field's text that swallows the click before a tap gesture
+        // sees it.
         .overlay(ShortcutFieldInput(hotKey: hotKey, isRecording: recorder.isRecording))
         .overlay(alignment: .trailing) {
             if recorder.showsClearButton {

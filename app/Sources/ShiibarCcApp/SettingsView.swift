@@ -1,19 +1,19 @@
-// Settings window (DESIGN.md §4.5 "Settings window" / §8.26/§8.27):
-// opened from the ⌄ menu's "Settings…" item (replacing the old Settings
-// submenu, M14 T1). Independent window, `NSApp.activate` on appear (same
-// LSUIElement requirement as Setup Check), no in-content close button — the
-// title bar's red button / ⌘W is the only way to close, because every
-// control here applies immediately (no "OK to confirm"). Two groups:
-// General (Start at Login, reusing AppState's existing SMAppService
-// read/write; Appearance = System / Light / Dark, §8.30/M27 T5; Text size,
-// the number field and stepper for the popover's and the window's text
-// size — §4.5 "text size", the same live value their ⌘= / ⌘− / ⌘0 keys
-// read and write via the shared `TextSizeStore`; Global shortcut, the
-// global hotkey's combination — §4.5/§8.50) and Sounds (Mute sound /
-// Waiting sound / Done sound, Waiting above Done per the product's own
-// waiting > working > idle priority).
+// Settings window (DESIGN.md §4.5 "Settings window" / §8.26/§8.27/§8.65):
+// opened from the ⌄ menu's "Settings…" item, the app menu and ⌘,.
+// Independent window, `NSApp.activate` on appear (an LSUIElement app's
+// window otherwise opens behind other apps), no in-content close button —
+// the title bar's red button / ⌘W is the only way to close, because every
+// control here applies immediately (no "OK to confirm").
+// Two tabs (`SettingsTab`): General — two headed boxes, General (Start at
+// Login, Appearance, Text size, Global shortcut) and Sounds (Mute sound,
+// Waiting sound, Done sound, Waiting above Done per the product's own
+// waiting > working > idle priority) — and Setup Check (SetupCheckView.swift).
+// Each row is a label with a one-line description on the left and one
+// control in a fixed-width right column (§8.65: what a setting does is
+// readable before it is touched; the controls line up). The window opens on
+// General every time and its height follows the shown tab's content.
 // Values are all UserDefaults-backed via `NotificationManager` (§4.5) or the
-// text-size store — this view only wires them to SwiftUI and previews a
+// text-size store — this file only wires them to SwiftUI and previews a
 // sound pick via `NSSound(named:)` (direct playback, not through a
 // notification — the pick is a user-initiated action, not an event, §4.5).
 
@@ -58,9 +58,9 @@ final class SettingsViewModel: ObservableObject {
         self.availableSoundNames = availableSoundNames
     }
 
-    /// Re-reads `SMAppService.mainApp.status` (never cached, same rule as
-    /// the old ⌄-menu checkmark — DESIGN.md §4.5) so the window can't drift
-    /// from System Settings' own Login Items UI.
+    /// Re-reads `SMAppService.mainApp.status` (never cached — DESIGN.md
+    /// §4.5) so the window can't drift from System Settings' own Login
+    /// Items UI.
     func refreshLoginItemStatus() {
         loginItemEnabled = loginItemEnabledProvider()
     }
@@ -183,133 +183,506 @@ final class TextSizeFieldModel: ObservableObject {
     private static func text(for size: TextSize) -> String { String(size.points) }
 }
 
-struct SettingsView: View {
-    @StateObject private var viewModel: SettingsViewModel
-    /// The Text size field over the shared store (§4.5): a key change from
-    /// the popover or the window moves the field live.
-    @StateObject private var textSizeField: TextSizeFieldModel
-    /// The global hotkey's registration (§4.5 "global hotkey"), shared with
-    /// the surface controller that receives the presses.
-    @ObservedObject private var hotKey: GlobalHotKeyModel
-
-    init(
-        notificationManager: NotificationManager,
-        loginItemEnabledProvider: @escaping () -> Bool,
-        toggleLoginItem: @escaping () -> Void,
-        appearanceSetting: AppearanceSetting,
-        setAppearance: @escaping (AppearanceSetting) -> Void,
-        textSize: TextSizeStore,
-        hotKey: GlobalHotKeyModel
-    ) {
-        self.hotKey = hotKey
-        _viewModel = StateObject(wrappedValue: SettingsViewModel(
-            notificationManager: notificationManager,
-            loginItemEnabledProvider: loginItemEnabledProvider,
-            toggleLoginItem: toggleLoginItem,
-            appearanceSetting: appearanceSetting,
-            setAppearance: setAppearance
-        ))
-        _textSizeField = StateObject(wrappedValue: TextSizeFieldModel(store: textSize))
-    }
-
-    var body: some View {
-        // A grouped `Form` (DESIGN.md §4.5: the look is a SwiftUI Form +
-        // .formStyle(.grouped)) — macOS renders native switch toggles,
-        // boxed sections, and row separators (the System Settings look), so
-        // the section headers and dividers come from the form chrome rather
-        // than being drawn by hand. The window's own title bar already reads
-        // as a settings pane, so no in-content "Settings" heading is drawn
-        // (a grouped Form with a redundant title looks doubled-up).
-        Form {
-            SettingsGeneralSection(viewModel: viewModel, textSizeField: textSizeField, hotKey: hotKey)
-
-            Section("Sounds") {
-                VStack(alignment: .leading, spacing: 2) {
-                    Toggle("Mute sound", isOn: Binding(
-                        get: { viewModel.muted },
-                        set: { viewModel.setMuted($0) }
-                    ))
-                    Text("Notifications arrive silently")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                // Waiting above Done (§4.5: matches the product's own
-                // priority order, waiting > working > idle).
-                Picker("Waiting sound", selection: Binding(
-                    get: { viewModel.waitingSoundName },
-                    set: { viewModel.setWaitingSoundName($0) }
-                )) {
-                    ForEach(viewModel.availableSoundNames, id: \.self) { name in
-                        Text(name).tag(name)
-                    }
-                }
-                .disabled(viewModel.muted)
-
-                Picker("Done sound", selection: Binding(
-                    get: { viewModel.doneSoundName },
-                    set: { viewModel.setDoneSoundName($0) }
-                )) {
-                    ForEach(viewModel.availableSoundNames, id: \.self) { name in
-                        Text(name).tag(name)
-                    }
-                }
-                .disabled(viewModel.muted)
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: Self.width)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear {
-            // `NSApp.activate` is required in an LSUIElement (accessory)
-            // app, same as Setup Check (§4.5).
-            NSApp.activate(ignoringOtherApps: true)
-            viewModel.refreshLoginItemStatus()
-        }
-    }
-
-    static let width: CGFloat = 380
+/// The Settings window's dimensions (DESIGN.md §9 "Settings window
+/// dimensions"; window-design.html "Settings window"). Fixed: the Settings
+/// window does not follow the popover's text size (§4.5 "text size").
+enum SettingsLayout {
+    /// The window's width, the same on every tab.
+    static let windowWidth: CGFloat = 600
+    /// The content's padding below the tab row.
+    static let contentTop: CGFloat = 16
+    static let contentSide: CGFloat = 24
+    static let contentBottom: CGFloat = 20
+    /// Between one box and the next heading (and above `Re-run`).
+    static let boxSpacing: CGFloat = 14
+    /// Between a box's heading and the box; the heading's left indent.
+    static let headingToBox: CGFloat = 6
+    static let headingIndent: CGFloat = 4
+    static let boxCornerRadius: CGFloat = 10
+    static let boxBorder: CGFloat = 1
+    /// A row's padding, its content's minimum height, the gap between the
+    /// left and right columns, and the gap between label and description.
+    static let rowVertical: CGFloat = 9
+    static let rowHorizontal: CGFloat = 14
+    static let rowMinContentHeight: CGFloat = 22
+    static let columnSpacing: CGFloat = 12
+    static let labelDescriptionSpacing: CGFloat = 2
+    /// The right column: a fixed width, controls aligned to its right edge.
+    static let controlColumnWidth: CGFloat = 240
+    static let controlColumnSpacing: CGFloat = 8
+    /// Type sizes (§4.5 "Settings window" look rules).
+    static let labelFont: CGFloat = 13
+    static let descriptionFont: CGFloat = 11
+    static let headingFont: CGFloat = 12
+    static let messageFont: CGFloat = 11
+    /// Text size's number field (§4.5: 56pt, right-aligned; 4pt to the
+    /// stepper).
+    static let textSizeFieldWidth: CGFloat = 56
+    static let textSizeStepperSpacing: CGFloat = 4
 }
 
-/// Settings > General (§4.5): Start at Login, Appearance, Text size, Global
-/// shortcut.
-struct SettingsGeneralSection: View {
+/// The tab row's dimensions (DESIGN.md §9 "Settings tab row dimensions").
+enum SettingsTabBarLayout {
+    static let rowVertical: CGFloat = 6
+    static let rowHorizontal: CGFloat = 12
+    static let buttonSpacing: CGFloat = 4
+    static let buttonMinWidth: CGFloat = 72
+    static let buttonVertical: CGFloat = 6
+    static let buttonHorizontal: CGFloat = 8
+    static let iconSize: CGFloat = 18
+    static let iconNameSpacing: CGFloat = 3
+    static let nameFont: CGFloat = 11
+    static let selectedCornerRadius: CGFloat = 7
+    /// The selected tab's ground: the accent color at this opacity.
+    static let selectedTintOpacity: Double = 0.16
+    /// The 1pt line under the tab row.
+    static let bottomLine: CGFloat = 1
+}
+
+/// The color of an input error and a guidance line under a description
+/// (DESIGN.md §9 "Settings error and guidance text color").
+enum SettingsColors {
+    static let messageNSColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0xF0 / 255, green: 0x8A / 255, blue: 0x5D / 255, alpha: 1)
+            : NSColor(srgbRed: 0xA0 / 255, green: 0x39 / 255, blue: 0x0A / 255, alpha: 1)
+    }
+}
+
+/// The Settings window's tabs, left to right (DESIGN.md §4.5 "Settings
+/// window").
+enum SettingsTab: CaseIterable, Equatable {
+    case general
+    case setupCheck
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .setupCheck: return "Setup Check"
+        }
+    }
+
+    /// SF Symbols: a gear for General, a checklist for Setup Check.
+    var symbolName: String {
+        switch self {
+        case .general: return "gearshape"
+        case .setupCheck: return "checklist"
+        }
+    }
+}
+
+/// The kind of control in a row's right column (DESIGN.md §4.5 "Settings
+/// window" look rules).
+enum SettingsControlKind: Equatable {
+    case toggleSwitch
+    case segmented
+    case numberFieldAndStepper
+    case shortcutField
+    case popup
+}
+
+/// One row of the General tab: its label, description and control (the
+/// table in DESIGN.md §4.5 "Settings window").
+enum SettingsRow: CaseIterable, Equatable {
+    case startAtLogin
+    case appearance
+    case textSize
+    case globalShortcut
+    case muteSound
+    case waitingSound
+    case doneSound
+
+    var label: String {
+        switch self {
+        case .startAtLogin: return "Start at Login"
+        case .appearance: return "Appearance"
+        case .textSize: return "Text size"
+        case .globalShortcut: return "Global shortcut"
+        case .muteSound: return "Mute sound"
+        case .waitingSound: return "Waiting sound"
+        case .doneSound: return "Done sound"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .startAtLogin: return "Runs in the menu bar after you log in to your Mac"
+        case .appearance: return "System follows the appearance setting of your Mac"
+        case .textSize: return "Text in the popover and the window"
+        case .globalShortcut: return "Shows the list from any app"
+        case .muteSound: return "Notifications arrive silently"
+        case .waitingSound: return "Plays when a session needs your input"
+        case .doneSound: return "Plays when a session finishes responding"
+        }
+    }
+
+    var control: SettingsControlKind {
+        switch self {
+        case .startAtLogin, .muteSound: return .toggleSwitch
+        case .appearance: return .segmented
+        case .textSize: return .numberFieldAndStepper
+        case .globalShortcut: return .shortcutField
+        case .waitingSound, .doneSound: return .popup
+        }
+    }
+}
+
+/// A headed box of rows.
+struct SettingsBoxSpec: Equatable {
+    let title: String
+    let rows: [SettingsRow]
+}
+
+/// The General tab's boxes and rows, top to bottom (DESIGN.md §4.5
+/// "Settings window").
+enum SettingsGeneralLayout {
+    static let boxes: [SettingsBoxSpec] = [
+        SettingsBoxSpec(title: "General", rows: [.startAtLogin, .appearance, .textSize, .globalShortcut]),
+        SettingsBoxSpec(title: "Sounds", rows: [.muteSound, .waitingSound, .doneSound]),
+    ]
+}
+
+/// The Settings window's state across its tabs: the selected tab, which is
+/// `General` every time the window opens (DESIGN.md §4.5 "tab on open"), and
+/// what a tab switch does to the General tab's unfinished input. The window
+/// is a SwiftUI `Window` scene whose content (and this model) outlives a
+/// close, so the tab goes back to General when the window closes; choosing
+/// Settings… while the window is open only brings it to the front and
+/// leaves the tab as it is.
+@MainActor
+final class SettingsWindowModel: ObservableObject {
+    @Published private(set) var selectedTab: SettingsTab = .general
+    let general: SettingsViewModel
+    let textSizeField: TextSizeFieldModel
+    let hotKey: GlobalHotKeyModel
+    let setupCheck: SetupCheckViewModel
+    private let center: NotificationCenter
+    private var closeObserver: NSObjectProtocol?
+
+    init(
+        general: SettingsViewModel,
+        textSizeField: TextSizeFieldModel,
+        hotKey: GlobalHotKeyModel,
+        setupCheck: SetupCheckViewModel,
+        center: NotificationCenter = .default
+    ) {
+        self.general = general
+        self.textSizeField = textSizeField
+        self.hotKey = hotKey
+        self.setupCheck = setupCheck
+        self.center = center
+        // No queue: AppKit posts `willClose` on the main thread.
+        closeObserver = center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let window = notification.object as? NSWindow, window.title == SettingsWindow.title else { return }
+            MainActor.assumeIsolated { self?.windowWillClose() }
+        }
+    }
+
+    deinit {
+        if let closeObserver { center.removeObserver(closeObserver) }
+    }
+
+    /// A click on a tab button (§4.5 "switching tabs"). Leaving General
+    /// treats the Text size field's unfinished input as a focus loss (an
+    /// edited value is applied, or its error shown) and abandons a Global
+    /// shortcut recording; showing Setup Check runs the checks.
+    func select(_ tab: SettingsTab) {
+        guard tab != selectedTab else { return }
+        if selectedTab == .general {
+            textSizeField.commitIfEdited()
+            hotKey.recordingAbandoned()
+        }
+        selectedTab = tab
+        if tab == .setupCheck { setupCheck.tabShown() }
+    }
+
+    /// Settings… (⌄ menu, app menu, ⌘,): asks the scene to open or bring
+    /// forward the window. The tab is left as it is — General after a
+    /// close (`windowWillClose`), the shown tab while the window is open —
+    /// and no check runs.
+    func open(using openScene: (String) -> Void) {
+        openScene(SettingsWindow.id)
+    }
+
+    /// The window is closing: the next open shows General, and a check run
+    /// in flight is discarded when it lands (§4.5 "Setup Check tab").
+    func windowWillClose() {
+        selectedTab = .general
+        setupCheck.windowClosed()
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var model: SettingsWindowModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SettingsTabBar(selected: model.selectedTab) { model.select($0) }
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: SettingsTabBarLayout.bottomLine)
+            SettingsTabContent(model: model)
+        }
+        .frame(width: SettingsLayout.windowWidth)
+        // The height follows the shown tab's content (§4.5 "window size":
+        // no scrolling); `.windowResizability(.contentSize)` sizes the
+        // window to it.
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            // `NSApp.activate` is required in an LSUIElement (accessory)
+            // app: without it the window can open behind other apps (§4.5).
+            NSApp.activate(ignoringOtherApps: true)
+            model.general.refreshLoginItemStatus()
+        }
+    }
+}
+
+/// The shown tab's content inside the content padding.
+struct SettingsTabContent: View {
+    @ObservedObject var model: SettingsWindowModel
+
+    var body: some View {
+        Group {
+            switch model.selectedTab {
+            case .general:
+                SettingsGeneralTab(viewModel: model.general, textSizeField: model.textSizeField, hotKey: model.hotKey)
+            case .setupCheck:
+                SetupCheckTab(model: model.setupCheck)
+            }
+        }
+        .padding(.top, SettingsLayout.contentTop)
+        .padding(.horizontal, SettingsLayout.contentSide)
+        .padding(.bottom, SettingsLayout.contentBottom)
+    }
+}
+
+/// The tab row (DESIGN.md §4.5 "Settings window" > tab row; §9): the
+/// buttons centered, an 18pt icon over an 11pt name, the selected one on a
+/// rounded accent-tinted ground in the accent color. A click switches tabs;
+/// the buttons never take the keyboard focus (no key operation switches
+/// tabs).
+struct SettingsTabBar: View {
+    let selected: SettingsTab
+    let onSelect: (SettingsTab) -> Void
+
+    var body: some View {
+        HStack(spacing: SettingsTabBarLayout.buttonSpacing) {
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, SettingsTabBarLayout.rowVertical)
+        .padding(.horizontal, SettingsTabBarLayout.rowHorizontal)
+    }
+
+    private func tabButton(_ tab: SettingsTab) -> some View {
+        let isSelected = tab == selected
+        let color = isSelected ? Color.accentColor : Color(nsColor: .labelColor)
+        return VStack(spacing: SettingsTabBarLayout.iconNameSpacing) {
+            Image(systemName: tab.symbolName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: SettingsTabBarLayout.iconSize, height: SettingsTabBarLayout.iconSize)
+            Text(tab.title)
+                .font(.system(size: SettingsTabBarLayout.nameFont))
+        }
+        .foregroundStyle(color)
+        .padding(.vertical, SettingsTabBarLayout.buttonVertical)
+        .padding(.horizontal, SettingsTabBarLayout.buttonHorizontal)
+        .frame(minWidth: SettingsTabBarLayout.buttonMinWidth)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: SettingsTabBarLayout.selectedCornerRadius)
+                    .fill(Color.accentColor.opacity(SettingsTabBarLayout.selectedTintOpacity))
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect(tab) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A headed box (window-design.html `.sh` + `.box`): the heading, then the
+/// rows on the row frames' ground with a 1pt border, a 1pt line between
+/// rows.
+struct SettingsBox<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.headingToBox) {
+            Text(title)
+                .font(.system(size: SettingsLayout.headingFont, weight: .semibold))
+                .padding(.leading, SettingsLayout.headingIndent)
+            VStack(spacing: 0) {
+                content()
+            }
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: SettingsLayout.boxCornerRadius)
+                    .fill(SurfaceColors.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsLayout.boxCornerRadius)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: SettingsLayout.boxBorder)
+            )
+        }
+    }
+}
+
+/// The 1pt line between two rows of a box.
+struct SettingsRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(height: 1)
+    }
+}
+
+/// One row (window-design.html `.it`): the label (13pt semibold) and its
+/// description (11pt, secondary) on the left, an error or guidance line
+/// under the description when there is one, and the control at the right
+/// edge of the fixed-width right column.
+struct SettingsRowView<Control: View>: View {
+    let row: SettingsRow
+    var message: String?
+    @ViewBuilder let control: () -> Control
+
+    var body: some View {
+        HStack(alignment: .center, spacing: SettingsLayout.columnSpacing) {
+            VStack(alignment: .leading, spacing: SettingsLayout.labelDescriptionSpacing) {
+                Text(row.label)
+                    .font(.system(size: SettingsLayout.labelFont, weight: .semibold))
+                Text(row.description)
+                    .font(.system(size: SettingsLayout.descriptionFont))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                if let message {
+                    Text(message)
+                        .font(.system(size: SettingsLayout.messageFont))
+                        .foregroundStyle(Color(nsColor: SettingsColors.messageNSColor))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: SettingsLayout.controlColumnSpacing) {
+                Spacer(minLength: 0)
+                control()
+            }
+            .frame(width: SettingsLayout.controlColumnWidth)
+        }
+        .frame(minHeight: SettingsLayout.rowMinContentHeight)
+        .padding(.vertical, SettingsLayout.rowVertical)
+        .padding(.horizontal, SettingsLayout.rowHorizontal)
+    }
+}
+
+/// The General tab (§4.5 "Settings window"): the General and Sounds boxes.
+struct SettingsGeneralTab: View {
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject var textSizeField: TextSizeFieldModel
     @ObservedObject var hotKey: GlobalHotKeyModel
 
     var body: some View {
-        Section("General") {
-            Toggle("Start at Login", isOn: Binding(
-                get: { viewModel.loginItemEnabled },
-                set: { _ in viewModel.toggleLoginItem() }
-            ))
-
-            // Appearance (§4.5/§8.30, M27 T5): System / Light / Dark,
-            // default System — the OS can stay light while this app
-            // (the popover and the window in particular) goes dark. Applies on pick, like every control here.
-            Picker("Appearance", selection: Binding(
-                get: { viewModel.appearance },
-                set: { viewModel.setAppearance($0) }
-            )) {
-                ForEach(AppearanceSetting.allCases, id: \.self) { setting in
-                    Text(setting.displayName).tag(setting)
+        VStack(alignment: .leading, spacing: SettingsLayout.boxSpacing) {
+            ForEach(SettingsGeneralLayout.boxes, id: \.title) { box in
+                SettingsBox(title: box.title) {
+                    ForEach(Array(box.rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { SettingsRowDivider() }
+                        rowView(row)
+                    }
                 }
             }
-
-            // Text size (§4.5 "text size"): right after Appearance.
-            TextSizeRow(field: textSizeField)
-
-            // Global shortcut (§4.5 / §8.50): records the global hotkey's
-            // combination; registers it the moment it is recorded.
-            GlobalShortcutRow(hotKey: hotKey)
         }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: SettingsRow) -> some View {
+        switch row {
+        case .startAtLogin:
+            SettingsRowView(row: row) {
+                SettingsSwitch(isOn: Binding(
+                    get: { viewModel.loginItemEnabled },
+                    set: { _ in viewModel.toggleLoginItem() }
+                ))
+            }
+        case .appearance:
+            // Appearance (§4.5/§8.30): System / Light / Dark, default
+            // System. Applies on pick, like every control here.
+            SettingsRowView(row: row) {
+                Picker(row.label, selection: Binding(
+                    get: { viewModel.appearance },
+                    set: { viewModel.setAppearance($0) }
+                )) {
+                    ForEach(AppearanceSetting.allCases, id: \.self) { setting in
+                        Text(setting.displayName).tag(setting)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+        case .textSize:
+            TextSizeRow(field: textSizeField)
+        case .globalShortcut:
+            GlobalShortcutRow(hotKey: hotKey)
+        case .muteSound:
+            SettingsRowView(row: row) {
+                SettingsSwitch(isOn: Binding(
+                    get: { viewModel.muted },
+                    set: { viewModel.setMuted($0) }
+                ))
+            }
+        case .waitingSound:
+            SettingsRowView(row: row) {
+                soundPicker(row, selection: Binding(
+                    get: { viewModel.waitingSoundName },
+                    set: { viewModel.setWaitingSoundName($0) }
+                ))
+            }
+        case .doneSound:
+            SettingsRowView(row: row) {
+                soundPicker(row, selection: Binding(
+                    get: { viewModel.doneSoundName },
+                    set: { viewModel.setDoneSoundName($0) }
+                ))
+            }
+        }
+    }
+
+    /// A sound popup, disabled while Mute sound is ON (a setting with no
+    /// effect is not offered — §4.5).
+    private func soundPicker(_ row: SettingsRow, selection: Binding<String>) -> some View {
+        Picker(row.label, selection: selection) {
+            ForEach(viewModel.availableSoundNames, id: \.self) { name in
+                Text(name).tag(name)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .disabled(viewModel.muted)
+    }
+}
+
+/// An ON / OFF switch at the small size (§4.5 "Settings window" look rules).
+struct SettingsSwitch: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle("", isOn: $isOn)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
     }
 }
 
 /// Settings > General > Text size (§4.5 "Settings window"): a 56pt
-/// right-aligned number field and the standard stepper, the description,
-/// and the error line under it. The field applies on Enter and when it loses
+/// right-aligned number field and the standard stepper, and the error line
+/// under the description. The field applies on Enter and when it loses
 /// focus, never per keystroke; closing the window while editing applies
 /// nothing.
 struct TextSizeRow: View {
@@ -319,31 +692,20 @@ struct TextSizeRow: View {
     /// not apply the edit.
     @State private var isShown = false
 
-    static let label = "Text size"
-    static let description = "Text in the popover and the window"
-    private static let fieldWidth: CGFloat = 56
+    static let label = SettingsRow.textSize.label
+    static let description = SettingsRow.textSize.description
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            LabeledContent(Self.label) {
-                HStack(spacing: 4) {
-                    TextField(Self.label, text: $field.text)
-                        .labelsHidden()
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: Self.fieldWidth)
-                        .focused($isFocused)
-                        .onSubmit { field.commit() }
-                    Stepper(Self.label, onIncrement: { field.stepUp() }, onDecrement: { field.stepDown() })
-                        .labelsHidden()
-                }
-            }
-            Text(Self.description)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            if let error = field.error {
-                Text(error.message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+        SettingsRowView(row: .textSize, message: field.error?.message) {
+            HStack(spacing: SettingsLayout.textSizeStepperSpacing) {
+                TextField(Self.label, text: $field.text)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: SettingsLayout.textSizeFieldWidth)
+                    .focused($isFocused)
+                    .onSubmit { field.commit() }
+                Stepper(Self.label, onIncrement: { field.stepUp() }, onDecrement: { field.stepDown() })
+                    .labelsHidden()
             }
         }
         .onAppear {

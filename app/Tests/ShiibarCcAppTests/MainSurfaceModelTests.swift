@@ -14,13 +14,27 @@ final class MainSurfaceModelTests: XCTestCase {
     private struct Dispatched {
         let arguments: [String]
         let completion: @MainActor (CLIRunResult) -> Void
+        var process: ConversationsProcess? = nil
+    }
+
+    /// One `conversations index` run of the conversation pane (no
+    /// `--json`; §4.6 "conversation pane reload").
+    private struct PaneIndexRun {
+        let arguments: [String]
+        let onLine: @MainActor (String) -> Void
+        let completion: @MainActor (Int32) -> Void
+        let process: ConversationsProcess
     }
 
     private final class Spy {
         var searches: [Dispatched] = []
         var shows: [Dispatched] = []
+        /// The index on open (`--json`).
         var indexLines: [@MainActor (String) -> Void] = []
         var indexCompletions: [@MainActor (Int32) -> Void] = []
+        var indexProcesses: [ConversationsProcess] = []
+        /// The conversation pane's own index runs.
+        var paneIndexes: [PaneIndexRun] = []
         var commands: [(arguments: [String], completion: @MainActor (Int32) -> Void)] = []
         var closePopoverCount = 0
         var permissionDeniedCount = 0
@@ -50,13 +64,21 @@ final class MainSurfaceModelTests: XCTestCase {
                 return ConversationsProcess(process: Process())
             },
             show: { arguments, _, completion in
-                spy.shows.append(Dispatched(arguments: arguments, completion: completion))
-                return ConversationsProcess(process: Process())
+                let process = ConversationsProcess(process: Process())
+                spy.shows.append(Dispatched(arguments: arguments, completion: completion, process: process))
+                return process
             },
-            index: { _, _, onLine, completion in
-                spy.indexLines.append(onLine)
-                spy.indexCompletions.append(completion)
-                return ConversationsProcess(process: Process())
+            index: { arguments, _, onLine, completion in
+                let process = ConversationsProcess(process: Process())
+                if arguments.contains("--json") {
+                    spy.indexLines.append(onLine)
+                    spy.indexCompletions.append(completion)
+                    spy.indexProcesses.append(process)
+                } else {
+                    spy.paneIndexes.append(PaneIndexRun(
+                        arguments: arguments, onLine: onLine, completion: completion, process: process))
+                }
+                return process
             }
         )
         let model = MainSurfaceModel(

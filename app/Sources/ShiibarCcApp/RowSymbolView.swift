@@ -3,14 +3,18 @@
 // DESIGN.md §3.1/§4.5): dim static ✻ = idle / glyph-cycle spinner at full
 // opacity = working (the Claude Code TUI's own · ✢ ✳ ✶ ✻ ✽ cycle — the
 // "blinking Claude" counterpart of the still, dim idle ✻) / outlined speech
-// bubble + bold "!" = waiting. Unreviewed rows get a red badge (with a
-// light halo, same two-layer idea as the tray's unreviewed dot) on the
-// symbol's top-right shoulder. The glyph and path coordinates below come
-// from window-design.html's 20-unit-box SVG symbols.
+// bubble + bold "!" = waiting, in orange (`systemOrange`, whether reviewed
+// or not — DESIGN.md §3.1). Working and idle carry no color. Unreviewed
+// rows get an accent-color dot (with a light halo, the same idea as the
+// tray's dot) on the symbol's top-right shoulder; a waiting unreviewed row
+// shows both. The same colors are used on a selected row (pale blue or pale
+// gray ground). The glyph and path coordinates below come from
+// window-design.html's 20-unit-box SVG symbols.
 //
 // `AgentStatus -> RowSymbolKind` selection is the pure, tested part
 // (`RowSymbol` in ShiibarCcCore); this view is purely the drawing.
 
+import AppKit
 import ShiibarCcCore
 import SwiftUI
 
@@ -28,7 +32,7 @@ struct RowSymbolView: View {
             symbolBody
                 .frame(width: size, height: size)
             if unreviewed {
-                badge
+                unreviewedDot
                     .offset(x: size * 0.32, y: -size * 0.32)
             }
         }
@@ -46,10 +50,10 @@ struct RowSymbolView: View {
         case .waiting:
             ZStack {
                 SpeechBubbleShape()
-                    .stroke(Color.primary, style: StrokeStyle(lineWidth: size * Self.waitingLineWidthRatio, lineJoin: .round))
+                    .stroke(Self.waitingColor, style: StrokeStyle(lineWidth: size * Self.waitingLineWidthRatio, lineJoin: .round))
                 Text("!")
                     .font(.system(size: size * Self.waitingBangSizeRatio, weight: .heavy, design: .rounded))
-                    .foregroundStyle(Color.primary)
+                    .foregroundStyle(Self.waitingColor)
             }
         case .working:
             // Glyph-cycle spinner at full opacity, same frame size and
@@ -91,9 +95,24 @@ struct RowSymbolView: View {
     /// window-design.html waiting symbol: "!" font-size 10.5 on a 20-unit box.
     private static let waitingBangSizeRatio: CGFloat = 10.5 / 20
 
-    private var badge: some View {
+    /// The color of a status symbol (DESIGN.md §3.1, §9 "state colors"):
+    /// orange for waiting; nil for working and idle, which use the label
+    /// color.
+    static func statusTintNSColor(for kind: RowSymbolKind) -> NSColor? {
+        switch kind {
+        case .waiting: return SurfaceColors.waitingNSColor
+        case .working, .idle: return nil
+        }
+    }
+
+    /// The unreviewed dot's fill (DESIGN.md §3.1).
+    static let unreviewedDotNSColor = SurfaceColors.unreviewedNSColor
+
+    private static let waitingColor = Color(nsColor: statusTintNSColor(for: .waiting) ?? .labelColor)
+
+    private var unreviewedDot: some View {
         ZStack {
-            Circle().fill(Color.red)
+            Circle().fill(Color(nsColor: Self.unreviewedDotNSColor))
             Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1)
         }
         .frame(width: size * 0.44, height: size * 0.44)

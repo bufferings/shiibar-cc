@@ -1016,9 +1016,9 @@ struct SectionHeaderView: View {
         case .band:
             SectionBandView(drawsTopLine: drawsTopLine) {
                 HStack(alignment: .center, spacing: SurfaceMetrics.sectionBandSpacing) {
-                    if heading.showsAttentionMark {
+                    if let mark = heading.attentionMark {
                         Circle()
-                            .fill(SurfaceColors.runningMark)
+                            .fill(SurfaceColors.stateDot(mark))
                             .frame(width: scale.runningMark, height: scale.runningMark)
                     }
                     name
@@ -1439,7 +1439,7 @@ struct RowView: View {
                     .truncationMode(.tail)
                     .frame(height: scale.rowLabelHeight)
                 // §4.5: the title is bold on every row; unreviewed is shown
-                // only by the badge on the status symbol.
+                // only by the accent-color dot on the status symbol.
                 Text(row.title)
                     .font(.system(size: scale.rowTitleFont, weight: .semibold))
                     .lineLimit(1)

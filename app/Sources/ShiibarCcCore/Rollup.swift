@@ -1,7 +1,7 @@
 // Tray icon rollup (the tray section of menubar-design.html, DESIGN.md §4.5):
 // one status glyph (and, while working, three dots) represents the whole
-// agent table, plus an independent
-// red-dot flag for "any agent unreviewed".
+// agent table, plus one corner dot: orange while any agent is waiting,
+// else the accent color while any agent is unreviewed (`StateDot`).
 
 import Foundation
 
@@ -22,17 +22,17 @@ public enum TrayGlyph: Equatable, Sendable {
     case none
 }
 
-/// Full tray rendering state: glyph, dim level, and whether the red
-/// unreviewed dot should be drawn.
+/// Full tray rendering state: glyph, dim level, and the corner dot (nil =
+/// no dot).
 public struct TrayIconState: Equatable, Sendable {
     public let glyph: TrayGlyph
     public let dim: Double
-    public let hasUnreviewedDot: Bool
+    public let dot: StateDot?
 
-    public init(glyph: TrayGlyph, dim: Double, hasUnreviewedDot: Bool) {
+    public init(glyph: TrayGlyph, dim: Double, dot: StateDot?) {
         self.glyph = glyph
         self.dim = dim
-        self.hasUnreviewedDot = hasUnreviewedDot
+        self.dot = dot
     }
 }
 
@@ -49,11 +49,14 @@ public enum Rollup {
     /// Compute the tray icon state from the current agent statuses.
     ///
     /// - Parameters:
-    ///   - statuses: every tracked agent's status.
+    ///   - statuses: every tracked agent's status (while disconnected, the
+    ///     last list received).
     ///   - hasUnreviewed: whether at least one agent has `unreviewed == true`.
     ///   - daemonConnected: `false` while reconnecting (§4.5); forces the
-    ///     "no agents" dim level regardless of `statuses`, since a stale
-    ///     rollup must not be shown as current.
+    ///     "no agents" glyph and dim level regardless of `statuses`, since a
+    ///     stale rollup must not be shown as current. The corner dot is
+    ///     still decided from the last list received, and drawn dimmed with
+    ///     the rest of the tray (§4.5 "visual source of truth").
     ///
     /// An `.unknown` status (forward-compat fallback) is ignored entirely
     /// (DESIGN.md §4.2/§4.5: clients ignore unknown statuses): it does not
@@ -64,19 +67,17 @@ public enum Rollup {
         hasUnreviewed: Bool,
         daemonConnected: Bool
     ) -> TrayIconState {
-        guard daemonConnected else {
-            return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
-        }
         let known = statuses.filter { $0 != .unknown }
-        guard !known.isEmpty else {
-            return TrayIconState(glyph: .none, dim: noAgentsDim, hasUnreviewedDot: hasUnreviewed)
+        let dot = StateDot.of(hasWaiting: known.contains(.waiting), hasUnreviewed: hasUnreviewed)
+        guard daemonConnected, !known.isEmpty else {
+            return TrayIconState(glyph: .none, dim: noAgentsDim, dot: dot)
         }
         if known.contains(.waiting) {
-            return TrayIconState(glyph: .waiting, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
+            return TrayIconState(glyph: .waiting, dim: normalDim, dot: dot)
         }
         if known.contains(.working) {
-            return TrayIconState(glyph: .working, dim: normalDim, hasUnreviewedDot: hasUnreviewed)
+            return TrayIconState(glyph: .working, dim: normalDim, dot: dot)
         }
-        return TrayIconState(glyph: .idle, dim: idleDim, hasUnreviewedDot: hasUnreviewed)
+        return TrayIconState(glyph: .idle, dim: idleDim, dot: dot)
     }
 }

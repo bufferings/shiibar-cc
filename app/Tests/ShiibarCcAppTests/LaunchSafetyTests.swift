@@ -28,6 +28,14 @@ final class LaunchSafetyTests: XCTestCase {
         XCTAssertFalse(delegate.appMenuModel.hasClosableWindow)
     }
 
+    /// The app lives in the menu bar: closing its last window (the main
+    /// window or Settings) must leave it running (§4.5). With a single
+    /// `Window` scene, SwiftUI quits the app unless the delegate says no.
+    func testClosingTheLastWindowDoesNotQuitTheApp() {
+        let delegate = AppDelegate()
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
+
     func testAppMenuModelInitNeverCallsTheKeyWindowProvider() {
         var providerCalls = 0
         let model = AppMenuModel(keyWindowProvider: {

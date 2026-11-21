@@ -4,7 +4,7 @@
 // section" / "stars" / "search scope", §8.49, §8.60). "History rows" are
 // the Starred and Recent rows together (§4.5).
 // Everything a row view draws is precomputed here: three text lines, the
-// symbol-and-time column (status symbol or star with the unreviewed badge,
+// symbol-and-time column (status symbol with the unreviewed dot, or star,
 // and the elapsed time). Each row also carries the two action buttons the bottom panel shows while it is
 // selected (enabled state, tooltip and the CLI call they make); the row
 // itself shows none of them (§4.5 "action buttons"). The view layer only
@@ -139,7 +139,8 @@ public struct RowButton: Equatable, Sendable {
 /// view's rows. The star is smaller than the status symbol and centered in
 /// a box of the same size (§9).
 public enum RowColumnSymbol: Equatable, Sendable {
-    /// Running row: status symbol, plus the red badge when unreviewed.
+    /// Running row: status symbol, plus the accent-color dot when
+    /// unreviewed.
     case status(RowSymbolKind, unreviewed: Bool)
     /// Starred row (`isStarred`): a filled yellow star, always visible.
     /// Recent row: an outline star shown only while the row is hovered.
@@ -224,7 +225,7 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
     public let cwd: String?
     /// The row's bold middle line (§4.5): the conversation title, or the
     /// `message` on a waiting Running row. Unreviewed is shown only by the
-    /// badge in `symbol`, never by this line's weight.
+    /// dot in `symbol`, never by this line's weight.
     public let title: String
     /// The two-component folder label (§4.5 "display label").
     public let label: String
@@ -340,9 +341,10 @@ public struct ListHeadingModel: Equatable, Identifiable, Sendable {
     /// The chevron is shown and a click opens or closes: not while
     /// searching.
     public let isCollapsible: Bool
-    /// The red dot before the name (Running only, while it is closed and
-    /// has a waiting or unreviewed row).
-    public let showsAttentionMark: Bool
+    /// The Running mark before the name (Running only, while it is closed
+    /// and has a waiting or unreviewed row): orange when a row is waiting,
+    /// else the accent color (§4.5 "collapsing sections"). Nil = no mark.
+    public let attentionMark: StateDot?
     /// The accent hint left of the chevron during a row drag (`Drop here to
     /// star` / `Drop here to unstar`).
     public let hint: String?
@@ -355,7 +357,7 @@ public struct ListHeadingModel: Equatable, Identifiable, Sendable {
         countText: String?,
         isOpen: Bool = true,
         isCollapsible: Bool = true,
-        showsAttentionMark: Bool = false,
+        attentionMark: StateDot? = nil,
         hint: String? = nil,
         isDropTarget: Bool = false
     ) {
@@ -364,12 +366,15 @@ public struct ListHeadingModel: Equatable, Identifiable, Sendable {
         self.countText = countText
         self.isOpen = isOpen
         self.isCollapsible = isCollapsible
-        self.showsAttentionMark = showsAttentionMark
+        self.attentionMark = attentionMark
         self.hint = hint
         self.isDropTarget = isDropTarget
     }
 
     public var title: String { heading.title }
+
+    /// The Running mark is shown (in either color).
+    public var showsAttentionMark: Bool { attentionMark != nil }
 
     /// §4.5 "row drag": the hint on the Starred heading while a Recent row
     /// is dragged.

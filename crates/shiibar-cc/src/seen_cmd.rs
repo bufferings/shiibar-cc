@@ -1,6 +1,6 @@
 //! `shiibar-cc seen <selector>` (DESIGN.md §4.2/§4.4): clear the unreviewed
 //! flag for one agent. Same selector-resolution and exit-code contract as
-//! `remove` (§4.4); the menu bar app's Clear badges calls this once per
+//! `remove` (§4.4); the menu bar app's Mark all as read calls this once per
 //! unreviewed target (§4.5/§8.24).
 
 use crate::exitcode;

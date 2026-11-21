@@ -14,9 +14,9 @@
 // load and opens content links in the default browser; the data store is
 // non-persistent.
 //
-// Bridge surface — native -> JS: load / setHits / jump / setSize / setTheme
-// / selectionRanges / markCopied. JS -> native: ready / rendered /
-// hitsApplied / selection / anchor / copyMessage / error. Every JS-side exception and every
+// Bridge surface — native -> JS: load / update / setHits / jump / setSize /
+// setTheme / selectionRanges / markCopied. JS -> native: ready / rendered /
+// hitsApplied / selection / anchor / copyMessage / needsLoad / error. Every JS-side exception and every
 // evaluateJavaScript failure lands in the unified log (category "webpane")
 // — nothing breaks silently.
 
@@ -77,8 +77,9 @@ public final class WebPaneController: NSObject, ObservableObject {
     /// through here — it is WebKit's own `copy:`.)
     public var pasteboard: NSPasteboard = .general
 
-    /// How long the copy button shows its check mark (§9). Injectable only
-    /// so tests can observe the revert without waiting the full duration.
+    /// How long the copy button shows its check mark and `Copied` (§9).
+    /// Injectable only so tests can observe the revert without waiting the
+    /// full duration.
     public var copyFeedbackSeconds: Double = MessageCopy.feedbackSeconds
 
     /// Called after a per-message copy wrote the pasteboard, with the
@@ -122,7 +123,15 @@ public final class WebPaneController: NSObject, ObservableObject {
     /// confirmed: a load dispatched into a 0x0 view renders, acks, and
     /// never paints). Flushed on the first nonzero layout.
     private var heldForLayout = false
-    private var lastLoadScript: String?
+    /// The content on the page, as the encoded payload of its latest load
+    /// or update, and the message the reader's viewport starts at (the
+    /// scroll memory's anchor; nil = the end). Every recovery — the held
+    /// layout flush, the ack retry, the zero-viewport self-heal, the
+    /// WebContent restart, and an update whose base the page does not hold
+    /// — replays a full `load` built from these, so it restores the
+    /// reader's position instead of the end.
+    private var contentPayloadJSON: String?
+    private var replayAnchorSeq: Int64?
     private var lastHitsScript: String?
     private var lastSizeScript: String?
     /// The body size last handed to the page (points), nil before the first.
@@ -161,8 +170,9 @@ public final class WebPaneController: NSObject, ObservableObject {
         loadGeneration += 1
         let generation = loadGeneration
         let payload = ConversationsWebPayload.payload(messages: messages, rendered: rendered, elapsed: elapsed)
-        let script = "shiibarAPI.load(JSON.parse(\(doubleEncoded(payload))), \(anchorSeq.map(String.init) ?? "null"), \(generation))"
-        lastLoadScript = script
+        contentPayloadJSON = doubleEncoded(payload)
+        replayAnchorSeq = anchorSeq
+        guard let script = replayLoadScript else { return }
         lastHitsScript = nil // hits for the previous conversation must not replay
         // §8.38(8), field-confirmed: a load dispatched while the view has
         // zero bounds renders into a 0x0 viewport, acks, and WebKit never
@@ -173,6 +183,53 @@ public final class WebPaneController: NSObject, ObservableObject {
             heldForLayout = true
             let bounds = webView.bounds.size
             webPaneLog.notice("load gen \(generation) held (bounds=\(Int(bounds.width))x\(Int(bounds.height)) window=\(self.webView.window != nil))")
+            return
+        }
+        run(script)
+        scheduleLoadAckCheck(generation)
+    }
+
+    /// Apply a reload of the conversation already in the page (§4.6
+    /// "conversation pane reload"). `change` is Core's comparison of the
+    /// fetched messages with the displayed ones; the page keeps the existing
+    /// elements for `.appended`, only re-labels the end marker for
+    /// `.unchanged`, and renders again for `.replaced`, and places the
+    /// scroll by the end-marker rule. `load` stays the first load. The
+    /// update is a delivery like `load` (§8.38(7)): it carries a generation,
+    /// is acked; a recovery (unacked, held layout, WebContent restart) and
+    /// an update whose base the page does not hold replay a full `load` of
+    /// this content at the reader's position.
+    public func update(
+        messages: [ConversationMessage], rendered: [RenderedMessage],
+        change: ConversationPaneUpdate, elapsed: String? = nil
+    ) {
+        loadedRendered = rendered
+        loadedMessages = messages
+        let base = loadGeneration
+        loadGeneration += 1
+        let generation = loadGeneration
+        let payload = ConversationsWebPayload.payload(messages: messages, rendered: rendered, elapsed: elapsed)
+        let mode: String
+        var from = 0
+        var keep: [[Int]] = []
+        switch change {
+        case .unchanged:
+            mode = "same"
+        case .appended(let firstNewIndex):
+            mode = "append"
+            from = firstNewIndex
+        case .replaced(let keptIndices):
+            mode = "replace"
+            keep = keptIndices.sorted { $0.key < $1.key }.map { [$0.key, $0.value] }
+        }
+        let encoded = doubleEncoded(payload)
+        contentPayloadJSON = encoded
+        let script = "shiibarAPI.update(JSON.parse(\(encoded)), \"\(mode)\", \(from), "
+            + "JSON.parse(\(doubleEncoded(keep))), \(generation), \(base))"
+        guard isDisplayable else {
+            heldForLayout = true
+            let bounds = webView.bounds.size
+            webPaneLog.notice("update gen \(generation) held (bounds=\(Int(bounds.width))x\(Int(bounds.height)) window=\(self.webView.window != nil))")
             return
         }
         run(script)
@@ -228,15 +285,23 @@ public final class WebPaneController: NSObject, ObservableObject {
         heldForLayout = false
         let bounds = webView.bounds.size
         webPaneLog.notice("flushing held pane state at bounds=\(Int(bounds.width))x\(Int(bounds.height)) gen=\(self.loadGeneration)")
-        for script in [lastThemeScript, lastSizeScript, lastLoadScript, lastHitsScript].compactMap({ $0 }) {
+        for script in [lastThemeScript, lastSizeScript, replayLoadScript, lastHitsScript].compactMap({ $0 }) {
             run(script)
         }
-        if lastLoadScript != nil {
+        if replayLoadScript != nil {
             scheduleLoadAckCheck(loadGeneration)
         }
     }
 
     // MARK: Delivery verification (§8.38(7))
+
+    /// A full `load` of the content on the page at the reader's position,
+    /// under the newest generation.
+    private var replayLoadScript: String? {
+        contentPayloadJSON.map {
+            "shiibarAPI.load(JSON.parse(\($0)), \(replayAnchorSeq.map(String.init) ?? "null"), \(loadGeneration))"
+        }
+    }
 
     /// If the page has not acked `generation` shortly after injection,
     /// re-inject the latest load once and log — a payload must never be
@@ -252,7 +317,7 @@ public final class WebPaneController: NSObject, ObservableObject {
             }
             self.retriedLoadGeneration = generation
             webPaneLog.error("load generation \(generation) was not acked; re-injecting once")
-            if let script = self.lastLoadScript {
+            if let script = self.replayLoadScript {
                 self.run(script)
                 if let hits = self.lastHitsScript { self.run(hits) }
                 self.scheduleLoadAckCheck(generation)
@@ -262,10 +327,10 @@ public final class WebPaneController: NSObject, ObservableObject {
 
     /// WebContent process died (the classic silently-blank web view): reload
     /// the page and replay the latest state once it reports ready.
-    fileprivate func recoverFromProcessTermination() {
+    func recoverFromProcessTermination() {
         webPaneLog.error("WebContent process terminated; reloading the pane")
         pageReady = false
-        queuedScripts = [lastThemeScript, lastSizeScript, lastLoadScript, lastHitsScript].compactMap { $0 }
+        queuedScripts = [lastThemeScript, lastSizeScript, replayLoadScript, lastHitsScript].compactMap { $0 }
         webView.loadHTMLString(pageHTML(), baseURL: nil)
     }
 
@@ -300,8 +365,9 @@ public final class WebPaneController: NSObject, ObservableObject {
     /// text of the message with `seq` (a Claude message's Markdown source;
     /// folded messages included) as plain text. The page's selection is not
     /// touched. After the write the page swaps the icon to a check mark for
-    /// `copyFeedbackSeconds` (§9). An unknown seq or an empty text writes
-    /// nothing and shows no check mark.
+    /// `copyFeedbackSeconds` (§9), with `Copied` to its left; a second press
+    /// meanwhile restarts the duration. An unknown seq or an empty text
+    /// writes nothing and shows no check mark.
     public func copyMessage(seq: Int64) {
         guard let text = MessageCopy.text(forSeq: seq, in: loadedMessages),
               writePasteboard(text) else { return }
@@ -384,7 +450,7 @@ public final class WebPaneController: NSObject, ObservableObject {
             // viewport while the native view HAS real bounds is the blank
             // pane; re-inject the latest load once per generation.
             if ack.viewportHeight <= 0, isDisplayable,
-               generation == loadGeneration, let script = lastLoadScript {
+               generation == loadGeneration, let script = replayLoadScript {
                 if selfHealedGeneration < generation {
                     selfHealedGeneration = generation
                     webPaneLog.notice("ack gen \(generation) had zero viewport with nonzero bounds; re-injecting once")
@@ -407,7 +473,26 @@ public final class WebPaneController: NSObject, ObservableObject {
             }
         case "anchor":
             if let seq = body["seq"] as? Int64 ?? (body["seq"] as? Int).map(Int64.init) {
+                replayAnchorSeq = seq
                 onAnchor?(seq)
+            }
+        case "needsLoad":
+            // An update whose base the page does not hold (a lost delivery,
+            // a reloaded page): render the latest content in full, at the
+            // reader's position — the page's top message, the end while the
+            // end marker was in view, or the remembered anchor when the
+            // page had no content.
+            let generation = (body["gen"] as? Int) ?? 0
+            guard generation == loadGeneration else { return } // a newer delivery follows
+            if body["hasContent"] as? Bool ?? false {
+                replayAnchorSeq = (body["atEnd"] as? Bool ?? false)
+                    ? nil
+                    : (body["anchor"] as? Int64 ?? (body["anchor"] as? Int).map(Int64.init))
+            }
+            webPaneLog.notice("update gen \(generation) without its base on the page; loading in full")
+            if let script = replayLoadScript {
+                run(script)
+                if let hits = lastHitsScript { run(hits) }
             }
         case "error":
             let message = body["message"] as? String ?? "unknown"

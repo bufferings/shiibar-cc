@@ -50,14 +50,15 @@
 
   <h2>デザイン原則</h2>
   <ul>
-    <li><strong>色は赤ただひとつ = 「あなた宛の未読(unreviewed)」</strong>。通知の発火条件と 1:1。
-      status は色ではなく<strong>記号と濃度</strong>で表す — <code>!</code>(waiting・太)/
-      <code>✻</code> と 3 つの点(working)/ <code>✻</code> だけ(idle・全体 0.8)</li>
+    <li><strong>色は、右肩の点の 2 色だけ</strong>: <strong>オレンジ = waiting のセッションがいる</strong>(あなたの操作を待って止まっている)、
+      <strong>アクセントカラー = 未確認(unreviewed)のセッションがいる</strong>(waiting がいないとき)。
+      窓とグリフには色を使用しない。status は<strong>記号と濃度</strong>でも表す — <code>!</code>(waiting・太)/
+      <code>✻</code> と 3 つの点(working)/ <code>✻</code> だけ(idle・全体 0.8)。色の意味は DESIGN.md §3.1</li>
     <li><strong>Claude が居る窓</strong>: トレイ = フルハイトの角丸窓 + 左上スロットの <strong>1 グリフ</strong>
       (Claude Code のスピナー文字)+ working のときだけ下段の 3 つの点。この組み合わせがロールアップを表す —
       「ターミナルで Claude Code が動いている姿」をそのまま記号化したもの</li>
-    <li><strong>太さと形・濃度の階層が色の代役</strong>: <code>!</code> は太く、working は 3 つの点が加わり、
-      idle・切断は全体の減光で沈む。グレースケールだけで優先順位が読める(色覚特性にも強い)</li>
+    <li><strong>太さと形・濃度の階層でも優先順位を示す</strong>: <code>!</code> は太く、working は 3 つの点が加わり、
+      idle・切断は全体の減光で沈む。点の色を判別できない場合も、グレースケールだけで優先順位が読める</li>
     <li>アイコンは<strong>操作ボタンを描かず、状態そのものを描く</strong>(▶/⏸ のようなメディアボタン文法は逆読みされるため不採用)</li>
   </ul>
 
@@ -68,7 +69,8 @@
     <tr><td>working のみ</td><td>静止した ✻ + 下段に 3 つの点(半径 0.9、中心は x 5.0 / 8.8 / 12.6・y 14.0)</td><td>実行中</td></tr>
     <tr><td>全員 idle</td><td>静止した ✻・全体 0.8</td><td>プロンプトが返っている = 手空き(窓は静か)</td></tr>
     <tr><td>エージェントなし</td><td>静止した ✻・全体 0.45</td><td>レイアウト不変のまま沈黙(スロットの位置は動かさない)</td></tr>
-    <tr><td>unreviewed が 1 台以上</td><td>右肩に<strong>赤バッジ</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、バッジは対応するまで残る)</td></tr>
+    <tr><td>waiting が 1 台以上</td><td>右肩に<strong>オレンジの点</strong>(上記に重畳)</td><td>操作を待っているエージェントがいる(確認済みかどうかに関係しない。waiting がいなくなるまで残る)</td></tr>
+    <tr><td>waiting が無く、unreviewed が 1 台以上</td><td>右肩に<strong>アクセントカラーの点</strong>(上記に重畳)</td><td>未確認(unreviewed)のエージェントがいる(通知は一過性、点は確認するまで残る)</td></tr>
   </table>
   <ul>
     <li>ロールアップ優先度: <strong>waiting &gt; working &gt; idle</strong>。トレイは全セッションの状態の代表 1 表示</li>
@@ -78,26 +80,32 @@
       waiting は ✻ と入れ替えで太い <code>!</code>(✻ の約 1.1 倍)。
       どの状態も静止画で、アニメーションは使用しない(画像を変更するたびに一定の処理時間が必要なため。
       DESIGN.md §8.51)。グリフと点だけなので、テンプレート画像のまま成立する</li>
-    <li>赤バッジは窓の右肩にさせ、<strong>細い明色フチ(ハロー)を常時描く</strong>
-      (明色バーでは実質不可視。テンプレート画像はバー色を知れないので条件分岐はしない)</li>
+    <li>点は窓の右肩に配置し、<strong>細い明色フチ(ハロー)を常時描く</strong>
+      (明色バーでは実質不可視。ハローは、バーの色による条件分岐をしない)。点は 1 つで、オレンジを優先する
+      (waiting と未確認の両方がいる場合は、オレンジの点だけを表示する)。位置と大きさは、色に関係なく同じである</li>
+    <li><strong>点の色</strong>: オレンジは <code>systemOrange</code>、アクセントカラーは <code>controlAccentColor</code> で、
+      どちらも、メニューバーのボタンの外観(明るいか暗いか)で解決した色を使用する。アクセントカラーの設定を変更したときは、
+      点の色も変化する(システムの色の変更の通知で、画像を描画し直す)。下の図の色は、既定のアクセントカラー(青)の例である</li>
     <li>減光は 2 段階: <strong>idle = 全体 0.8 / エージェントなし = 0.45</strong>(値は実機調整。
       idle と切断の見分けはこの濃度差のみ)。
-      <strong>daemon 切断中はトレイ全体をエージェントなしと同じ減光にする</strong>(古いロールアップを正常と誤認させない。DESIGN.md §4.5)</li>
+      <strong>daemon 切断中はトレイ全体をエージェントなしと同じ減光にする</strong>(古いロールアップを正常と誤認させない。DESIGN.md §4.5)。
+      切断中も、最後に受け取った一覧で点の種類を判定し、同じ減光で表示する</li>
   </ul>
   <div class="mock">
-    <div class="mock-label">左から: 待ち・未読 / 待ち・対応中 / 実行中・完了未読あり / 実行中のみ / 全員待機(0.8) / エージェントなし・切断(0.45)</div>
+    <div class="mock-label">左から: 待ち・未読(オレンジの点)/ 待ち・確認済み(同じ表示)/ 実行中・完了未読あり(アクセントカラーの点)/ 実行中のみ / 全員待機(0.8) / エージェントなし・切断(0.45)</div>
     <div class="mbar">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text></svg></span></span>
-      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text><circle cx="5" cy="14" r="0.9" fill="currentColor"/><circle cx="8.8" cy="14" r="0.9" fill="currentColor"/><circle cx="12.6" cy="14" r="0.9" fill="currentColor"/><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#ff9500"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#ff9500"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text><circle cx="5" cy="14" r="0.9" fill="currentColor"/><circle cx="8.8" cy="14" r="0.9" fill="currentColor"/><circle cx="12.6" cy="14" r="0.9" fill="currentColor"/><circle cx="15.6" cy="4.1" r="3.6" fill="#0a84ff"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
       <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text><circle cx="5" cy="14" r="0.9" fill="currentColor"/><circle cx="8.8" cy="14" r="0.9" fill="currentColor"/><circle cx="12.6" cy="14" r="0.9" fill="currentColor"/></svg></span></span>
       <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
       <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.45"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
       <span class="mitem dim">📶</span><span class="mitem dim">🔋</span><span class="mitem" style="font-variant-numeric:tabular-nums">7月5日(日) 0:15</span>
     </div>
-    <div class="mock-label">暗色メニューバー(壁紙の色を拾った例)での見え方 — テンプレートの自動反転で白いグリフになる。赤バッジには明色フチ</div>
+    <div class="mock-label">暗色メニューバー(壁紙の色を拾った例)での見え方 — テンプレートの自動反転で白いグリフになる。点には明色フチ。左から: 待ち(オレンジの点)/ 実行中・完了未読あり(アクセントカラーの点)/ 実行中のみ / 全員待機</div>
     <div class="mbar" style="background:#5c2018;color:#f4f0ee">
-      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="#f4f0ee" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#f24d52"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="10.45" font-weight="800" text-anchor="middle" fill="#f4f0ee" stroke="none">!</text><circle cx="15.6" cy="4.1" r="3.6" fill="#ff9f0a"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
+      <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x273B;&#xFE0E;</text><circle cx="5" cy="14" r="0.9" fill="#f4f0ee"/><circle cx="8.8" cy="14" r="0.9" fill="#f4f0ee"/><circle cx="12.6" cy="14" r="0.9" fill="#f4f0ee"/><circle cx="15.6" cy="4.1" r="3.6" fill="#0a84ff"/><circle cx="15.6" cy="4.1" r="3.6" fill="none" stroke="rgba(255,255,255,.85)" stroke-width=".9"/></svg></span></span>
       <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x273B;&#xFE0E;</text><circle cx="5" cy="14" r="0.9" fill="#f4f0ee"/><circle cx="8.8" cy="14" r="0.9" fill="#f4f0ee"/><circle cx="12.6" cy="14" r="0.9" fill="#f4f0ee"/></svg></span></span>
       <span class="mitem tray" style="margin-left:8px"><span class="tsvg"><svg viewBox="0 0 20 18" style="opacity:0.8"><rect x="0.8" y="1" width="16" height="16.2" rx="3.5" fill="none" stroke="#f4f0ee" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/><text x="6.4" y="11" font-size="9.5" text-anchor="middle" fill="#f4f0ee" stroke="none">&#x273B;&#xFE0E;</text></svg></span></span>
       <span class="mitem" style="font-variant-numeric:tabular-nums;color:#f4f0ee">0:15</span>
@@ -107,14 +115,15 @@
   <h2>実装ノート</h2>
   <ul>
     <li>トレイは<strong>二層合成</strong>: 窓 + スロットグリフの<strong>テンプレート層</strong>(モノクロ・自動追従)の上に、
-      <strong>赤バッジを別レイヤーで重ねる</strong>。単一 NSImage に赤を描いてテンプレート指定すると赤が失われる点に注意。
-      スロットの ✻ と <code>!</code> は文字グリフ(attributed string)、working の 3 つの点とバッジは自前描画</li>
+      <strong>色の点を別レイヤーで重ねる</strong>。単一 NSImage に色を描いてテンプレート指定すると色が失われる点に注意。
+      スロットの ✻ と <code>!</code> は文字グリフ(attributed string)、working の 3 つの点と右肩の点は自前描画</li>
     <li><strong>✻ は素の Unicode 文字グリフ(U+273B TEARDROP-SPOKED ASTERISK 系の文字記号)のまま使い、
       Anthropic ロゴのサンバースト形状には寄せない</strong>(ブランド流用回避。公開リポジトリなので特に)</li>
     <li>線の太さ・間隔・光学調整はすべて<strong>実機(Retina レンダリング)で最終決定</strong>。実機確認項目:
       ✻ と枠の間隔が融合して見えないか / ✻ の花弁が小サイズで潰れないか
       (潰れる場合は 9.5pt → 10.5pt まで戻してよい) / working の 3 つの点が小サイズで判別できるか /
-      赤バッジのハローが各種メニューバー色で機能するか</li>
+      点のハローが各種メニューバー色で機能するか / オレンジの点とアクセントカラーの点を、明るいバーと暗いバーの両方で判別できるか
+      (アクセントカラーの設定を変更した場合を含む)</li>
     <li>トレイのロールアップは「waiting 2 台」と「1 台」を区別しない(意図的な割り切り。内訳は、アイコンのクリックで開く一覧(ポップオーバーまたはウィンドウ)が示す — window-design.html)</li>
   </ul>
 </div>

@@ -9,6 +9,7 @@
 
 import AppKit
 import Combine
+import os
 import ShiibarCcCore
 import SwiftUI
 import WebKit
@@ -59,18 +60,16 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// until the popover it opens closes (`RegularAppHold`).
     private var closingWindowForPopover = false
     private var subscriptions: Set<AnyCancellable> = []
-    /// Redraws the tray when the menu bar's appearance flips (the badge
+    /// Redraws the tray when the menu bar's appearance flips (the dot
     /// variant is not a template image and picks its glyph color by hand).
     private var appearanceObservation: NSKeyValueObservation?
-    /// Skips tray image assignments that would depict the same thing (see
-    /// `refreshTrayImage`).
-    private var trayImageGate = TrayImageGate()
-    /// Opens the Settings / Setup Check `Window` scenes (captured from a
-    /// SwiftUI view on whichever surface appeared first — see
-    /// `surfaceRootView`).
+    /// Sets the tray image only when what it depicts changed.
+    private var trayImageUpdater: TrayImageUpdater?
+    /// Opens the Settings `Window` scene (captured from a SwiftUI view on
+    /// whichever surface appeared first — see `surfaceRootView`).
     var openSceneWindow: ((String) -> Void)?
     private lazy var menuHandler = HeaderMenuHandler(controller: self)
-    /// Applies the pin's level to Settings / Setup Check as they become key.
+    /// Applies the pin's level to Settings as it becomes key.
     private var auxiliaryKeyObserver: NSObjectProtocol?
     /// The About panel, once shown: the panel the About call brought on
     /// screen (AppKit gives it no public handle).
@@ -78,6 +77,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// Closes the popover when the app stops being active (§4.5 "popover",
     /// §8.58).
     private var deactivationCloser: PopoverDeactivationCloser?
+    /// Logs the windows the app did not create (§4.5 "making failures
+    /// visible").
+    private var unownedWindowMonitor: UnownedWindowMonitor?
 
     /// The window's `title` (§4.5: not drawn; Mission Control and the
     /// title filters use it).
@@ -99,6 +101,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         )
         setUpKeyMonitor()
         setUpMouseDownMonitor()
+        unownedWindowMonitor = UnownedWindowMonitor(kind: { [weak self] window in
+            self?.shownWindowKind(window) ?? .other
+        })
         model.onClosePopover = { [weak self] in self?.closePopover() }
         model.onOpenInWindow = { [weak self] in self?.openWindow() }
         model.onCloseWindowForPopover = { [weak self] in self?.closeWindowForPopover() }
@@ -113,9 +118,9 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             self?.applyAuxiliaryWindowLevels()
         }
         state.showAboutPanel = { [weak self] in self?.showAboutPanel() }
-        // Settings / Setup Check open from the ⌄ menus, the app menu and ⌘,
-        // and SwiftUI can create them after `openWindow` returns: each one
-        // takes the pin's level whenever it becomes key.
+        // Settings opens from the ⌄ menus, the app menu and ⌘, and SwiftUI
+        // can create it after `openWindow` returns: it takes the pin's level
+        // whenever it becomes key.
         auxiliaryKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: nil
         ) { [weak self] notification in
@@ -155,18 +160,26 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             }
         }
         statusItem = item
+        trayImageUpdater = TrayImageUpdater(
+            state: { [weak self] in self?.state.trayIcon ?? Rollup.icon(statuses: [], hasUnreviewed: false, daemonConnected: false) },
+            appearance: { [weak item] in item?.button?.effectiveAppearance },
+            setImage: { [weak item] image in item?.button?.image = image })
     }
 
     private func refreshTrayImage() {
-        guard let button = statusItem?.button else { return }
-        let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let icon = state.trayIcon
-        // Assign only when the depicted state or the menu bar appearance
-        // changed: setting the image schedules a replicant redraw that sets
-        // the button's appearance and re-fires `appearanceObservation`, so an
-        // unconditional assignment never stops redrawing.
-        guard trayImageGate.shouldRender(state: icon, darkMenuBar: dark) else { return }
-        button.image = TrayIconRenderer.render(state: icon, darkMenuBar: dark)
+        trayImageUpdater?.refresh()
+    }
+
+    /// What a shown window is, for the log of windows the app did not
+    /// create: the app's own windows by identity, the rest by class name
+    /// (`UnownedWindowLog.kind`).
+    private func shownWindowKind(_ shown: NSWindow) -> ShownWindowKind {
+        if shown === window { return .mainWindow }
+        if let popoverWindow = popover.contentViewController?.view.window, shown === popoverWindow { return .popover }
+        if let aboutPanel, shown === aboutPanel { return .aboutPanel }
+        if let statusWindow = statusItem?.button?.window, shown === statusWindow { return .statusItem }
+        if shown.title == SettingsWindow.title { return .settings }
+        return UnownedWindowLog.kind(className: String(describing: type(of: shown)))
     }
 
     /// The window is open: on screen or minimized to the Dock (closing
@@ -336,6 +349,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         popover.appearance = NSApp.effectiveAppearance
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         installPopoverBackground()
+        unownedWindowMonitor?.surfaceShown()
         popover.contentViewController?.view.window?.makeKey()
         button.highlight(true)
         if let popoverWindow = popover.contentViewController?.view.window {
@@ -417,13 +431,14 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        unownedWindowMonitor?.surfaceShown()
         reportFocus(of: window, surface: .window)
         // Activation can complete later; `windowDidBecomeKey` reports then.
         model.surfaceKeyChanged(surface: .window, isKey: window.isKeyWindow)
         if focus == .initial {
             model.requestInitialFocus()
         }
-        // Open Settings / Setup Check / About now float over the pinned
+        // Open Settings / About now float over the pinned
         // window.
         applyAuxiliaryWindowLevels()
     }
@@ -513,7 +528,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
 
     /// The root view of either surface: the shared layout plus the
     /// zero-size `SceneOpenerView` that hands over SwiftUI's `openWindow`
-    /// for the ⌄ menu's Settings… / Setup Check…. Both surfaces carry it,
+    /// for the ⌄ menu's Settings…. Both surfaces carry it,
     /// because either can be the first to appear after launch (the window
     /// form opens the window without the popover ever showing).
     static func surfaceRootView(
@@ -530,7 +545,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         window?.level = model.keepOnTop ? .floating : .normal
     }
 
-    /// Settings, Setup Check and the About panel float while the pin is ON
+    /// Settings and the About panel float while the pin is ON
     /// and the window is open, so they open in front of the pinned window
     /// (`AuxiliaryWindowLevel`).
     /// `windowOpen` overrides the window's state for the close path: in
@@ -982,10 +997,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         showAboutPanel()
     }
 
-    fileprivate func openScene(_ id: String, title: String, from surface: MainSurface) {
+    fileprivate func openSettings(from surface: MainSurface) {
         if surface == .popover { closePopover() }
         NSApp.activate(ignoringOtherApps: true)
-        openSceneWindow?(id)
+        let title = SettingsWindow.title
+        state.settingsWindow.open { [weak self] id in self?.openSceneWindow?(id) }
         // `openWindow` can create the window after this call returns, and
         // re-opening an existing one does not always make it key: on the
         // next turn, bring the scene's window to the front as key.
@@ -1006,8 +1022,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     fileprivate func archivedMenuItemChosen() { model.archivedMenuItemChosen() }
 }
 
-/// The window level of the auxiliary windows — Settings, Setup Check and
-/// the About panel (§4.5 "pin (Keep on Top)"): floating while the pin is ON
+/// The window level of the auxiliary windows — Settings and the About
+/// panel (§4.5 "pin (Keep on Top)", §8.62): floating while the pin is ON
 /// and the main window is open (minimized counts as open), so they open in
 /// front of the pinned window; normal while the pin is OFF or the main
 /// window is closed (the popover form included). The main window's own
@@ -1017,10 +1033,10 @@ enum AuxiliaryWindowLevel {
         keepOnTop && windowOpen ? .floating : .normal
     }
 
-    /// Settings and Setup Check by their scene titles; the About panel by
-    /// the handle taken when it was shown.
+    /// Settings by its scene title; the About panel by the handle taken
+    /// when it was shown.
     static func isAuxiliary(title: String, isAboutPanel: Bool) -> Bool {
-        isAboutPanel || title == SettingsWindow.title || title == SetupCheckWindow.title
+        isAboutPanel || title == SettingsWindow.title
     }
 }
 
@@ -1105,9 +1121,8 @@ struct HeaderMenuItem: Equatable {
     enum Command: Equatable {
         case about
         case settings
-        case setupCheck
         case archived
-        case clearBadges
+        case markAllAsRead
         case quit
     }
 
@@ -1119,11 +1134,11 @@ struct HeaderMenuItem: Equatable {
 }
 
 /// The ⌄ menu's entries (§4.5 "⌄ menu"): About Shiibar CC / — / Settings… /
-/// Setup Check… / — / Archived / Clear badges / — / Quit. Refresh is the
-/// header row's button and ⌘R.
+/// — / Archived / Mark all as read / — / Quit. Setup Check is a tab of the
+/// Settings window; Refresh is the header row's button and ⌘R.
 enum HeaderMenu {
-    /// The state when the menu opens: Clear badges is disabled when nothing
-    /// is unreviewed (§8.24); `Archived` is disabled while no conversation
+    /// The state when the menu opens: Mark all as read is disabled when
+    /// nothing is unreviewed (§8.24); `Archived` is disabled while no conversation
     /// is archived (`hasArchived`: the stored archived list, not waiting
     /// for a search result) and checked while the Archive view is shown
     /// (`showsArchive`).
@@ -1132,11 +1147,10 @@ enum HeaderMenu {
             .item(HeaderMenuItem(command: .about, title: "About Shiibar CC", isEnabled: true)),
             .separator,
             .item(HeaderMenuItem(command: .settings, title: "Settings\u{2026}", isEnabled: true)),
-            .item(HeaderMenuItem(command: .setupCheck, title: "Setup Check\u{2026}", isEnabled: true)),
             .separator,
             .item(HeaderMenuItem(command: .archived, title: "Archived", isEnabled: hasArchived,
                                  isChecked: showsArchive)),
-            .item(HeaderMenuItem(command: .clearBadges, title: "Clear badges", isEnabled: hasUnreviewed)),
+            .item(HeaderMenuItem(command: .markAllAsRead, title: "Mark all as read", isEnabled: hasUnreviewed)),
             .separator,
             .item(HeaderMenuItem(command: .quit, title: "Quit", isEnabled: true)),
         ]
@@ -1148,8 +1162,8 @@ enum HeaderMenu {
 final class HeaderMenuHandler: NSObject {
     weak var controller: MainSurfaceController?
     var surface: MainSurface = .popover
-    /// Set by the items that open another window (About / Settings / Setup
-    /// Check) while the menu is open.
+    /// Set by the items that open another window (About / Settings) while
+    /// the menu is open.
     var openedWindow = false
 
     init(controller: MainSurfaceController?) {
@@ -1181,9 +1195,8 @@ final class HeaderMenuHandler: NSObject {
         switch command {
         case .about: return #selector(showAbout(_:))
         case .settings: return #selector(openSettings(_:))
-        case .setupCheck: return #selector(openSetupCheck(_:))
         case .archived: return #selector(toggleArchived(_:))
-        case .clearBadges: return #selector(clearBadges(_:))
+        case .markAllAsRead: return #selector(markAllAsRead(_:))
         case .quit: return #selector(quit(_:))
         }
     }
@@ -1194,14 +1207,10 @@ final class HeaderMenuHandler: NSObject {
     }
     @objc func openSettings(_ sender: Any?) {
         openedWindow = true
-        controller?.openScene(SettingsWindow.id, title: SettingsWindow.title, from: surface)
-    }
-    @objc func openSetupCheck(_ sender: Any?) {
-        openedWindow = true
-        controller?.openScene(SetupCheckWindow.id, title: SetupCheckWindow.title, from: surface)
+        controller?.openSettings(from: surface)
     }
     @objc func toggleArchived(_ sender: Any?) { controller?.archivedMenuItemChosen() }
-    @objc func clearBadges(_ sender: Any?) { controller?.appState.clearBadges() }
+    @objc func markAllAsRead(_ sender: Any?) { controller?.appState.markAllAsRead() }
     @objc func quit(_ sender: Any?) { controller?.appState.quit() }
 }
 
@@ -1313,7 +1322,7 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 }
 
 /// Captures SwiftUI's `openWindow` action so AppKit code (the ⌄ menu) can
-/// open the Settings / Setup Check `Window` scenes.
+/// open the Settings `Window` scene.
 struct SceneOpenerView: View {
     let onResolve: (@escaping (String) -> Void) -> Void
     @Environment(\.openWindow) private var openWindow
@@ -1327,3 +1336,155 @@ struct SceneOpenerView: View {
             }
     }
 }
+
+/// One window of the app's process in the on-screen window list.
+struct OnScreenWindowInfo: Equatable {
+    let number: Int
+    let width: Double
+    let height: Double
+    /// The window list's layer (the window level).
+    let layer: Int
+}
+
+/// Logs a window shown in the app's process that the app did not create
+/// (DESIGN.md §4.5 "making failures visible", §8.65): its class name, size
+/// and level, once per showing (`UnownedWindowTracker`, shared by both
+/// detections). It only reads windows; display, focus and level are never
+/// changed.
+///
+/// Two detections:
+/// 1. Window notifications: a window's occlusion state changes when it is
+///    ordered on or off screen (`NSWindow.didChangeOcclusionStateNotification`),
+///    a panel that takes key status posts `didBecomeKey`, and a closing
+///    window posts `willClose`. A visible window counts as shown; one that is
+///    no longer visible, or closing, as hidden.
+/// 2. The on-screen window list: 0.5 and 2 seconds after the popover or the
+///    window is shown (§9), the app's process's on-screen windows
+///    (`CGWindowListCopyWindowInfo` filtered by the app's pid) are matched
+///    to the app's `NSWindow`s by window number. An unmatched window is
+///    logged with a marker instead of a class name.
+/// The notification center, the window list, the window lookup and the
+/// timer are injected so tests neither read the screen nor wait.
+@MainActor
+final class UnownedWindowMonitor {
+    typealias Schedule = (TimeInterval, @escaping @MainActor () -> Void) -> Void
+
+    private let center: NotificationCenter
+    private let kind: (NSWindow) -> ShownWindowKind
+    private let log: (String) -> Void
+    private let listWindows: () -> [OnScreenWindowInfo]
+    private let windowForNumber: @MainActor (Int) -> NSWindow?
+    private let isShown: @MainActor (NSWindow) -> Bool
+    private let numberOf: @MainActor (NSWindow) -> Int
+    private let schedule: Schedule
+    private var tracker = UnownedWindowTracker()
+    /// The number each window had when it was last seen shown (by either
+    /// detection): a closed window's number may no longer be readable.
+    /// An entry is dropped when its window is hidden or closes.
+    private var numbers: [ObjectIdentifier: Int] = [:]
+    private var observers: [NSObjectProtocol] = []
+
+    init(
+        center: NotificationCenter = .default,
+        kind: @escaping (NSWindow) -> ShownWindowKind,
+        log: @escaping (String) -> Void = { line in unownedWindowLog.notice("\(line, privacy: .public)") },
+        listWindows: @escaping () -> [OnScreenWindowInfo] = UnownedWindowMonitor.onScreenWindowsOfThisProcess,
+        windowForNumber: @escaping @MainActor (Int) -> NSWindow? = { NSApp.window(withWindowNumber: $0) },
+        isShown: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible },
+        numberOf: @escaping @MainActor (NSWindow) -> Int = { $0.windowNumber },
+        schedule: @escaping Schedule = { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+        }
+    ) {
+        self.center = center
+        self.kind = kind
+        self.log = log
+        self.listWindows = listWindows
+        self.windowForNumber = windowForNumber
+        self.isShown = isShown
+        self.numberOf = numberOf
+        self.schedule = schedule
+        // No queue: AppKit posts these on the main thread.
+        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] notification in
+                guard let window = notification.object as? NSWindow else { return }
+                MainActor.assumeIsolated { self?.windowChanged(window, closing: false) }
+            })
+        }
+        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let window = notification.object as? NSWindow else { return }
+            MainActor.assumeIsolated { self?.windowChanged(window, closing: true) }
+        })
+    }
+
+    deinit {
+        for observer in observers { center.removeObserver(observer) }
+    }
+
+    /// The popover or the window was shown: read the window list after
+    /// each of §9's delays.
+    func surfaceShown() {
+        for delay in UnownedWindowLog.scanDelays {
+            schedule(delay) { [weak self] in self?.scan() }
+        }
+    }
+
+    private func windowChanged(_ window: NSWindow, closing: Bool) {
+        let id = ObjectIdentifier(window)
+        let current = numberOf(window)
+        guard !closing, isShown(window), current > 0 else {
+            // Hidden or closing: whichever detection recorded it, the next
+            // showing is logged again.
+            let number = numbers.removeValue(forKey: id) ?? current
+            if number > 0 { tracker.windowHidden(number) }
+            return
+        }
+        let number = current
+        numbers[id] = number
+        guard tracker.windowShown(number, kind: kind(window)) else { return }
+        log(UnownedWindowLog.line(
+            className: String(describing: type(of: window)),
+            width: Double(window.frame.width), height: Double(window.frame.height),
+            level: window.level.rawValue))
+    }
+
+    private func scan() {
+        let scanned = listWindows().map { info -> ScannedWindow in
+            if let window = windowForNumber(info.number) {
+                numbers[ObjectIdentifier(window)] = info.number
+                return ScannedWindow(
+                    number: info.number, className: String(describing: type(of: window)), kind: kind(window),
+                    width: info.width, height: info.height, level: window.level.rawValue)
+            }
+            return ScannedWindow(number: info.number, className: nil, kind: .other,
+                                 width: info.width, height: info.height, level: info.layer)
+        }
+        for line in tracker.scanned(scanned) { log(line) }
+    }
+
+    /// The on-screen windows owned by this process
+    /// (`CGWindowListCopyWindowInfo`, on-screen only, filtered by pid).
+    nonisolated static func onScreenWindowsOfThisProcess() -> [OnScreenWindowInfo] {
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return list.compactMap { entry in
+            guard (entry[kCGWindowOwnerPID as String] as? Int) == pid,
+                  let number = entry[kCGWindowNumber as String] as? Int else { return nil }
+            let bounds = (entry[kCGWindowBounds as String] as? NSDictionary)
+                .flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) } ?? .zero
+            return OnScreenWindowInfo(
+                number: number, width: Double(bounds.width), height: Double(bounds.height),
+                layer: entry[kCGWindowLayer as String] as? Int ?? 0)
+        }
+    }
+}
+
+/// os_log sink for windows the app did not create. Same subsystem as the
+/// app's other loggers.
+///   log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "window"'
+let unownedWindowLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "cc.shiibar.menubar",
+    category: "window"
+)

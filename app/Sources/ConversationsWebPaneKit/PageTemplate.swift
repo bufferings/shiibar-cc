@@ -19,7 +19,12 @@
 //   nodes, so they also stay out of hits, folds, and textContent.
 // - Per-message copy (§4.6): the page only reports WHICH message's button
 //   was pressed (its seq); Swift assembles and writes the text, then tells
-//   the page to show the check mark.
+//   the page to show the check mark and `Copied`.
+// - Reload (§4.6 "conversation pane reload"): `update` applies a newer copy
+//   of the same conversation. Swift decides how the lists relate (same /
+//   appended / replaced); the page only measures where the end marker and
+//   the top message sit and places the scroll accordingly. An update whose
+//   base the page does not hold asks Swift for a full load instead.
 //
 // All text in this page is English (repo rule: docs-only Japanese).
 
@@ -48,19 +53,21 @@ let pageTemplate = #"""
     /* The You label is the system blue (§4.6), resolved by WebKit for the
        view's effective appearance, so it follows light/dark by itself. */
     --you:-apple-system-blue;
+    /* The ground of the `Copied` tag (window-design.html --panebg). */
+    --panebg:#ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root { --text:#ededf0; --text2:#9b9ba3; --label2:#a5a5ad; --line:#38383d;
       --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
-      --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); }
+      --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); --panebg:#2b2b2f; }
   }
   /* The app's Appearance override (§4.5) wins in both directions. */
   html[data-theme="light"] { --text:#1d1d1f; --text2:#6e6e73; --label2:#7c7c82; --line:#d9d9de;
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
-    --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75); }
+    --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75); --panebg:#ffffff; }
   html[data-theme="dark"] { --text:#ededf0; --text2:#9b9ba3; --label2:#a5a5ad; --line:#38383d;
     --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
-    --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); }
+    --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55); --panebg:#2b2b2f; }
 
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:transparent; }
@@ -103,10 +110,21 @@ let pageTemplate = #"""
      8px-before-the-minimap line like the text. */
   .cp { flex:none; margin-left:auto; margin-right:10px; padding:calc(2px * var(--k)) 3px; border-radius:5px;
     color:var(--label2); display:flex; border:0; background:transparent; cursor:default;
-    font:inherit; line-height:0; }
+    font:inherit; line-height:0; position:relative; }
   .cp:hover { background:var(--card); }
   .cp svg { width:calc(14px * var(--k)); height:calc(14px * var(--k)); display:block; fill:none; stroke:currentColor;
     stroke-width:1.3; stroke-linecap:round; stroke-linejoin:round; }
+  /* `Copied` next to the check mark (§4.6 "per-message copy", window-design
+     .cpd): 4px left of the icon, absolutely placed so the label row keeps
+     its height and nothing else moves. The text scales with --k; padding,
+     radius, and border stay fixed. The word is generated content, so it is
+     never a text node: it cannot enter a selection, a copy, or
+     textContent. */
+  .cpd { position:absolute; right:calc(100% + 4px); top:50%; transform:translateY(-50%); white-space:nowrap;
+    font-size:calc(11px * var(--k)); line-height:1.2; font-weight:400; color:var(--text);
+    background:var(--panebg); border:1px solid var(--line); border-radius:4px; padding:3px 6px;
+    pointer-events:none; }
+  .cpd::before { content:"Copied"; }
 
   /* User message: shown as typed (no Markdown), regular weight, 13.5px at 13. */
   .mt { font-size:calc(13.5px * var(--k)); line-height:1.6; padding-right:14px; }
@@ -150,7 +168,7 @@ let pageTemplate = #"""
 
   /* Chrome is not content: excluded from selection AND copy (§4.6) — the
      label row (label + copy button) and the fold controls. */
-  .who, .cp, .expand {
+  .who, .cp, .cpd, .expand {
     -webkit-user-select:none; user-select:none;
   }
 
@@ -195,6 +213,7 @@ const S = {
   msgEls: [],          // per message: container element
   ranges: [],          // per hit: resolved Range or null (behind the fold)
   copied: new Map(),   // message seq -> timer of its check-mark feedback
+  gen: 0,              // delivery generation of the content on the page
   hasSelection: false,
   warnedNoHighlight: false,
 };
@@ -334,6 +353,11 @@ const ICONS = {
 function setCopyIcon(btn, done) {
   btn.textContent = '';
   btn.dataset.state = done ? 'done' : 'idle';
+  if (done) {
+    const tag = document.createElement('span');
+    tag.className = 'cpd';
+    btn.appendChild(tag);
+  }
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   for (const d of ICONS[done ? 'check' : 'copy']) {
@@ -398,9 +422,11 @@ function buildMessage(msg, mi) {
   return holder;
 }
 
-// Check-mark feedback after Swift wrote the copy (§4.6/§9): same position,
-// size, and color; reverts after `ms`. Survives a rebuild of the message
-// (fold toggles) because the state lives in S.copied, keyed by seq.
+// Copy feedback after Swift wrote the copy (§4.6/§9): the check mark (same
+// position, size, and color) and `Copied`; both revert after `ms`, counted
+// from the latest press. Survives a rebuild of the message (fold toggles)
+// and an appending update because the state lives in S.copied, keyed by
+// seq.
 function markCopied(seq, ms) {
   const prev = S.copied.get(seq);
   if (prev) clearTimeout(prev);
@@ -420,18 +446,45 @@ function render() {
     doc.appendChild(el);
     S.msgEls[mi] = el;
   });
-  if (S.msgs.length) {
-    // End marker (§4.6/§8.39): chrome, not content — no node-map entry, so
-    // it can never enter hits, selection ranges, or copies.
-    const cap = document.createElement('div');
-    cap.className = 'endcap';
-    cap.textContent = S.elapsed
-      ? 'Latest message \u00B7 ' + S.elapsed + ' ago'
-      : 'Latest message';
-    doc.appendChild(cap);
-  }
+  appendEndMarker();
   applyHighlights();
   rebuildMinimap();
+}
+
+// End marker (§4.6/§8.39): chrome, not content — no node-map entry, so it
+// can never enter hits, selection ranges, or copies.
+function endMarkerText() {
+  return S.elapsed ? 'Latest message \u00B7 ' + S.elapsed + ' ago' : 'Latest message';
+}
+
+function appendEndMarker() {
+  if (!S.msgs.length) return;
+  const cap = document.createElement('div');
+  cap.className = 'endcap';
+  cap.textContent = endMarkerText();
+  doc.appendChild(cap);
+}
+
+// Whether any part of the end marker is inside the viewport (§4.6
+// "conversation pane reload": reading the end follows the new end).
+function endMarkerInView() {
+  const cap = doc.querySelector('.endcap');
+  if (!cap) return false;
+  const top = contentY(cap);
+  const bottom = top + cap.offsetHeight;
+  return top < doc.scrollTop + doc.clientHeight && bottom > doc.scrollTop;
+}
+
+// The message at the top of the viewport (the same rule as the scroll
+// memory's anchor): its index and its offset from the viewport top.
+function topMessage() {
+  for (let mi = 0; mi < S.msgEls.length; mi++) {
+    const el = S.msgEls[mi];
+    if (!el) continue;
+    const y = contentY(el);
+    if (y + el.offsetHeight > doc.scrollTop) return { mi, offset: y - doc.scrollTop };
+  }
+  return null;
 }
 
 // Expansion toggles rebuild ONE message in place; other messages' nodes —
@@ -648,6 +701,7 @@ window.shiibarAPI = {
   // and re-inject once if it was lost.
   load(payload, anchorSeq, gen) {
     const t0 = performance.now();
+    S.gen = gen || 0;
     S.msgs = payload.messages;
     S.elapsed = payload.elapsed || null;
     S.hits = []; S.cur = -1; S.expanded = new Set();
@@ -661,12 +715,72 @@ window.shiibarAPI = {
     } else {
       doc.scrollTop = doc.scrollHeight; // bottom = latest (§4.6)
     }
-    post({
-      type: 'rendered', ms: performance.now() - t0, messages: S.msgs.length, gen: gen || 0,
-      // Geometry for the blank-pane field diagnosis (§8.38(8)): a render
-      // into a zero-size viewport is the prime suspect.
-      docH: doc.scrollHeight, vw: window.innerWidth, vh: window.innerHeight,
-    });
+    postRendered(t0, gen);
+  },
+  // A reload of the same conversation (§4.6 "conversation pane reload").
+  // `mode` is Swift's decision: 'same' (only the end marker's elapsed time
+  // changes), 'append' (messages from index `from` are new; the existing
+  // elements, the selection, the expansions, and the copy feedback stay),
+  // or 'replace' (render again; `keep` pairs [old index, new index] of the
+  // messages that stayed the same). `gen` / `baseGen` are delivery
+  // generations (§8.38(7)): a repeated delivery only acks again, and an
+  // update whose base is not the content on the page (a lost delivery, a
+  // reloaded page) is not applied: the page reports where the reader is
+  // and Swift sends a full load of the latest content at that position.
+  update(payload, mode, from, keep, gen, baseGen) {
+    const t0 = performance.now();
+    if (gen <= S.gen) { postRendered(t0, gen); return; }
+    if (S.gen !== baseGen || (mode === 'append' && from !== S.msgEls.length)) {
+      S.copied.forEach(t => clearTimeout(t)); S.copied = new Map();
+      const atEnd = endMarkerInView();
+      const top = atEnd ? null : topMessage();
+      post({
+        type: 'needsLoad', gen, hasContent: S.msgEls.length > 0, atEnd,
+        anchor: top ? Number(S.msgEls[top.mi].dataset.seq) : null,
+      });
+      return;
+    }
+    // Measured right before the update is applied (§4.6). Unchanged
+    // messages never move the scroll, wherever the end marker is.
+    const followEnd = mode !== 'same' && endMarkerInView();
+    S.elapsed = payload.elapsed || null;
+    if (mode === 'same') {
+      S.msgs = payload.messages;
+      const cap = doc.querySelector('.endcap');
+      if (cap) cap.textContent = endMarkerText();
+    } else if (mode === 'append') {
+      const cap = doc.querySelector('.endcap');
+      if (cap) cap.remove();
+      S.msgs = payload.messages;
+      for (let mi = from; mi < S.msgs.length; mi++) {
+        const el = buildMessage(S.msgs[mi], mi);
+        doc.appendChild(el);
+        S.msgEls[mi] = el;
+      }
+      appendEndMarker();
+      applyHighlights();
+      rebuildMinimap();
+    } else {
+      const top = followEnd ? null : topMessage();
+      const kept = new Map(keep);
+      const target = top && kept.has(top.mi) ? { mi: kept.get(top.mi), offset: top.offset } : null;
+      S.msgs = payload.messages;
+      S.hits = []; S.cur = -1; S.expanded = new Set();
+      render();
+      void doc.scrollHeight; // force layout before positioning
+      if (!followEnd) {
+        const el = target ? S.msgEls[target.mi] : null;
+        // The top message stays where it was; gone, the view goes to the end.
+        doc.scrollTop = el ? contentY(el) - target.offset : doc.scrollHeight;
+      }
+    }
+    if (followEnd) {
+      void doc.scrollHeight;
+      doc.scrollTop = doc.scrollHeight;
+    }
+    S.gen = gen;
+    updateViewportCues();
+    postRendered(t0, gen);
   },
   // Query retyping: highlights and badges change, the DOM and the scroll do
   // not (§4.6 + the selection-survival rule). Fold controls are the one
@@ -711,6 +825,16 @@ window.shiibarAPI = {
   selectionRanges,
   hasSelection() { return S.hasSelection; },
 };
+
+// The rendered ack of a load or an update (§8.38(7)), with the geometry for
+// the blank-pane field diagnosis (§8.38(8)): a render into a zero-size
+// viewport is the prime suspect.
+function postRendered(t0, gen) {
+  post({
+    type: 'rendered', ms: performance.now() - t0, messages: S.msgs.length, gen: gen || 0,
+    docH: doc.scrollHeight, vw: window.innerWidth, vh: window.innerHeight,
+  });
+}
 
 // Badge counts live on fold buttons; refresh them without touching message
 // content nodes (keeps selections alive).

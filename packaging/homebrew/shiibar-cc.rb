@@ -180,8 +180,8 @@ cask "shiibar-cc" do
 
       Open Shiibar CC once to grant the notification and iTerm2 Automation
       permissions it needs (it registers itself as a Login Item on that
-      first launch too). Then verify everything end to end from the ⌄ menu's
-      Setup Check, or from a terminal:
+      first launch too). Then verify everything end to end from the Setup
+      Check tab of the ⌄ menu's Settings…, or from a terminal:
 
         shiibar-cc doctor
 

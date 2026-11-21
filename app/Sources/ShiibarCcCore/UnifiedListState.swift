@@ -660,16 +660,24 @@ public struct UnifiedListState: Equatable, Sendable {
     }
 
     /// The Running mark (§4.5 "collapsing sections"): while Running is
-    /// closed — not while searching — and has a waiting or unreviewed row.
-    public var showsRunningAttentionMark: Bool {
-        guard !isArchiveView, !isSectionShown(.running) else { return false }
-        return runningRows.contains { row in
+    /// closed — not while searching, not in the Archive view — orange when
+    /// a row is waiting, else the accent color when a row is unreviewed,
+    /// else none (`StateDot`, the tray dot's priority).
+    public var runningAttentionMark: StateDot? {
+        guard !isArchiveView, !isSectionShown(.running) else { return nil }
+        var hasWaiting = false
+        var hasUnreviewed = false
+        for row in runningRows {
             if case .status(let kind, let unreviewed) = row.symbol {
-                return kind == .waiting || unreviewed
+                hasWaiting = hasWaiting || kind == .waiting
+                hasUnreviewed = hasUnreviewed || unreviewed
             }
-            return false
         }
+        return StateDot.of(hasWaiting: hasWaiting, hasUnreviewed: hasUnreviewed)
     }
+
+    /// The Running mark is shown (in either color).
+    public var showsRunningAttentionMark: Bool { runningAttentionMark != nil }
 
     /// The Recent heading's count (§4.5 "row counts", §4.6 "Recent
     /// section"): the row count, or `first 100` while the cap leaves rows
@@ -712,7 +720,7 @@ public struct UnifiedListState: Equatable, Sendable {
             let open = isHeadingOpen(.running)
             blocks.append(.heading(ListHeadingModel(
                 heading: .running, style: .band, countText: "\(runningRows.count)", isOpen: open,
-                showsAttentionMark: showsRunningAttentionMark)))
+                attentionMark: runningAttentionMark)))
             if open { blocks.append(.frame(ListFrameModel(id: .running, rows: runningRows))) }
         }
         guard !starredRows.isEmpty || !recentRows.isEmpty else { return blocks }

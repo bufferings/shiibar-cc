@@ -14,7 +14,10 @@ final class ArchiveModelTests: XCTestCase {
     private final class Spy {
         var searches: [(arguments: [String], completion: @MainActor (CLIRunResult) -> Void)] = []
         var shows: [(arguments: [String], completion: @MainActor (CLIRunResult) -> Void)] = []
+        /// The index on open (`--json`).
         var indexCompletions: [@MainActor (Int32) -> Void] = []
+        /// The conversation pane's own index runs (no `--json`).
+        var paneIndexCompletions: [@MainActor (Int32) -> Void] = []
         var commands: [(arguments: [String], completion: @MainActor (Int32) -> Void)] = []
         var rowMenus: [(items: [RowMenuItem], completion: @MainActor (RowMenuCommand?) -> Void)] = []
     }
@@ -39,8 +42,12 @@ final class ArchiveModelTests: XCTestCase {
                 spy.shows.append((arguments, completion))
                 return ConversationsProcess(process: Process())
             },
-            index: { _, _, _, completion in
-                spy.indexCompletions.append(completion)
+            index: { arguments, _, _, completion in
+                if arguments.contains("--json") {
+                    spy.indexCompletions.append(completion)
+                } else {
+                    spy.paneIndexCompletions.append(completion)
+                }
                 return ConversationsProcess(process: Process())
             }
         )
@@ -280,6 +287,10 @@ final class ArchiveModelTests: XCTestCase {
         openPopover(model, delivering: ["a"])
         model.rowClicked(.running(target: "iterm2:T1"))
         model.viewClicked()
+        // A Running row's conversation: index first, then show (§4.6).
+        XCTAssertTrue(spy.shows.isEmpty)
+        XCTAssertEqual(spy.paneIndexCompletions.count, 1)
+        spy.paneIndexCompletions[0](0)
         XCTAssertEqual(spy.shows.map(\.arguments), [["conversations", "show", "s1", "--json"]])
         spy.shows[0].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
         XCTAssertTrue(model.paneShowsNoConversation)
@@ -287,7 +298,8 @@ final class ArchiveModelTests: XCTestCase {
         XCTAssertEqual(ConversationPaneModel.noMessagesText, "No conversation to show")
 
         // Refresh runs show again, once its search has landed (the search
-        // catches the index up; show reads it as it is).
+        // catches the index up; show reads it as it is). The line stays
+        // while reloading and after a reload that fails.
         let searches = spy.searches.count
         model.refresh()
         XCTAssertEqual(spy.searches.count, searches + 1)
@@ -295,13 +307,16 @@ final class ArchiveModelTests: XCTestCase {
         spy.searches.last?.completion(ok(resultJSON(["a", "s1"])))
         XCTAssertEqual(spy.shows.count, 2, "after the search result")
         XCTAssertEqual(spy.shows[1].arguments, ["conversations", "show", "s1", "--json"])
-        XCTAssertFalse(model.paneShowsNoConversation, "cleared while loading")
+        XCTAssertTrue(model.paneShowsNoConversation, "kept while reloading")
         spy.shows[1].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
         XCTAssertTrue(model.paneShowsNoConversation)
+        XCTAssertNil(model.paneLoadError)
 
-        // Choosing the row again runs show again.
+        // Choosing the row again runs index and show again.
         model.backClicked()
         model.viewClicked()
+        XCTAssertEqual(spy.paneIndexCompletions.count, 2)
+        spy.paneIndexCompletions[1](0)
         XCTAssertEqual(spy.shows.count, 3)
         spy.shows[2].completion(ok(#"{"session_id":"s1","cwd":"/Users/example/demo","title":"t","messages":[]}"#))
         XCTAssertFalse(model.paneShowsNoConversation)
@@ -317,6 +332,7 @@ final class ArchiveModelTests: XCTestCase {
         openPopover(model, delivering: ["a"])
         model.rowClicked(.running(target: "iterm2:T1"))
         model.viewClicked()
+        spy.paneIndexCompletions.last?(0)
         spy.shows[0].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
         XCTAssertTrue(model.paneShowsNoConversation)
         model.agentsUpdated([])
@@ -336,8 +352,16 @@ final class ArchiveModelTests: XCTestCase {
         spy.shows[0].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
         XCTAssertEqual(model.paneLoadError, MainSurfaceModel.unavailableText)
         XCTAssertFalse(model.paneShowsNoConversation)
+        // Refresh reloads a History row's conversation too (§4.6 trigger 3);
+        // a reload that fails keeps the error line.
         model.refresh()
-        XCTAssertEqual(spy.shows.count, 1, "Refresh does not rerun show for an error line")
+        XCTAssertEqual(spy.shows.count, 1, "not before the search result")
+        spy.searches.last?.completion(ok(resultJSON(["a"])))
+        XCTAssertEqual(spy.shows.count, 2)
+        XCTAssertEqual(model.paneLoadError, MainSurfaceModel.unavailableText, "kept while reloading")
+        spy.shows[1].completion(CLIRunResult(exitCode: 2, stdout: "", stderr: ""))
+        XCTAssertEqual(model.paneLoadError, MainSurfaceModel.unavailableText)
+        XCTAssertFalse(model.paneShowsNoConversation)
     }
 
     func testAnArchiveViewRowsShowExitTwoKeepsTheErrorLine() {

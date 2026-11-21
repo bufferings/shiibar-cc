@@ -274,9 +274,9 @@ public enum ConversationsWebPayload {
 /// shows. The page only reports which message's button was pressed (its
 /// seq); the text is assembled here, never in the page.
 public enum MessageCopy {
-    /// §9: the icon shows a check mark for 2 seconds after a copy (the same
-    /// value as the Refresh result's transient display).
-    public static let feedbackSeconds: Double = 2
+    /// §9: after a copy, the icon shows a check mark and `Copied` shows to
+    /// its left for 1 second (§4.6 "per-message copy").
+    public static let feedbackSeconds: Double = 1
 
     /// The full text of the message with `seq`, exactly as `conversations
     /// show` returned it (§4.6): a user message's words as typed, a Claude

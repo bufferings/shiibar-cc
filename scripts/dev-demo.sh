@@ -30,12 +30,12 @@ stage)
   # working: spinner glyph cycling
   start_and_prompt w0t1p0 "$U_WORK" "/Users/example/projects/blog" \
     "Draft a post about the new release pipeline"
-  # idle, reviewed (no badge): finished and seen
+  # idle, reviewed (no unreviewed dot): finished and seen
   start_and_prompt w0t2p0 "$U_IDLE" "/Users/example/projects/dotfiles" \
     "Clean up the zsh aliases"
   report w0t2p0 "$U_IDLE" Stop "{\"session_id\":\"$U_IDLE\",\"cwd\":\"/Users/example/projects/dotfiles\",\"hook_event_name\":\"Stop\",\"background_tasks\":[],\"last_assistant_message\":\"Done — removed 12 stale aliases.\"}"
   shiibar-cc seen "$U_IDLE" >/dev/null
-  # waiting + unreviewed (red badge). Staged last: its banner pops ~3s later
+  # waiting + unreviewed (orange symbol and accent-color dot). Staged last: its banner pops ~3s later
   start_and_prompt w0t3p0 "$U_WAIT" "/Users/example/projects/shiibar-cc" \
     "Run the release checklist"
   report w0t3p0 "$U_WAIT" Notification "{\"session_id\":\"$U_WAIT\",\"cwd\":\"/Users/example/projects/shiibar-cc\",\"hook_event_name\":\"Notification\",\"notification_type\":\"permission_prompt\",\"message\":\"Claude needs your permission to use Bash\"}"

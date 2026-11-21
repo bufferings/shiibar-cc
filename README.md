@@ -38,11 +38,12 @@ Claude Code hooks report each session's state to a small local daemon that
 feeds the menu bar app. The tray icon shows a roll-up of every session at
 a glance:
 
-- **waiting** — an agent is blocked on you (a permission prompt, a question)
+- **waiting** — an agent is blocked on you (a permission prompt, a question);
+  shown in orange until it stops waiting
 - **working** — an agent is actively running a tool or generating a response
 - **idle** — an agent has nothing pending (just started, or finished its work)
-- **unreviewed** — a badge that stays lit until you've actually looked at a
-  session that finished or started waiting
+- **unreviewed** — a dot in your accent color that stays lit until you've
+  actually looked at a session that finished or started waiting
 
 Click the tray icon and a popover opens under it with one list: the
 sessions running right now (**Running**, newest first, each with its status
@@ -86,7 +87,10 @@ bottom left shows the keys that work right now. The buttons at the
 bottom, with their keys (→ for View, ↩ for Jump / Resume, ⌘↩ for Branch),
 show while the list has focus and hide while you type in the search field. ⌘R (or the **Refresh** button next to the search field)
 refreshes the whole list: the running sessions and the
-past conversations. The popover is as tall as
+past conversations. While the conversation of a running session is open,
+it reloads when the session's status changes (you send a prompt, Claude
+finishes, or it waits for you), so new messages appear without
+reselecting the row. Refresh also reloads the open conversation. The popover is as tall as
 you drag its bottom edge, and stays that way. ⌘= and ⌘− make the text
 and the rows in the popover and the window larger or smaller, and ⌘0 goes
 back to the default size (the same value is in Settings… → General → **Text size**).
@@ -104,8 +108,8 @@ list, with the header across both columns (the search field stretching up
 to the buttons at the right edge); drag the line between the two to
 resize the list, and double-click the line to go back to the default
 width. Pin the window (the pin button, to the right of Open in popover) to
-keep it in front of other windows; while it is pinned, Settings, Setup
-Check and About open in front of it. While the window is open the app shows up in the
+keep it in front of other windows; while it is pinned, Settings and About
+open in front of it. While the window is open the app shows up in the
 Dock with a regular menu bar menu (⌘, opens Settings… — where you can
 also switch the appearance between System, Light and Dark).
 
@@ -234,7 +238,7 @@ claude plugin install shiibar-cc@shiibar-cc
 Then open Shiibar CC once (from Spotlight or `/Applications`) to grant the
 notification and terminal Automation permissions — this also registers it as
 a Login Item. Verify everything end to end from the popover's ⌄ menu →
-Setup Check, or from a terminal:
+Settings… → the Setup Check tab, or from a terminal:
 
 ```sh
 shiibar-cc doctor

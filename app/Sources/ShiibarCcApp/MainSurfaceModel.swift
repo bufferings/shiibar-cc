@@ -4,8 +4,9 @@
 // results, clock ticks, user input), executes the effects it returns, and
 // runs the subprocess pipelines around it: `conversations index --json` on
 // open, the debounced `conversations search`, `conversations show` for the
-// conversation pane, the row verbs (focus / resume / resume --fork), and
-// Refresh (the search plus `shiibar-cc reconcile` — §4.6).
+// conversation pane and its reload (§4.6 "conversation pane reload"), the
+// row verbs (focus / resume / resume --fork), and Refresh (the search plus
+// `shiibar-cc reconcile` — §4.6).
 // Both surfaces' views render from this object only; decisions live in Core.
 //
 // Every outward action is injectable (subprocess launchers, the row-verb
@@ -150,10 +151,19 @@ final class MainSurfaceModel: ObservableObject {
     /// One-line error for the message surface (§4.6: show exit 2 / exit 1).
     @Published private(set) var paneLoadError: String?
     /// The message surface shows `No conversation to show`: show exited 2
-    /// for a Running row's conversation (§4.6 "conversation pane"). Not
-    /// updated on its own — a new selection of the row or Refresh runs show
-    /// again.
+    /// for a Running row's conversation (§4.6 "conversation pane"). A new
+    /// selection of the row and the reload triggers run show again.
     @Published private(set) var paneShowsNoConversation = false
+    /// The end marker's elapsed text last handed to the page (nil = none).
+    private(set) var paneElapsedText: String?
+    /// How the page was last told to show the conversation: a first load,
+    /// or a reload's update with Core's comparison of the message lists.
+    private(set) var lastPaneRender: PaneRender?
+
+    enum PaneRender: Equatable {
+        case load
+        case update(ConversationPaneUpdate)
+    }
     /// All in-body hits of the current query, document order (§4.6).
     @Published private(set) var hits: [ConversationHit] = []
     @Published private(set) var currentHitIndex: Int?
@@ -279,8 +289,11 @@ final class MainSurfaceModel: ObservableObject {
     private var searchProcess: ConversationsProcess?
     private var showProcess: ConversationsProcess?
     private var indexProcess: ConversationsProcess?
+    /// The conversation pane's own `conversations index` (§4.6 "conversation
+    /// pane reload": a separate process from the index on open; neither
+    /// cancels the other).
+    private var paneIndexProcess: ConversationsProcess?
     private var searchGeneration = 0
-    private var showGeneration = 0
     private var indexGeneration = 0
     private var transientGeneration = 0
     private var delayedRefetchGeneration = 0
@@ -290,9 +303,51 @@ final class MainSurfaceModel: ObservableObject {
     /// The current Refresh's reconcile exit code; nil until it lands.
     private var refreshReconcileExitCode: Int32?
     private var refreshGeneration = 0
-    /// Refresh found `No conversation to show`: show runs again once the
-    /// Refresh's search has landed.
-    private var reloadShowAfterRefreshSearch = false
+
+    /// One load of the conversation pane in flight (§4.6 "conversation
+    /// pane" / "conversation pane reload"): the first load of a
+    /// conversation, or a reload.
+    private struct PaneLoad {
+        enum Trigger: Equatable {
+            case firstLoad
+            /// Trigger 1 (index, then show).
+            case statusChange
+            /// The reload after trigger 1 (index, then show).
+            case followUp
+            /// The one rerun of triggers that arrived during a load (index,
+            /// then show, whatever the triggers were).
+            case rerun
+            /// Trigger 2: the search of the open / key catch-up, then show.
+            case surfaceShown
+            /// Trigger 3: Refresh's search, then show.
+            case refresh
+        }
+
+        enum Phase: Equatable {
+            case indexing
+            case awaitingSearch
+            case showing
+        }
+
+        let sessionID: String
+        let trigger: Trigger
+        var phase: Phase
+        /// Schedule the follow-up reload when this load completes (§4.6:
+        /// after a status-change reload only, never after the follow-up).
+        let schedulesFollowUp: Bool
+    }
+
+    private var paneLoad: PaneLoad?
+    /// Matches subprocess completions to the pane load that started them; a
+    /// newer load (a switched conversation included) drops older results.
+    private var paneLoadGeneration = 0
+    /// A reload trigger arrived while a pane load was in flight: one rerun
+    /// (index, then show) follows its completion (§4.6).
+    private var paneReloadPending = false
+    /// One of the pending triggers was a status change: the rerun schedules
+    /// the follow-up reload.
+    private var paneReloadPendingFollowUp = false
+    private var paneFollowUpGeneration = 0
     private var clockTimer: Timer?
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -369,9 +424,17 @@ final class MainSurfaceModel: ObservableObject {
 
     // MARK: - Inputs from AppState
 
-    /// The daemon's agent table changed (§4.5 Running rows).
+    /// The daemon's agent table changed (§4.5 Running rows). A status
+    /// change of the Running row the pane shows reloads the pane while a
+    /// surface is on screen (§4.6 "conversation pane reload", trigger 1).
     func agentsUpdated(_ agents: [Agent]) {
+        let before = list
         send(.agentsUpdated(agents))
+        if visibleSurface != nil,
+           let sessionID = ConversationPaneReload.statusChangeTrigger(before: before, after: list),
+           sessionID == paneSessionID {
+            requestPaneReload(.statusChange)
+        }
     }
 
     func setWarnings(_ warnings: [SurfaceWarning]) {
@@ -400,6 +463,9 @@ final class MainSurfaceModel: ObservableObject {
         startClockTimer()
         paneAttachRequest += 1
         onSurfaceShown()
+        // The reload waits for the search this open runs: registered first,
+        // so a search that completes at once still counts for it.
+        requestSurfaceShownReload()
         runIndexThenSearch()
     }
 
@@ -409,7 +475,16 @@ final class MainSurfaceModel: ObservableObject {
         if visibleSurface != .window {
             surfaceDidShow(.window)
         } else {
+            requestSurfaceShownReload()
             runIndexThenSearch()
+        }
+    }
+
+    /// Trigger 2 (§4.6 "conversation pane reload"): showing a surface (or
+    /// the window becoming key) reloads a Running row's conversation.
+    private func requestSurfaceShownReload() {
+        if case .running = list.selection?.key, paneSessionID != nil {
+            requestPaneReload(.surfaceShown)
         }
     }
 
@@ -424,6 +499,8 @@ final class MainSurfaceModel: ObservableObject {
         }
         guard visibleSurface == surface else { return }
         visibleSurface = nil
+        // §4.6: no follow-up reload while neither surface is shown.
+        cancelPaneFollowUp()
         send(.surfaceHidden)
         clockTimer?.invalidate()
         clockTimer = nil
@@ -682,11 +759,12 @@ final class MainSurfaceModel: ObservableObject {
         let generation = refreshGeneration
         setTransient(.refreshing, autoClear: false)
         debounceTask?.cancel()
+        // Trigger 3 (§4.6 "conversation pane reload"): whatever row the
+        // pane shows, show runs again once this search has landed —
+        // registered before the search starts, so a search that completes
+        // at once still counts for it.
+        requestPaneReload(.refresh)
         performSearch()
-        // §4.6 "conversation pane": `No conversation to show` is not updated
-        // on its own; Refresh runs show again — once its search has landed,
-        // since show reads the index as it is and the search catches it up.
-        reloadShowAfterRefreshSearch = paneShowsNoConversation
         runCommand(CLIRunner.reconcileArguments) { [weak self] exitCode in
             guard let self, generation == self.refreshGeneration, self.isRefreshing else { return }
             self.refreshReconcileExitCode = exitCode
@@ -918,6 +996,11 @@ final class MainSurfaceModel: ObservableObject {
             // there was none). Recovery comes with the next trigger.
             messageError = .indexFailed
             send(.historyFetchFailed)
+            // §4.6: a surface-shown reload whose index failed gets no
+            // search; show follows the index instead.
+            if let load = paneLoad, load.phase == .awaitingSearch, load.trigger == .surfaceShown {
+                notePaneSearchFinished()
+            }
             return
         }
         performSearch()
@@ -983,12 +1066,14 @@ final class MainSurfaceModel: ObservableObject {
             messageError = .searchFailed
             send(.historyFetchFailed)
             noteRefreshSearchFinished(succeeded: false)
+            notePaneSearchFinished()
             return
         }
         // §4.6: an error clears on the next successful fetch.
         messageError = nil
         send(.historyDelivered(decoded.conversations, isFiltered: filtered))
         noteRefreshSearchFinished(succeeded: true)
+        notePaneSearchFinished()
     }
 
     /// The first search result to land during a Refresh is the Refresh's
@@ -997,12 +1082,6 @@ final class MainSurfaceModel: ObservableObject {
     private func noteRefreshSearchFinished(succeeded: Bool) {
         guard isRefreshing, refreshSearchSucceeded == nil else { return }
         refreshSearchSucceeded = succeeded
-        if reloadShowAfterRefreshSearch {
-            reloadShowAfterRefreshSearch = false
-            if paneShowsNoConversation, let sessionID = list.selection?.sessionID, !sessionID.isEmpty {
-                loadConversation(sessionID)
-            }
-        }
         settleRefreshIfFinished()
     }
 
@@ -1027,6 +1106,18 @@ final class MainSurfaceModel: ObservableObject {
 
     // MARK: - Conversation pane (show) — §4.6
 
+    /// The session_id of the conversation the pane shows; nil while no pane
+    /// is on screen, nothing is selected, or the row has no session_id.
+    private var paneSessionID: String? {
+        guard list.isConversationPaneVisible, let sessionID = list.selection?.sessionID,
+              !sessionID.isEmpty else { return nil }
+        return sessionID
+    }
+
+    /// The first load of a conversation (§4.6 "conversation pane"): the pane
+    /// is cleared, then a Running row's conversation runs index and then
+    /// show (show reads the index as it is), a Starred / Recent / Archive
+    /// view row's runs show only.
     private func loadConversation(_ sessionID: String) {
         detail = nil
         renderedMessages = []
@@ -1034,14 +1125,143 @@ final class MainSurfaceModel: ObservableObject {
         currentHitIndex = nil
         paneLoadError = nil
         paneShowsNoConversation = false
-        showProcess?.cancel()
-        showGeneration += 1
-        let generation = showGeneration
-        showProcess = launchers.show(["conversations", "show", sessionID, "--json"], helpersDirectory) { [weak self] result in
-            guard let self, generation == self.showGeneration,
-                  self.list.selection?.sessionID == sessionID else { return }
-            self.handleShowResult(result, sessionID: sessionID)
+        paneReloadPending = false
+        paneReloadPendingFollowUp = false
+        var isRunningRow = false
+        if case .running = list.selection?.key { isRunningRow = true }
+        startPaneLoad(PaneLoad(
+            sessionID: sessionID, trigger: .firstLoad,
+            phase: isRunningRow ? .indexing : .showing, schedulesFollowUp: false))
+    }
+
+    /// A reload trigger (§4.6 "conversation pane reload"). While a pane load
+    /// is in flight (waiting for an index or a search included), the
+    /// triggers collapse into one rerun after it.
+    private enum PaneReloadTrigger {
+        case statusChange
+        case surfaceShown
+        case refresh
+    }
+
+    private func requestPaneReload(_ trigger: PaneReloadTrigger) {
+        guard let sessionID = paneSessionID else { return }
+        if paneLoad != nil {
+            paneReloadPending = true
+            if trigger == .statusChange { paneReloadPendingFollowUp = true }
+            return
         }
+        switch trigger {
+        case .statusChange:
+            startPaneLoad(PaneLoad(sessionID: sessionID, trigger: .statusChange, phase: .indexing, schedulesFollowUp: true))
+        case .surfaceShown:
+            startPaneLoad(PaneLoad(sessionID: sessionID, trigger: .surfaceShown, phase: .awaitingSearch, schedulesFollowUp: false))
+        case .refresh:
+            startPaneLoad(PaneLoad(sessionID: sessionID, trigger: .refresh, phase: .awaitingSearch, schedulesFollowUp: false))
+        }
+    }
+
+    private func startPaneLoad(_ load: PaneLoad) {
+        // §4.6: a pending follow-up does not run once another load starts.
+        cancelPaneFollowUp()
+        paneIndexProcess?.cancel()
+        paneIndexProcess = nil
+        showProcess?.cancel()
+        showProcess = nil
+        paneLoadGeneration += 1
+        paneLoad = load
+        switch load.phase {
+        case .indexing: runPaneIndex()
+        case .showing: runPaneShow()
+        case .awaitingSearch: break
+        }
+    }
+
+    /// The pane's `conversations index` (catch-up only). Its progress, full
+    /// build state, and failure are not shown and change no list state;
+    /// show runs after it whatever its exit code (§4.6).
+    private func runPaneIndex() {
+        let generation = paneLoadGeneration
+        paneIndexProcess = launchers.index(
+            ConversationPaneReload.indexArguments,
+            helpersDirectory,
+            { _ in },
+            { [weak self] _ in
+                guard let self, generation == self.paneLoadGeneration else { return }
+                self.paneIndexProcess = nil
+                self.runPaneShow()
+            }
+        )
+    }
+
+    /// The first search result after a surface-shown or Refresh trigger
+    /// (success or failure, a replacing search included) stands for that
+    /// trigger's search: show follows (§4.6).
+    private func notePaneSearchFinished() {
+        guard let load = paneLoad, load.phase == .awaitingSearch else { return }
+        guard paneSessionID == load.sessionID else {
+            // The conversation went away from the pane meanwhile.
+            paneLoad = nil
+            paneReloadPending = false
+            paneReloadPendingFollowUp = false
+            return
+        }
+        runPaneShow()
+    }
+
+    private func runPaneShow() {
+        guard var load = paneLoad else { return }
+        load.phase = .showing
+        paneLoad = load
+        let generation = paneLoadGeneration
+        showProcess = launchers.show(["conversations", "show", load.sessionID, "--json"], helpersDirectory) { [weak self] result in
+            guard let self, generation == self.paneLoadGeneration else { return }
+            self.showProcess = nil
+            self.paneLoadFinished(result)
+        }
+    }
+
+    private func paneLoadFinished(_ result: CLIRunResult) {
+        guard let load = paneLoad else { return }
+        paneLoad = nil
+        // A conversation that left the pane meanwhile: the result is dropped.
+        guard paneSessionID == load.sessionID else {
+            paneReloadPending = false
+            paneReloadPendingFollowUp = false
+            return
+        }
+        if load.trigger == .firstLoad {
+            handleShowResult(result, sessionID: load.sessionID)
+        } else {
+            handleReloadResult(result, sessionID: load.sessionID)
+        }
+        if paneReloadPending {
+            let followUp = paneReloadPendingFollowUp
+            paneReloadPending = false
+            paneReloadPendingFollowUp = false
+            // §4.6: the follow-up runs after the rerun when the completed
+            // load or any trigger merged into the rerun was a status change.
+            startPaneLoad(PaneLoad(sessionID: load.sessionID, trigger: .rerun, phase: .indexing,
+                                   schedulesFollowUp: followUp || load.schedulesFollowUp))
+        } else if load.schedulesFollowUp {
+            schedulePaneFollowUp(load.sessionID)
+        }
+    }
+
+    /// §4.6 / §9: once more after the delay, unless another load starts,
+    /// the conversation changes, or no surface is shown meanwhile. The
+    /// follow-up schedules nothing after it.
+    private func schedulePaneFollowUp(_ sessionID: String) {
+        paneFollowUpGeneration += 1
+        let generation = paneFollowUpGeneration
+        schedule(ConversationPaneReload.followUpSeconds) { [weak self] in
+            guard let self, generation == self.paneFollowUpGeneration, self.visibleSurface != nil,
+                  self.paneLoad == nil, self.paneSessionID == sessionID else { return }
+            self.startPaneLoad(PaneLoad(sessionID: sessionID, trigger: .followUp, phase: .indexing, schedulesFollowUp: false))
+        }
+    }
+
+    private func cancelPaneFollowUp() {
+        paneFollowUpGeneration += 1
     }
 
     private func handleShowResult(_ result: CLIRunResult, sessionID: String) {
@@ -1053,17 +1273,7 @@ final class MainSurfaceModel: ObservableObject {
                 paneLoadError = Self.loadFailedText
                 return
             }
-            paneLoadError = nil
-            detail = loaded
-            renderedMessages = loaded.messages.map { RenderedMessage(role: $0.role, text: $0.text) }
-            recomputeHits()
-            let updatedAt = list.history?.first { $0.sessionID == sessionID }?.updatedAt
-            let elapsed = updatedAt.map { ElapsedTime.format(seconds: nowSeconds() - $0) }
-            webPane.load(
-                messages: loaded.messages, rendered: renderedMessages,
-                anchorSeq: scrollMemory[sessionID], elapsed: elapsed
-            )
-            pushHitsToPane(scrollToCurrent: scrollMemory[sessionID] == nil)
+            showFromStart(loaded, sessionID: sessionID)
         case .noConversation:
             paneLoadError = nil
             paneShowsNoConversation = true
@@ -1075,19 +1285,96 @@ final class MainSurfaceModel: ObservableObject {
         }
     }
 
+    /// The conversation from the start (§4.6 "conversation pane"): the
+    /// remembered scroll position, else the bottom; the initial hit is the
+    /// latest.
+    private func showFromStart(_ loaded: ConversationDetail, sessionID: String) {
+        paneLoadError = nil
+        paneShowsNoConversation = false
+        detail = loaded
+        renderedMessages = loaded.messages.map { RenderedMessage(role: $0.role, text: $0.text) }
+        recomputeHits()
+        let elapsed = elapsedText(for: loaded, sessionID: sessionID)
+        paneElapsedText = elapsed
+        webPane.load(
+            messages: loaded.messages, rendered: renderedMessages,
+            anchorSeq: scrollMemory[sessionID], elapsed: elapsed
+        )
+        lastPaneRender = .load
+        pushHitsToPane(scrollToCurrent: scrollMemory[sessionID] == nil)
+    }
+
+    /// A reload's show result (§4.6 "applying the result"). A failure keeps
+    /// what the pane shows (the conversation, `No conversation to show`, or
+    /// the error line) and shows no new error: a reload also runs without
+    /// any user action.
+    private func handleReloadResult(_ result: CLIRunResult, sessionID: String) {
+        guard result.exitCode == 0, let loaded = ConversationDetail.decode(result.stdout) else { return }
+        guard let shown = detail, paneLoadError == nil, !paneShowsNoConversation else {
+            showFromStart(loaded, sessionID: sessionID)
+            return
+        }
+        let change = ConversationPaneUpdate.classify(displayed: shown.messages, fetched: loaded.messages)
+        let hadHits = !hits.isEmpty
+        let previousHitIndex = currentHitIndex
+        let previousRendered = renderedMessages
+        detail = loaded
+        renderedMessages = loaded.messages.enumerated().map { index, message in
+            // Unchanged messages keep their rendering.
+            switch change {
+            case .unchanged, .appended:
+                if index < previousRendered.count { return previousRendered[index] }
+            case .replaced:
+                break
+            }
+            return RenderedMessage(role: message.role, text: message.text)
+        }
+        // §4.6 "hits": the current position stays on the same occurrence
+        // unless there was no hit before or the list renders again (then
+        // the latest occurrence). The scroll never moves to a hit here.
+        let keptHitIndex: Int?
+        switch change {
+        case .unchanged, .appended:
+            keptHitIndex = hadHits ? previousHitIndex : nil
+        case .replaced:
+            keptHitIndex = nil
+        }
+        recomputeHits(keeping: keptHitIndex)
+        let elapsed = elapsedText(for: loaded, sessionID: sessionID)
+        paneElapsedText = elapsed
+        webPane.update(messages: loaded.messages, rendered: renderedMessages, change: change, elapsed: elapsed)
+        lastPaneRender = .update(change)
+        pushHitsToPane(scrollToCurrent: false)
+    }
+
+    /// The end marker's elapsed time (§4.6): from show's `updated_at`, else
+    /// (a CLI without the field) from the search result's.
+    private func elapsedText(for loaded: ConversationDetail, sessionID: String) -> String? {
+        let updatedAt = loaded.updatedAt ?? list.history?.first { $0.sessionID == sessionID }?.updatedAt
+        return updatedAt.map { ElapsedTime.format(seconds: nowSeconds() - $0) }
+    }
+
     static let unavailableText = "Conversation no longer available"
     static let loadFailedText = "Failed to load conversation"
 
-    private func recomputeHits() {
+    /// `keeping`: the current position to keep when it is still a hit (a
+    /// reload that kept the messages); otherwise the position is the latest
+    /// hit. `currentHitIndex` is assigned once.
+    private func recomputeHits(keeping kept: Int? = nil) {
         guard detail != nil else {
             hits = []
             currentHitIndex = nil
             return
         }
         let terms = ConversationsQuery.validTerms(query.precomposedStringWithCanonicalMapping)
-        hits = ConversationHits.locations(messageTexts: renderedMessages.map(\.renderedText), terms: terms)
-        // §4.6: the initial position is the latest hit.
-        currentHitIndex = hits.isEmpty ? nil : hits.count - 1
+        let found = ConversationHits.locations(messageTexts: renderedMessages.map(\.renderedText), terms: terms)
+        hits = found
+        if let kept, found.indices.contains(kept) {
+            currentHitIndex = kept
+        } else {
+            // §4.6: the initial position is the latest hit.
+            currentHitIndex = found.isEmpty ? nil : found.count - 1
+        }
     }
 
     private func pushHitsToPane(scrollToCurrent: Bool) {

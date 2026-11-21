@@ -119,7 +119,7 @@ struct AppMenuCommands: Commands {
             Button("Settings…") {
                 state.willOpenAuxiliaryWindow()
                 NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: SettingsWindow.id)
+                state.settingsWindow.open { openWindow(id: $0) }
             }
             .keyboardShortcut(",")
         }

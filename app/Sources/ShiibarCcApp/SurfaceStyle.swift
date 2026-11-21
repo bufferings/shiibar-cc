@@ -2,16 +2,18 @@
 // (visual spec: docs/window-design.html). The CSS values there are paper
 // examples for colors — the implementation follows the system colors and
 // the accent color (window-design.html "implementation notes"); the star
-// yellow and the unreviewed red use the page's values. Sizes and spacing
-// follow the mock's CSS.
+// yellow uses the page's values, and the two state colors are
+// `systemOrange` (waiting) and `controlAccentColor` (unreviewed — DESIGN.md
+// §3.1, §9 "state colors"). Sizes and spacing follow the mock's CSS.
 
 import AppKit
+import ShiibarCcCore
 import SwiftUI
 
 enum SurfaceColors {
     /// The list's pale, opaque ground in the popover and the window
     /// (window-design.html "implementation notes": light = the control
-    /// background with 5% system gray; dark = the window background with
+    /// background with 10% system gray; dark = the window background with
     /// 30% black), so white row frames stand out on light and veiled ones on
     /// dark. The popover paints its arrow with the same color.
     static let listBackgroundNSColor = NSColor(name: nil) { appearance in
@@ -21,19 +23,22 @@ enum SurfaceColors {
                 ?? .windowBackgroundColor
     }
     /// The share of gray in the light list ground (window-design.html
-    /// "implementation notes": 5%), close to the row frames' white so the
-    /// heading bands stand out on it.
-    static let lightListGrayFraction: CGFloat = 0.05
+    /// "implementation notes": 10%): dark enough that the white row frames
+    /// read against it, with the bands darker still.
+    static let lightListGrayFraction: CGFloat = 0.10
     static let listBackground = Color(nsColor: listBackgroundNSColor)
     /// The conversation pane: the plain reading background.
     static let paneBackground = Color(nsColor: .controlBackgroundColor)
-    /// A row frame's ground: opaque white on light; a light veil on dark so it reads on
-    /// any ground (window background or popover material).
+    /// A row frame's ground (window-design.html "implementation notes"):
+    /// the control background on light; on dark, white at
+    /// `darkCardWhiteOpacity` over the list ground, so on dark the list
+    /// ground, the band and the row frame get lighter in that order.
     static let cardNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor.white.withAlphaComponent(0.07)
+            ? NSColor.white.withAlphaComponent(darkCardWhiteOpacity)
             : NSColor.controlBackgroundColor
     }
+    static let darkCardWhiteOpacity: CGFloat = 0.10
     static let card = Color(nsColor: cardNSColor)
     static let cardBorderNSColor = NSColor.separatorColor
     static let cardBorder = Color(nsColor: cardBorderNSColor)
@@ -52,18 +57,29 @@ enum SurfaceColors {
     /// Neutral chip / key-hint ground (`rgba(127,127,127,.09)`).
     static let chip = Color.gray.opacity(0.09)
     /// The heading band's ground, drawn over the list's ground
-    /// (window-design.html "implementation notes": the system gray at 0.09
-    /// on light, 0.12 on dark). Its top and bottom lines are `line`.
+    /// (window-design.html "implementation notes": the system gray at 0.12
+    /// on light, 0.08 on dark). Its top and bottom lines are `line`.
     static let sectionBand = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor.systemGray.withAlphaComponent(sectionBandOpacity(dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua))
     })
-    static func sectionBandOpacity(dark: Bool) -> CGFloat { dark ? 0.12 : 0.09 }
+    static func sectionBandOpacity(dark: Bool) -> CGFloat { dark ? 0.08 : 0.12 }
     /// The more button's box while its menu is open (window-design.html
     /// `.sym.open`: gray at 16%).
     static let moreButtonOpenGround = Color.gray.opacity(0.16)
-    /// The Running mark: the unreviewed badge's red (DESIGN.md §4.5
-    /// "collapsing sections"; `RowSymbolView`).
-    static let runningMark = Color.red
+    /// The waiting color (DESIGN.md §3.1, §9 "state colors"): the waiting
+    /// status symbol, the Running mark and the tray dot.
+    static let waitingNSColor = NSColor.systemOrange
+    /// The unreviewed color (DESIGN.md §3.1, §9 "state colors"): a row's
+    /// unreviewed dot, the Running mark and the tray dot.
+    static let unreviewedNSColor = NSColor.controlAccentColor
+    /// The color of a dot that stands for several sessions (the closed
+    /// Running heading's mark — DESIGN.md §4.5 "collapsing sections").
+    static func stateDot(_ dot: StateDot) -> Color {
+        switch dot {
+        case .waiting: return Color(nsColor: waitingNSColor)
+        case .unreviewed: return Color(nsColor: unreviewedNSColor)
+        }
+    }
     /// A hovered row's ground (window-design.html `.row.hov`: gray at 9%),
     /// paler than the gray selection ground.
     static let rowHover = Color.gray.opacity(0.09)

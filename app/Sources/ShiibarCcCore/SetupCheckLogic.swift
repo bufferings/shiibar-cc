@@ -1,10 +1,10 @@
-// Setup Check window (DESIGN.md §4.5, M5 T5): parses `shiibar-cc doctor
+// Settings' Setup Check tab (DESIGN.md §4.5): parses `shiibar-cc doctor
 // --json` (§4.4) into rows, and builds the two rows the CLI can't produce
 // itself (notification permission / Login Item status — both only readable
 // from inside the running app). Judgement logic for the CLI-derived checks
 // stays entirely in the CLI ("doctor is the source of truth", §4.5) — this
 // file only reshapes already-decided ok/warn/fail records into the row model
-// the window displays, plus decides the row for the two app-only checks.
+// the tab displays, plus decides the row for the two app-only checks.
 // UNUserNotificationCenter / SMAppService I/O stays in the app layer
 // (SetupCheckView); this is pure logic so it's independently testable
 // against fixture JSON strings.
@@ -43,7 +43,7 @@ public enum SetupCheckStatus: String, Equatable, Sendable {
     }
 }
 
-/// One row of the Setup Check window: a CLI check (from `doctor --json`) or
+/// One row of the Setup Check tab: a CLI check (from `doctor --json`) or
 /// one of the two app-only checks (notification permission / Login Item).
 public struct SetupCheckRow: Equatable, Sendable, Identifiable {
     public let id: String

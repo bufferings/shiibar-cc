@@ -4,7 +4,7 @@ import SwiftUI
 import XCTest
 @testable import ShiibarCcApp
 
-/// The ⌄ menu's Settings… / Setup Check… need SwiftUI's `openWindow`, which
+/// The ⌄ menu's Settings… needs SwiftUI's `openWindow`, which
 /// the root view of a surface hands over when it appears. Either surface can
 /// be the first to appear after launch (the window form opens the window
 /// without the popover ever showing), so both root views must hand it over.

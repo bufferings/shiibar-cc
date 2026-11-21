@@ -18,7 +18,7 @@ final class RollupTests: XCTestCase {
         let state = Rollup.icon(statuses: [.working, .working], hasUnreviewed: true, daemonConnected: true)
         XCTAssertEqual(state.glyph, .working)
         XCTAssertEqual(state.dim, Rollup.normalDim)
-        XCTAssertTrue(state.hasUnreviewedDot)
+        XCTAssertEqual(state.dot, .unreviewed)
     }
 
     func testAllIdleIsDimmedIdleTier() {
@@ -43,10 +43,45 @@ final class RollupTests: XCTestCase {
         XCTAssertEqual(state.dim, Rollup.noAgentsDim)
     }
 
-    func testUnreviewedDotIsIndependentOfGlyphAndDisconnectedState() {
-        XCTAssertTrue(Rollup.icon(statuses: [], hasUnreviewed: true, daemonConnected: true).hasUnreviewedDot)
-        XCTAssertTrue(Rollup.icon(statuses: [.idle], hasUnreviewed: true, daemonConnected: false).hasUnreviewedDot)
-        XCTAssertFalse(Rollup.icon(statuses: [.waiting], hasUnreviewed: false, daemonConnected: true).hasUnreviewedDot)
+    /// DESIGN.md §4.5 "visual source of truth": the corner dot is orange
+    /// while any agent is waiting, else the accent color while any agent is
+    /// unreviewed, else absent — whatever the glyph.
+    func testCornerDotPrefersWaitingOverUnreviewed() {
+        struct Case {
+            let statuses: [AgentStatus]
+            let hasUnreviewed: Bool
+            let expected: StateDot?
+        }
+        let cases: [Case] = [
+            Case(statuses: [.waiting], hasUnreviewed: false, expected: .waiting),
+            Case(statuses: [.waiting], hasUnreviewed: true, expected: .waiting),
+            Case(statuses: [.waiting, .idle], hasUnreviewed: true, expected: .waiting),
+            Case(statuses: [.idle], hasUnreviewed: true, expected: .unreviewed),
+            Case(statuses: [.working, .idle], hasUnreviewed: true, expected: .unreviewed),
+            Case(statuses: [.working, .idle], hasUnreviewed: false, expected: nil),
+            Case(statuses: [.unknown], hasUnreviewed: false, expected: nil),
+        ]
+        for c in cases {
+            XCTAssertEqual(Rollup.icon(statuses: c.statuses, hasUnreviewed: c.hasUnreviewed, daemonConnected: true).dot,
+                           c.expected, "\(c.statuses) unreviewed=\(c.hasUnreviewed)")
+        }
+    }
+
+    /// With no agents there is no dot.
+    func testNoAgentsHasNoDot() {
+        XCTAssertNil(Rollup.icon(statuses: [], hasUnreviewed: false, daemonConnected: true).dot)
+        XCTAssertNil(Rollup.icon(statuses: [], hasUnreviewed: false, daemonConnected: false).dot)
+    }
+
+    /// While disconnected the glyph is the no-agents glyph, but the dot is
+    /// decided from the last list received (drawn dimmed with the rest).
+    func testDisconnectedDecidesTheDotFromTheLastList() {
+        let waiting = Rollup.icon(statuses: [.waiting, .idle], hasUnreviewed: true, daemonConnected: false)
+        XCTAssertEqual(waiting.glyph, .none)
+        XCTAssertEqual(waiting.dim, Rollup.noAgentsDim)
+        XCTAssertEqual(waiting.dot, .waiting)
+        XCTAssertEqual(Rollup.icon(statuses: [.idle], hasUnreviewed: true, daemonConnected: false).dot, .unreviewed)
+        XCTAssertNil(Rollup.icon(statuses: [.idle], hasUnreviewed: false, daemonConnected: false).dot)
     }
 
     func testUnknownStatusIsIgnoredInTheRollup() {

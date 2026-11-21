@@ -5,8 +5,8 @@ import XCTest
 @testable import ShiibarCcApp
 
 /// The Global shortcut field (DESIGN.md §4.5 "Settings window" > General >
-/// Global shortcut) hosted the way the Settings window hosts it — inside the
-/// grouped `Form` — in a real titled window placed far offscreen, driven by
+/// Global shortcut) hosted the way the Settings window hosts it — in the
+/// General tab's row — in a real titled window placed far offscreen, driven by
 /// real mouse and key `NSEvent`s through the application's event path. A
 /// spy registrar and in-memory defaults: no real hotkey is registered and
 /// `UserDefaults.standard` is never written.
@@ -57,8 +57,8 @@ final class GlobalShortcutFieldClickTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// The model started (app launch) and the General section hosted in the
-    /// Settings window's grouped Form; returns the field's input view.
+    /// The model started (app launch) and the General tab hosted as the
+    /// Settings window shows it; returns the field's input view.
     private func host(stored: GlobalShortcut? = nil) throws -> (GlobalHotKeyModel, ShortcutFieldInputView) {
         if let stored {
             defaults.set(GlobalShortcutCodec.encode(stored), forKey: GlobalShortcutCodec.defaultsKey)
@@ -73,12 +73,15 @@ final class GlobalShortcutFieldClickTests: XCTestCase {
             setAppearance: { _ in },
             availableSoundNames: ["Glass"])
         let textSizeField = TextSizeFieldModel(store: TextSizeStore(defaults: defaults))
-        let root = Form { SettingsGeneralSection(viewModel: settings, textSizeField: textSizeField, hotKey: model) }
-            .formStyle(.grouped)
-            .frame(width: SettingsView.width)
+        let windowModel = SettingsWindowModel(
+            general: settings, textSizeField: textSizeField, hotKey: model,
+            setupCheck: SetupCheckViewModel(performChecks: { _ in }),
+            center: NotificationCenter())
+        let root = SettingsTabContent(model: windowModel)
+            .frame(width: SettingsLayout.windowWidth)
             .fixedSize(horizontal: false, vertical: true)
         let window = OffscreenWindow(
-            contentRect: NSRect(x: -40000, y: -40000, width: SettingsView.width, height: 300),
+            contentRect: NSRect(x: -40000, y: -40000, width: SettingsLayout.windowWidth, height: 600),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         // ARC holds the reference (release-on-close double-frees under XCTest).
         window.isReleasedWhenClosed = false
@@ -145,8 +148,8 @@ final class GlobalShortcutFieldClickTests: XCTestCase {
     // MARK: - Tests
 
     /// A click on the field's text (`Record Shortcut`, which covers most of
-    /// the field) starts recording; the Form's text interaction view over
-    /// the text must not take it.
+    /// the field) starts recording; a text interaction view over the text
+    /// must not take it.
     func testClickOnTheFieldTextStartsRecording() throws {
         let (model, input) = try host()
         XCTAssertEqual(model.recorder.fieldText, GlobalShortcutRecorder.recordText)

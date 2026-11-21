@@ -176,15 +176,17 @@ final class HeaderRowAndMenuTests: XCTestCase {
         return nil
     }
 
-    /// Refresh is not in the ⌄ menu (it is the header row's button and ⌘R).
-    /// `Archived` follows the separator under `Setup Check…`, before
-    /// `Clear badges` (§4.5 "⌄ menu").
+    /// Refresh is not in the ⌄ menu (it is the header row's button and ⌘R)
+    /// and neither is Setup Check (a tab of the Settings window).
+    /// `Archived` follows the separator under `Settings…`, before
+    /// `Mark all as read` (§4.5 "⌄ menu").
     func testMenuItemsAndOrder() {
         let entries = HeaderMenu.entries(hasUnreviewed: true, hasArchived: true, showsArchive: false)
         XCTAssertEqual(titles(entries), [
-            "About Shiibar CC", "---", "Settings\u{2026}", "Setup Check\u{2026}", "---",
-            "Archived", "Clear badges", "---", "Quit",
+            "About Shiibar CC", "---", "Settings\u{2026}", "---",
+            "Archived", "Mark all as read", "---", "Quit",
         ])
+        XCTAssertFalse(titles(entries).contains { $0.hasPrefix("Setup Check") })
         for entry in entries {
             if case .item(let item) = entry {
                 XCTAssertTrue(item.isEnabled, item.title)
@@ -194,11 +196,23 @@ final class HeaderRowAndMenuTests: XCTestCase {
         }
     }
 
-    func testClearBadgesIsDisabledWithNothingUnreviewed() {
+    /// `Mark all as read` is disabled while nothing is unreviewed (§8.24).
+    func testMarkAllAsReadIsDisabledWithNothingUnreviewed() {
         XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: false),
-                            .clearBadges)?.isEnabled, false)
+                            .markAllAsRead)?.isEnabled, false)
         XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: true, hasArchived: true, showsArchive: false),
-                            .clearBadges)?.isEnabled, true)
+                            .markAllAsRead)?.isEnabled, true)
+    }
+
+    /// The item runs the handler's `markAllAsRead(_:)`, which calls
+    /// `AppState.markAllAsRead` (`seen` for every unreviewed target —
+    /// `MarkAllAsRead.targets`).
+    func testMarkAllAsReadRunsTheMarkAllAsReadAction() {
+        let handler = HeaderMenuHandler(controller: nil)
+        let menu = handler.menu(for: HeaderMenu.entries(hasUnreviewed: true, hasArchived: true, showsArchive: false))
+        let menuItem = menu.items.first { $0.title == "Mark all as read" }
+        XCTAssertEqual(menuItem?.action, #selector(HeaderMenuHandler.markAllAsRead(_:)))
+        XCTAssertTrue(menuItem?.target === handler)
     }
 
     /// §4.5 "⌄ menu": `Archived` is disabled while nothing is archived and
@@ -218,11 +232,11 @@ final class HeaderRowAndMenuTests: XCTestCase {
         }
         let handler = HeaderMenuHandler(controller: nil)
         let checked = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: true))
-        XCTAssertEqual(checked.items[5].title, "Archived")
-        XCTAssertEqual(checked.items[5].state, .on)
+        XCTAssertEqual(checked.items[4].title, "Archived")
+        XCTAssertEqual(checked.items[4].state, .on)
         let unchecked = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: false, showsArchive: false))
-        XCTAssertEqual(unchecked.items[5].state, .off)
-        XCTAssertFalse(unchecked.items[5].isEnabled)
+        XCTAssertEqual(unchecked.items[4].state, .off)
+        XCTAssertFalse(unchecked.items[4].isEnabled)
     }
 
     // MARK: - ⌄ menu as built
@@ -232,11 +246,11 @@ final class HeaderRowAndMenuTests: XCTestCase {
         let menu = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: false))
         XCTAssertFalse(menu.autoenablesItems, "the flags keep the values of the moment the menu opened")
         XCTAssertEqual(menu.items.map { $0.isSeparatorItem ? "---" : $0.title }, [
-            "About Shiibar CC", "---", "Settings\u{2026}", "Setup Check\u{2026}", "---",
-            "Archived", "Clear badges", "---", "Quit",
+            "About Shiibar CC", "---", "Settings\u{2026}", "---",
+            "Archived", "Mark all as read", "---", "Quit",
         ])
-        XCTAssertFalse(menu.items[6].isEnabled, "Clear badges")
-        for index in [0, 2, 3, 5, 8] {
+        XCTAssertFalse(menu.items[5].isEnabled, "Mark all as read")
+        for index in [0, 2, 4, 7] {
             XCTAssertTrue(menu.items[index].isEnabled, menu.items[index].title)
         }
         for menuItem in menu.items where !menuItem.isSeparatorItem {
@@ -246,6 +260,6 @@ final class HeaderRowAndMenuTests: XCTestCase {
         }
         let withUnreviewed = handler.menu(for: HeaderMenu.entries(hasUnreviewed: true, hasArchived: true,
                                                                   showsArchive: false))
-        XCTAssertTrue(withUnreviewed.items[6].isEnabled)
+        XCTAssertTrue(withUnreviewed.items[5].isEnabled)
     }
 }

@@ -47,7 +47,8 @@ public final class UnreviewedEdgeTracker {
     /// app launch is a baseline") records the current unreviewed set without
     /// reporting any edges for it — used exactly once, for the very first
     /// snapshot an app process receives, so pre-existing unreviewed entries
-    /// at launch don't re-notify (the red badge already shows the backlog).
+    /// at launch don't re-notify (the unreviewed dots already show the
+    /// backlog).
     /// Every later observation (reconnect snapshots included, and any
     /// `status_changed` / reconcile update) must pass `baseline: false` so
     /// rising edges are reported as usual.

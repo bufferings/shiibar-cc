@@ -161,7 +161,8 @@ final class ConversationsWebPayloadTests: XCTestCase {
         XCTAssertNil(MessageCopy.text(forSeq: 99, in: messages))
     }
 
-    func testMessageCopyFeedbackIsTwoSeconds() {
-        XCTAssertEqual(MessageCopy.feedbackSeconds, 2)
+    /// §9: the check mark and `Copied` show for 1 second.
+    func testMessageCopyFeedbackIsOneSecond() {
+        XCTAssertEqual(MessageCopy.feedbackSeconds, 1)
     }
 }

@@ -204,12 +204,14 @@ final class SurfaceScaleTests: XCTestCase {
         XCTAssertEqual(RowColumnSymbol.moreButtonOnly.boxes, [.moreButton])
     }
 
-    /// window-design.html "implementation notes": the light list ground has
-    /// 5% system gray; the band's gray is 0.09 on light and 0.12 on dark.
+    /// window-design.html "implementation notes": the light list ground is
+    /// the control background with 10% system gray; the band's gray is 0.12
+    /// on light and 0.08 on dark; the dark row frame is white at 0.10.
     func testListAndBandColorRules() {
-        XCTAssertEqual(SurfaceColors.lightListGrayFraction, 0.05)
-        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: false), 0.09)
-        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: true), 0.12)
+        XCTAssertEqual(SurfaceColors.lightListGrayFraction, 0.10)
+        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: false), 0.12)
+        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: true), 0.08)
+        XCTAssertEqual(SurfaceColors.darkCardWhiteOpacity, 0.10)
     }
 
     func testFixedValues() {

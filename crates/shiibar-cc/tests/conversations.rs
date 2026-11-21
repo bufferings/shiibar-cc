@@ -662,6 +662,26 @@ fn show_returns_the_full_utterance_sequence_without_the_meta_row() {
 }
 
 #[test]
+fn show_updated_at_equals_the_search_value_for_the_same_conversation() {
+    // §4.4: show's updated_at is the value search returns for the same
+    // conversation, so the pane can age the end marker from show alone.
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("older one", "ok"), 1_000);
+    fx.write_transcript("slug", "s2", &simple_conversation("newer one", "ok"), 2_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+
+    let rows = run_search(&deps, None, &mut || {}).unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        let shown = run_show(&deps, &row.session_id).unwrap().expect("indexed");
+        assert_eq!(shown.updated_at, row.updated_at, "{}", row.session_id);
+    }
+    // The two conversations differ, so equality is not a shared constant.
+    assert_ne!(rows[0].updated_at, rows[1].updated_at);
+}
+
+#[test]
 fn show_does_not_catch_up() {
     let fx = Fixture::new();
     fx.write_transcript(
@@ -1197,7 +1217,16 @@ fn binary_show_json_has_the_contract_fields_and_exit_codes() {
     let out = run_binary(home.path(), &["show", "abc-123", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+    let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["cwd", "messages", "session_id", "title", "updated_at"]
+    );
     assert_eq!(v["session_id"], "abc-123");
+    assert_eq!(v["cwd"], "/Users/example/project");
+    assert!(v["title"].is_string());
+    assert!(v["updated_at"].is_i64());
     assert_eq!(v["messages"][0]["seq"], 0);
     assert_eq!(v["messages"][0]["role"], "user");
     assert_eq!(v["messages"][0]["text"], "the question");
@@ -1206,6 +1235,27 @@ fn binary_show_json_has_the_contract_fields_and_exit_codes() {
     let missing = run_binary(home.path(), &["show", "no-such-id"]);
     assert_eq!(missing.code, 2);
     assert!(!missing.stderr.is_empty());
+}
+
+#[test]
+fn binary_show_json_updated_at_equals_the_search_updated_at() {
+    // §4.4: show's updated_at is the same value search returns for the
+    // same conversation.
+    let home = tempfile::tempdir().unwrap();
+    write_home_transcript(
+        home.path(),
+        "abc-123",
+        &simple_conversation("the question", "the answer"),
+    );
+    let search = run_binary(home.path(), &["search", "--json"]);
+    assert_eq!(search.code, 0, "stderr: {}", search.stderr);
+    let sv: serde_json::Value = serde_json::from_str(search.stdout.trim()).unwrap();
+    let searched = sv["conversations"][0]["updated_at"].as_i64().unwrap();
+
+    let show = run_binary(home.path(), &["show", "abc-123", "--json"]);
+    assert_eq!(show.code, 0, "stderr: {}", show.stderr);
+    let v: serde_json::Value = serde_json::from_str(show.stdout.trim()).unwrap();
+    assert_eq!(v["updated_at"].as_i64(), Some(searched));
 }
 
 #[test]

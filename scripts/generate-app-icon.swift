@@ -47,7 +47,10 @@ func rgb(_ hex: UInt32, alpha: CGFloat = 1) -> CGColor {
 
 let tileColor = rgb(0x1b1b1e)
 let foregroundColor = rgb(0xf2f0ec)
-let badgeColor = rgb(0xf2464d)
+// The shoulder dot: a fixed blue close to the default accent color, with a
+// light halo (DESIGN.md §9 "app icon dot color"). An icon image cannot follow
+// the user's accent color setting, so the value is fixed.
+let dotColor = rgb(0x0a84ff)
 let haloColor = rgb(0xffffff, alpha: 0.9)
 
 // MARK: - Iconset file list (standard Apple iconutil naming)
@@ -72,7 +75,7 @@ let entries: [IconEntry] = [
 
 // Sizes at or below this many pixels use the simplified tile+asterisk-only
 // variant (M24 T2: "at 32px and below, the simplified ✻-only variant") — the
-// badge is too fine to read at that resolution.
+// dot is too fine to read at that resolution.
 let simplifiedThreshold = 32
 
 // U+273B TEARDROP-SPOKED ASTERISK with VS15 (U+FE0E) to force the text
@@ -124,14 +127,13 @@ func drawTile(_ ctx: CGContext, margin: CGFloat, tileSize: CGFloat) {
     ctx.fillPath()
 }
 
-/// Red unreviewed badge with a white halo (M24 T2: same two-layer drawing
-/// as the pre-M24 badge this replaces — a filled circle plus a stroked
-/// halo ring of the same radius). `center` and `r` are in the 100-unit
+/// The blue shoulder dot with a white halo: a filled circle plus a stroked
+/// halo ring of the same radius. `center` and `r` are in the 100-unit
 /// logical space; `length` converts to pixels.
-func drawBadge(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat) {
+func drawDot(_ ctx: CGContext, center: CGPoint, r: CGFloat, length: (CGFloat) -> CGFloat) {
     let radius = length(r)
     let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-    ctx.setFillColor(badgeColor)
+    ctx.setFillColor(dotColor)
     ctx.fillEllipse(in: rect)
     ctx.setStrokeColor(haloColor)
     ctx.setLineWidth(length(r * 0.22))
@@ -174,17 +176,16 @@ func renderIcon(pixels: Int) -> CGImage {
     drawTile(ctx, margin: margin, tileSize: tileSize)
 
     if pixels <= simplifiedThreshold {
-        // Simplified variant: tile + centered ✻ only, 60pt, no badge (M24
-        // T2) — too fine a resolution for a badge to read.
+        // Simplified variant: tile + centered ✻ only, 60pt, no dot (M24
+        // T2) — too fine a resolution for a dot to read.
         let font = ctFont(size: length(60))
         drawCenteredText(ctx, text: asterisk, font: font, color: foregroundColor, center: point(50, 50))
     } else {
         // Normal variant: tile + ✻ optically centered at (30, 30), 56pt +
-        // red badge at (78, 22), r 7 (M24 T2 — replaces the old baseline-
-        // pinned ✳ + state-symbol column entirely).
+        // blue dot at (78, 22), r 7.
         let font = ctFont(size: length(56))
         drawCenteredText(ctx, text: asterisk, font: font, color: foregroundColor, center: point(30, 30))
-        drawBadge(ctx, center: point(78, 22), r: 7, length: length)
+        drawDot(ctx, center: point(78, 22), r: 7, length: length)
     }
 
     guard let image = ctx.makeImage() else {

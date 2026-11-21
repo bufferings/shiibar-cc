@@ -1,7 +1,7 @@
 // App entry point (DESIGN.md §4.5): an accessory-policy app whose tray icon
 // is an own `NSStatusItem` opening an `NSPopover`, plus the single window
 // opened from it (`MainSurfaceController`, AppKit). SwiftUI scenes host only
-// the Settings and Setup Check windows and the app menu commands. Daemon
+// the Settings window and the app menu commands. Daemon
 // lifecycle, reconcile, and the first-launch-only Login Item
 // auto-registration are kicked off from `applicationDidFinishLaunching`.
 
@@ -25,29 +25,11 @@ struct ShiibarCcMenuBarApp: App {
             EmptyView()
         }
 
-        // Setup Check window (§4.5), opened via `openWindow(id:)` from the ⌄
-        // menu and the app menu. It re-runs its checks on every (re)open via
-        // NSWindow notifications — see `SetupCheckViewModel.observeWindowLifecycle`.
-        Window(SetupCheckWindow.title, id: SetupCheckWindow.id) {
-            SetupCheckView(
-                helpersDirectory: appDelegate.state.helpersDirectory,
-                notificationManager: appDelegate.state.notificationManager,
-                loginItemEnabledProvider: { appDelegate.state.loginItemEnabled }
-            )
-        }
-        .windowResizability(.contentSize)
-
-        // Settings window (§4.5/§8.26), opened the same way as Setup Check.
+        // Settings window (§4.5/§8.26/§8.65) with its General and Setup
+        // Check tabs, opened via `openWindow(id:)` from the ⌄ menu and the
+        // app menu. The window's size follows its content.
         Window(SettingsWindow.title, id: SettingsWindow.id) {
-            SettingsView(
-                notificationManager: appDelegate.state.notificationManager,
-                loginItemEnabledProvider: { appDelegate.state.loginItemEnabled },
-                toggleLoginItem: { appDelegate.state.toggleLoginItem() },
-                appearanceSetting: appDelegate.state.appearanceSetting,
-                setAppearance: { appDelegate.state.setAppearanceSetting($0) },
-                textSize: appDelegate.state.textSize,
-                hotKey: appDelegate.state.hotKey
-            )
+            SettingsView(model: appDelegate.state.settingsWindow)
         }
         .windowResizability(.contentSize)
         // App menu and Edit menu (§4.5/§8.30/§8.41). Commands are app-wide;
@@ -61,22 +43,13 @@ struct ShiibarCcMenuBarApp: App {
     }
 }
 
-/// The Setup Check `Window` scene's stable id, shared between the scene
-/// declaration above and the `openWindow(id:)` call sites (⌄ menu, app menu).
-enum SetupCheckWindow {
-    static let id = "setup-check"
-    /// Must match the title passed to `Window(_:id:)` above — used by
-    /// `SetupCheckViewModel.observeWindowLifecycle` to filter the global
-    /// `NSWindow` open/close notifications down to just this window.
-    static let title = "Setup Check"
-}
-
 /// The Settings `Window` scene's stable id, shared between the scene
 /// declaration above and the `openWindow(id:)` call sites.
 enum SettingsWindow {
     static let id = "settings"
     /// Must match the title passed to `Window(_:id:)` above (the ⌄ menu
-    /// finds the opened window by it to make it key).
+    /// finds the opened window by it to make it key, and
+    /// `SettingsWindowModel` finds its close by it).
     static let title = "Settings"
 }
 
@@ -154,6 +127,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         state.raiseMainWindow()
         return false
+    }
+
+    /// Closing the last window never quits the app: it stays in the menu
+    /// bar (§4.5). The answer has to be explicit because SwiftUI quits an
+    /// app whose only window scene is a single `Window` when its last
+    /// window closes, and that covers the AppKit main window too.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

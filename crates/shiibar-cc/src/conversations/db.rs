@@ -57,6 +57,8 @@ pub struct ShowResult {
     pub session_id: String,
     pub cwd: Option<String>,
     pub title: Option<String>,
+    /// Same value `search` returns for this conversation (§4.4).
+    pub updated_at: i64,
     pub messages: Vec<ShowMessage>,
 }
 
@@ -519,16 +521,17 @@ impl Db {
     /// when the session id is not in the index.
     pub fn show(&self, session_id: &str) -> rusqlite::Result<Option<ShowResult>> {
         let head = self.conn.query_row(
-            "SELECT cwd, title FROM conversations WHERE session_id = ?1",
+            "SELECT cwd, title, updated_at FROM conversations WHERE session_id = ?1",
             params![session_id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
                 ))
             },
         );
-        let (cwd, title) = match head {
+        let (cwd, title, updated_at) = match head {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
             Err(e) => return Err(e),
@@ -550,6 +553,7 @@ impl Db {
             session_id: session_id.to_string(),
             cwd,
             title,
+            updated_at,
             messages,
         }))
     }

@@ -10,17 +10,17 @@
     --graytint:#ebebec;
     --hl:rgba(255,213,0,.45); --hlcur:rgba(255,166,0,.75);
     --card:rgba(127,127,127,.09); --codebg:rgba(127,127,127,.1);
-    --cardsbg:#fafafa; --band:#f0f0f0; --cardbg:#ffffff; --cardline:#e3e3e6; --panebg:#ffffff;
-    --red:#e5484d; --star:#f5b400; --star-line:#d39700;
+    --cardsbg:#f4f4f4; --band:#e8e8e8; --cardbg:#ffffff; --cardline:#e3e3e6; --panebg:#ffffff;
+    --wait:#ff9500; --unread:var(--sel); --star:#f5b400; --star-line:#d39700;
     --tipbg:#1d1d1f; --tipfg:#ffffff; --floatshadow:0 8px 22px rgba(0,0,0,.22);
     --shadow:0 12px 36px rgba(0,0,0,.20), 0 0 0 .5px rgba(0,0,0,.14); }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#141416; --text:#ededf0; --text2:#9b9ba3; --line:#38383d; --accent:#e8a10e;
-      --menu-text2:#a5a5ad; --tint:#1f3a5c; --link:#4c9bff;
+      --menu-text2:#a5a5ad; --tint:#1f3a5c; --link:#4c9bff; --wait:#ff9f0a;
       --graytint:#474749;
       --hl:rgba(255,213,0,.28); --hlcur:rgba(255,166,0,.55);
       --card:rgba(255,255,255,.055); --codebg:rgba(255,255,255,.07);
-      --cardsbg:#1e1f23; --band:#292a2e; --cardbg:#2b2b2f; --cardline:#3a3b40; --panebg:#2b2b2f;
+      --cardsbg:#1e1f23; --band:#27282c; --cardbg:#343539; --cardline:#3a3b40; --panebg:#2b2b2f;
       --tipbg:#ededf0; --tipfg:#1d1d1f; --floatshadow:0 8px 22px rgba(0,0,0,.6);
       --shadow:0 12px 36px rgba(0,0,0,.55), 0 0 0 .5px rgba(255,255,255,.16); }
   }
@@ -123,7 +123,8 @@
   .rows .sec.closed b { color:var(--menu-text2); }
   .rows .sec .chev { margin-left:auto; width:14px; height:14px; display:flex; align-items:center; justify-content:center; }
   .rows .sec .chev .ic { width:12px; height:12px; stroke-width:1.8; }
-  .rows .sec .dot { width:7px; height:7px; border-radius:50%; background:var(--red); flex:none; }
+  .rows .sec .dot { width:7px; height:7px; border-radius:50%; background:var(--wait); flex:none; }
+  .rows .sec .dot.unr { background:var(--unread); }
   /* 文字と線の見出し(.sub。Starred と Recent): 地と上下の線が無い。左右の端は行の枠にそろえ、内側は上下 4px・左 12px・右 9px
      (名前の左端と山形の右端は、帯と同じ位置)。上の間隔 6px・下の間隔 4px。
      行数と山形の間(見出しの案内がある間は、行数と案内の間)の残りの幅に、区切り線の色の 1px の線を引く(上下の中央。左右の間隔 8px) */
@@ -262,7 +263,43 @@
   .hl { background:var(--hl); border-radius:2px; }
   .hlcur { background:var(--hlcur); border-radius:2px; }
   /* 発言ごとのコピー: ラベルの行の右端。アイコン 14px */
-  .cp { flex:none; margin-left:auto; margin-right:10px; padding:2px 3px; border-radius:5px; color:var(--menu-text2); display:flex; }
+  .cp { flex:none; margin-left:auto; margin-right:10px; padding:2px 3px; border-radius:5px; color:var(--menu-text2); display:flex; position:relative; }
+  /* コピーの反応の文字: アイコンの左 4px。ラベルの行の高さと、ほかの要素の位置を変更しない(絶対配置)。
+     文字 11px(文字の大きさ 13 のとき。比率で連動する)。余白と角の半径と枠線は固定 */
+  .cpd { position:absolute; right:calc(100% + 4px); top:50%; transform:translateY(-50%); white-space:nowrap;
+    font-size:11px; line-height:1.2; font-weight:400; color:var(--text); background:var(--panebg);
+    border:1px solid var(--line); border-radius:4px; padding:3px 6px; }
+  /* Settings ウィンドウ(DESIGN.md §4.5「Settings ウィンドウ」。寸法は同 §9) */
+  .setw { width:600px; max-width:100%; background:var(--bg); border-radius:9px; box-shadow:var(--shadow);
+    padding:16px 24px 20px; font-size:13px; box-sizing:border-box; }
+  .setw.tabbed { padding:0; }
+  .setw .tabs { display:flex; justify-content:center; gap:4px; padding:6px 12px; border-bottom:1px solid var(--line); }
+  .setw .tab { min-width:72px; padding:6px 8px; border-radius:7px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; }
+  .setw .tab svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.3; stroke-linecap:round; stroke-linejoin:round; }
+  .setw .tab.on { color:var(--sel); background:color-mix(in srgb, var(--sel) 16%, transparent); }
+  .setw .pane { padding:16px 24px 20px; }
+  .setw .ck { flex:none; width:16px; text-align:center; font-weight:700; align-self:flex-start; margin-right:-4px; }
+  .setw .ck.ok { color:#34a853; } .setw .ck.wn { color:#e0a800; } .setw .ck.ng { color:#e5484d; }
+  .setw .lb.ck-t b { font-weight:400; }
+  .setw .foot { display:flex; justify-content:flex-end; margin-top:14px; }
+  .setw .sh { font-size:12px; font-weight:600; padding-left:4px; margin:14px 0 6px; }
+  .setw .sh:first-child { margin-top:0; }
+  .setw .box { background:var(--cardbg); border:1px solid var(--line); border-radius:10px; }
+  .setw .it { display:flex; align-items:center; gap:12px; padding:9px 14px; min-height:22px; border-top:1px solid var(--line); }
+  .setw .it:first-child { border-top:0; }
+  .setw .lb { flex:1; min-width:0; }
+  .setw .lb b { font-weight:600; display:block; }
+  .setw .lb span { display:block; margin-top:2px; font-size:11px; color:var(--text2); }
+  .setw .lb .er { color:#A0390A; }
+  @media (prefers-color-scheme: dark) { .setw .lb .er { color:#F08A5D; } }
+  .setw .ct { flex:none; width:240px; display:flex; justify-content:flex-end; align-items:center; gap:8px; font-size:12px; }
+  .setw .sw { width:26px; height:15px; border-radius:8px; background:var(--sel); position:relative; }
+  .setw .sw::after { content:""; position:absolute; top:1.5px; right:1.5px; width:12px; height:12px; border-radius:50%; background:#fff; }
+  .setw .sw.off { background:rgba(127,127,127,.35); }
+  .setw .sw.off::after { right:auto; left:1.5px; }
+  .setw .seg { display:inline-flex; border-radius:6px; background:rgba(127,127,127,.16); padding:1px; }
+  .setw .seg span { padding:2px 10px; border-radius:5px; }
+  .setw .seg .on { background:var(--cardbg); box-shadow:0 0 0 .5px rgba(127,127,127,.5); }
 
   .mm { position:absolute; top:0; bottom:0; right:0; width:20px; }
   .mm .m { position:absolute; left:4px; right:4px; border-radius:1px; }
@@ -314,10 +351,10 @@
   <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
   <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
   <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></symbol>
-  <!-- 状態記号(20 単位のボックス): waiting の吹き出し / working・idle の ✻ / 未確認の赤バッジ -->
+  <!-- 状態記号(20 単位のボックス): waiting の吹き出し(使用する側でオレンジを指定する)/ working・idle の ✻ / 未確認の点(アクセントカラー) -->
   <symbol id="s-wait" viewBox="0 0 20 20" overflow="visible"><path d="M 3.2 1.6 h 13.6 a 2.6 2.6 0 0 1 2.6 2.6 v 8.2 a 2.6 2.6 0 0 1 -2.6 2.6 h -8.1 l -3.6 3.4 a 0.62 0.62 0 0 1 -1.05 -0.45 v -2.95 h -0.85 a 2.6 2.6 0 0 1 -2.6 -2.6 v -8.2 a 2.6 2.6 0 0 1 2.6 -2.6 z" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="12.3" font-size="10.5" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">!</text></symbol>
   <symbol id="s-glyph" viewBox="0 0 20 20" overflow="visible"><text x="10" y="15.4" font-size="15.5" text-anchor="middle" fill="currentColor" stroke="none">&#x273B;&#xFE0E;</text></symbol>
-  <symbol id="s-badge" viewBox="0 0 20 20" overflow="visible"><circle cx="16.4" cy="3.6" r="4.5" fill="#e5484d"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></symbol>
+  <symbol id="s-badge" viewBox="0 0 20 20" overflow="visible"><circle cx="16.4" cy="3.6" r="4.5" style="fill:var(--unread)"/><circle cx="16.4" cy="3.6" r="4.5" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="1.05"/></symbol>
 </svg>
 <div class="wrap">
   <div class="eyebrow">shiibar-cc — 確定デザイン</div>
@@ -331,10 +368,10 @@
 
   <h2>デザイン原則</h2>
   <ul>
-    <li><strong>色</strong>: <strong>赤 = 未確認(unreviewed)と、閉じている Running の印</strong>、<strong>黄 = スター専用</strong>。
-      <strong>青(アクセントカラー)</strong>は、選択・<code>You</code> のラベル・ピンの ON・主ボタン・
+    <li><strong>色</strong>: <strong>オレンジ = waiting</strong>(状態記号と、閉じている Running の印)、<strong>黄 = スター専用</strong>。
+      <strong>青(アクセントカラー)</strong>は、未確認(unreviewed)の点・閉じている Running の印(waiting の行が無いとき)・選択・<code>You</code> のラベル・ピンの ON・主ボタン・
       テキストボタン・行のドラッグの移動先の表示(線、強調の枠、見出しの案内)に使用する。
-      status(waiting / working / idle)には色を使用しない — 記号と濃度で表す(DESIGN.md §3.1 / §8.49)</li>
+      working と idle には色を使用しない — 記号と濃度で表す(DESIGN.md §3.1)</li>
     <li><strong>レイアウトは 1 種類</strong>: ポップオーバー、細いウィンドウ、広いウィンドウは、
       同じ構成要素(見出し行・一覧・会話ペイン・フッター)を表示する。幅によって変化するのは列の数だけである</li>
     <li><strong>行のクリックは選択、実行は下部パネルのボタン</strong>: 行のクリックは、行を選択するだけである。
@@ -435,10 +472,9 @@
         <span>About Shiibar CC</span>
         <span class="note">───</span>
         <span>Settings…</span>
-        <span>Setup Check…</span>
         <span class="note">───</span>
         <span>Archived</span>
-        <span>Clear badges</span>
+        <span>Mark all as read</span>
         <span class="note">───</span>
         <span>Quit</span>
       </div>
@@ -494,8 +530,8 @@
     <li><strong>Starred または Recent に残る実行中の会話</strong>: 1 行目(ラベル)の末尾に <code>· running</code>。
       選択中は、下部パネルの主ボタンが <strong>disabled の Jump</strong>(ツールチップ
       <code>Running in a terminal Shiibar CC can't drive</code>)になり、Branch は通常の表示</li>
-    <li><strong>未確認(unreviewed)= 状態記号の右肩の赤バッジ</strong>(明色ハロー付き。
-      トレイアイコンの「窓の右肩のバッジ」と同じ文法 — menubar-design.html)。タイトルの太さでは未確認を示さない。
+    <li><strong>未確認(unreviewed)= 状態記号の右肩の、アクセントカラーの点</strong>(明色ハロー付き。
+      トレイアイコンの「窓の右肩の点」と同じ文法 — menubar-design.html)。タイトルの太さでは未確認を示さない。
       行の右端には未確認の印を配置しない</li>
     <li><strong>クリック</strong>: スターと三点リーダー以外の部分をクリックすると、その行を選択する。
       青で表示している選択中の行をクリックすると、選択を解除する(選択なしになる)。
@@ -541,7 +577,7 @@
         <div class="rows">
           <div class="sec"><b>Running</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
           <div class="group">
-            <div class="row sel"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
+            <div class="row sel"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait" style="color:var(--wait)"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
             <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
           </div>
           <div class="sec"><b>History</b><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
@@ -611,10 +647,12 @@
       周期 2 秒のコサインイージングで、両端に留まり中間を速く通過する。等間隔のステップにしない。
       動作させる条件は DESIGN.md §4.5「表示中の更新」)/
       <strong>輪郭だけの吹き出し + 太い ! = waiting</strong>(塗りなし —
-      Claude が利用者に話しかけて返事を待っている)。
+      Claude が利用者に話しかけて返事を待っている)。<strong>waiting の状態記号は、輪郭と ! の両方をオレンジ(<code>systemOrange</code>)で表示する</strong>
+      (未確認かどうかに関係しない)。working と idle の状態記号には、色を付けない。選択中の行でも、同じ色である。
       モックは静止画のため、working は循環の 1 コマ(✻)を示す(idle との差は濃度のみ)</li>
-    <li><strong>赤バッジ</strong>: 状態記号の右肩に表示する塗りの円 + 細い明色のフチ(ハロー)。
-      状態記号の種類によらず同じ位置</li>
+    <li><strong>未確認の点</strong>: 状態記号の右肩に表示する、アクセントカラー(<code>controlAccentColor</code>)の塗りの円 + 細い明色のフチ(ハロー)。
+      状態記号の種類によらず同じ位置。waiting で未確認の行は、オレンジの状態記号と、アクセントカラーの点の両方を表示する。
+      本ページの色は、既定のアクセントカラー(青)の例である</li>
     <li><strong>スター</strong>(記号と時間の列の上・16px。状態記号より小さい。Starred と Recent の行):
       三点リーダーの枠の左の、20px の枠の中心に表示する。クリックに反応する範囲は、20px の枠である。
       線の太さは、輪郭だけの星が 1.1px、塗りの星が 0.7px である。3 状態 —
@@ -628,14 +666,14 @@
   <div class="mock">
     <figure>
       <div class="app strip side" style="width:auto"><div class="inl" style="padding:12px; gap:14px">
-        <span class="sym"><svg><use href="#s-wait"/></svg></span>
+        <span class="sym"><svg><use href="#s-wait" style="color:var(--wait)"/></svg></span>
         <span class="sym"><svg><use href="#s-glyph"/></svg></span>
         <span class="sym"><svg style="opacity:.5"><use href="#s-glyph"/></svg></span>
         <span style="width:16px"></span>
-        <span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span>
+        <span class="sym"><svg><use href="#s-wait" style="color:var(--wait)"/><use href="#s-badge"/></svg></span>
         <span class="sym"><svg><g style="opacity:.5"><use href="#s-glyph"/></g><use href="#s-badge"/></svg></span>
       </div></div>
-      <figcaption>状態記号の 3 種(waiting / working / idle)と、赤バッジを付けた形</figcaption>
+      <figcaption>状態記号の 3 種(waiting = オレンジ / working / idle)と、未確認の点を付けた形</figcaption>
     </figure>
     <figure>
       <div class="app strip side" style="padding:10px">
@@ -676,8 +714,9 @@
       開いているときは下向き(<code>M4 6l4 4 4-4</code>)、閉じているときは右向き(<code>M6 4l4 4-4 4</code>。どちらも 16 単位の枠)である</li>
     <li><strong>閉じている見出し</strong>: 見出しだけを表示し、名前を二次色にする。行数は、開いているときと同じ値を表示する。開閉にアニメーションは無い。
       History を閉じている間は、History の見出しだけを表示し、Starred と Recent の見出しと行を表示しない</li>
-    <li><strong>Running の印</strong>: Running を閉じている間、waiting または未確認の行があるときに、名前の前に直径 7px の赤い点
-      (未確認の赤バッジと同じ色)を表示する</li>
+    <li><strong>Running の印</strong>: Running を閉じている間、名前の前に直径 7px の点を表示する。waiting の行があるときは、オレンジの点
+      (waiting の状態記号と同じ色)、waiting の行が無くて未確認の行があるときは、アクセントカラーの点(未確認の点と同じ色)である。
+      どちらの行も無いときは、表示しない</li>
     <li><strong>検索中の見出し</strong>: Running と History の見出しは、帯の形のままで、山形と Running の印を表示しない。
       Starred と Recent の見出しは表示しない。
       行数は、表示している行の数である(History の見出しは、Starred の行と Recent の行の合計を表示する。
@@ -721,7 +760,7 @@
         </div>
         <div class="sec sub closed"><b>Recent</b><span>first 100</span><span class="chev"><svg class="ic"><use href="#i-chev-r"/></svg></span></div>
       </div></div>
-      <figcaption>Running と Recent を閉じた状態。Running の名前の前の赤い点は、waiting または未確認の行があることを示す。閉じている見出しの名前は二次色、山形は右向き。Recent の行が上限を超えている間の <code>first 100</code> は、閉じている間も表示する</figcaption>
+      <figcaption>Running と Recent を閉じた状態。Running の名前の前のオレンジの点は、waiting の行があることを示す(waiting の行が無くて、未確認の行があるときは、アクセントカラーの点になる)。閉じている見出しの名前は二次色、山形は右向き。Recent の行が上限を超えている間の <code>first 100</code> は、閉じている間も表示する</figcaption>
     </figure>
     <figure>
       <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
@@ -823,7 +862,7 @@
       <div class="app strip side"><div class="rows" style="overflow:visible; padding-bottom:10px">
         <div class="sec"><b>Running</b><span>2</span><span class="chev"><svg class="ic"><use href="#i-chev"/></svg></span></div>
         <div class="group">
-          <div class="row hov"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
+          <div class="row hov"><span class="rt"><span class="lb">demo/api-server</span><span class="tt">Claude needs your permission</span><span class="lp">本番に適用する前に dry-run の結果を見せて</span></span><span class="rc"><span class="sym"><svg><use href="#s-wait" style="color:var(--wait)"/><use href="#s-badge"/></svg></span><span class="tm">4m</span></span></div>
           <div class="row"><span class="rt"><span class="lb">example/mobile-app</span><span class="tt">Add retry to the upload client</span><span class="lp">Use exponential backoff, at most 5 attempts</span></span><span class="rc"><span class="sym"><svg><use href="#s-glyph"/></svg></span><span class="tm">12m</span></span></div>
         </div>
         <div class="tip" style="left:150px; transform:translateY(-93px)">Running is ordered automatically</div>
@@ -894,7 +933,7 @@
   <h2>固定フッター: 警告行・メッセージ行・キーの案内</h2>
   <ul>
     <li><strong>警告行</strong>(表示する条件は DESIGN.md §4.5「異常の可視化」):
-      <strong>モノクロ(二次色)+ ⚠ 記号</strong>・12px。赤は使用しない(赤は、未確認と、閉じている Running の印だけに使用する)。
+      <strong>モノクロ(二次色)+ ⚠ 記号</strong>・12px。色は使用しない(状態の色のオレンジとアクセントカラーは、状態記号、未確認の点、閉じている Running の印だけに使用する)。
       クリックの動作は無い</li>
     <li><strong>メッセージ行</strong>(二次色 11px・クリック不可): 表示する内容があるときだけ、
       キーの案内の上に 1 行で表示する(内容と優先順位は DESIGN.md §4.6「メッセージ行」)。
@@ -1012,7 +1051,7 @@
         <div class="docwrap">
           <div class="doc">
             <div class="msg band"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
-            <div class="msg ans"><div class="who ai">Claude<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div>
+            <div class="msg ans"><div class="who ai">Claude<span class="cp"><span class="cpd">Copied</span><svg class="ic s14"><use href="#i-check"/></svg></span></div>
               <p>タスクにタグを付けてから、一覧のコマンドで絞り込みます。</p>
               <pre>todo <span class="hl">tag</span> 42 urgent
 todo list --<span class="hl">tag</span>s urgent,work</pre>
@@ -1248,8 +1287,11 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       モノスペースで揃わず、列が崩れる(DESIGN.md §8.37)</li>
     <li><strong>発言ごとのコピー</strong>: 各発言のラベルの行の右端に、コピーのアイコンボタン
       (14px・二次色)を常に表示する。本文の文字と同じく、ミニマップの手前 8px より内側に配置する。
-      押した後は一定時間、アイコンを<strong>チェックマーク</strong>に替える(同じ位置・同じ大きさ・同じ色。
-      表示時間は DESIGN.md §9、コピーする内容は §4.6「発言ごとのコピー」)</li>
+      押した後は一定時間、アイコンを<strong>チェックマーク</strong>に替え(同じ位置・同じ大きさ・同じ色)、
+      アイコンの左 4px に <code>Copied</code> を表示する(<code>.cpd</code>。枠線と地を持つ角丸の表示で、
+      ラベルの行の高さと、ほかの要素の位置を変更しない。選択とコピーの対象に含めない。
+      表示時間は DESIGN.md §9、コピーする内容は §4.6「発言ごとのコピー」)。
+      上記「詳細ページ(1 列)」のポップオーバーの図では、2 番目の発言が、押した直後の状態である</li>
     <li><strong>選択とコピー</strong>(文法の正は DESIGN.md §4.6「選択とコピー」): 選択ハイライトは
       メッセージをまたいで連続する。ラベル・展開 / 畳みのボタン・コピーのボタンは
       選択に含まれない。右クリックメニューは Copy(⌘C)/ Copy as Markdown(⇧⌘C)の 2 項目だけ</li>
@@ -1286,9 +1328,9 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:8px; overflow:hidden">
         <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-copy"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
-        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><svg class="ic s14"><use href="#i-check"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
+        <div class="msg band" style="margin-top:0"><div class="who you">You<span class="cp"><span class="cpd">Copied</span><svg class="ic s14"><use href="#i-check"/></svg></span></div><div class="mt">タスクを絞り込む方法を教えて</div></div>
       </div>
-      <figcaption>コピーのボタンの反応(上 = 通常: コピーのアイコン / 下 = 押した直後: チェックマーク)</figcaption>
+      <figcaption>コピーのボタンの反応(上 = 通常: コピーのアイコン / 下 = 押した直後: チェックマークと <code>Copied</code>)</figcaption>
     </figure>
   </div>
 
@@ -1361,20 +1403,68 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       日本語入力の変換が未確定の間は、すべてのキーを日本語入力に渡す</li>
   </ul>
 
-  <h2>文字の大きさ</h2>
+  <h2>Settings ウィンドウ</h2>
   <div class="mock">
     <figure>
-      <div class="app strip" style="width:320px">
-        <span class="lab">General</span>
-        <div class="rowc"><span>Text size<br><span style="font-size:11px;color:var(--text2)">Text in the popover and the window</span></span>
-          <span style="display:inline-flex;align-items:center;gap:4px"><span class="popup" style="min-width:56px;justify-content:flex-end">13</span><span class="popup" style="padding:0 3px">▲▼</span></span></div>
+      <div class="setw tabbed">
+        <div class="tabs"><span class="tab on"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.6"/><circle cx="9" cy="9" r="6.2" stroke-dasharray="2.4 2.5"/></svg>General</span><span class="tab"><svg viewBox="0 0 18 18"><path d="M3 5l1.4 1.4L6.8 4M3 10l1.4 1.4L6.8 9M9.5 5.2h5.5M9.5 10.2h5.5M3.6 14.6h.1M9.5 14.6h5.5"/></svg>Setup Check</span></div>
+        <div class="pane">
+        <div class="sh">General</div>
+        <div class="box">
+          <div class="it"><div class="lb"><b>Start at Login</b><span>Runs in the menu bar after you log in to your Mac</span></div><div class="ct"><span class="sw"></span></div></div>
+          <div class="it"><div class="lb"><b>Appearance</b><span>System follows the appearance setting of your Mac</span></div><div class="ct"><span class="seg"><span class="on">System</span><span>Light</span><span>Dark</span></span></div></div>
+          <div class="it"><div class="lb"><b>Text size</b><span>Text in the popover and the window</span></div><div class="ct" style="gap:4px"><span class="popup" style="min-width:56px;text-align:right;box-sizing:border-box">13</span><span class="popup" style="padding:0 3px">▲▼</span></div></div>
+          <div class="it"><div class="lb"><b>Global shortcut</b><span>Shows the list from any app</span><span class="er">Add ⌃, ⌥, or ⌘ to the shortcut</span></div><div class="ct"><span class="popup" style="min-width:120px;text-align:center;box-sizing:border-box">Type shortcut</span></div></div>
+        </div>
+        <div class="sh">Sounds</div>
+        <div class="box">
+          <div class="it"><div class="lb"><b>Mute sound</b><span>Notifications arrive silently</span></div><div class="ct"><span class="sw off"></span></div></div>
+          <div class="it"><div class="lb"><b>Waiting sound</b><span>Plays when a session needs your input</span></div><div class="ct"><span class="popup">Glass<span class="chev">▲▼</span></span></div></div>
+          <div class="it"><div class="lb"><b>Done sound</b><span>Plays when a session finishes responding</span></div><div class="ct"><span class="popup">Glass<span class="chev">▲▼</span></span></div></div>
+        </div>
+        </div>
       </div>
-      <figcaption>Settings ウィンドウの General の Text size(数値の入力欄とステッパー)</figcaption>
+      <figcaption>Settings ウィンドウの General のタブ(Global shortcut の行は、登録できない組み合わせを押した直後の、案内を表示している状態)</figcaption>
+    </figure>
+    <figure>
+      <div class="setw tabbed">
+        <div class="tabs"><span class="tab"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.6"/><circle cx="9" cy="9" r="6.2" stroke-dasharray="2.4 2.5"/></svg>General</span><span class="tab on"><svg viewBox="0 0 18 18"><path d="M3 5l1.4 1.4L6.8 4M3 10l1.4 1.4L6.8 9M9.5 5.2h5.5M9.5 10.2h5.5M3.6 14.6h.1M9.5 14.6h5.5"/></svg>Setup Check</span></div>
+        <div class="pane">
+        <div class="sh">Doctor</div>
+        <div class="box">
+          <div class="it"><span class="ck ok">✓</span><div class="lb ck-t"><b>daemon is running</b></div></div>
+          <div class="it"><span class="ck wn">⚠</span><div class="lb ck-t"><b>hooks are not installed</b><span>Run: claude plugin install shiibar-cc@shiibar-cc</span></div></div>
+          <div class="it"><span class="ck ng">✗</span><div class="lb ck-t"><b>the terminal cannot be controlled</b><span>Allow Shiibar CC in System Settings › Privacy &amp; Security › Automation</span></div></div>
+        </div>
+        <div class="sh">App</div>
+        <div class="box">
+          <div class="it"><span class="ck ok">✓</span><div class="lb ck-t"><b>Notifications are allowed</b></div></div>
+          <div class="it"><span class="ck ok">✓</span><div class="lb ck-t"><b>Start at Login is on</b></div></div>
+        </div>
+        <div class="foot"><span class="popup">Re-run</span></div>
+        </div>
+      </div>
+      <figcaption>Settings ウィンドウの Setup Check のタブ(行の文言は例示である。実際の文言は、<code>shiibar-cc doctor</code> の結果とアプリの確認の結果である)</figcaption>
     </figure>
   </div>
   <ul>
+    <li><strong>タブの行</strong>: ウィンドウの上端に、<code>General</code> と <code>Setup Check</code> のタブのボタンを中央にそろえて並べ、下に 1px の線を引く。
+      ボタンは、上に 18px のアイコン、下に 11px の名前で、最小の幅 72px、余白は上下 6px・左右 8px、ボタンの間隔 4px、行の余白は上下 6px・左右 12px である。
+      選択中のタブは、アクセントカラーを 16% で重ねた角丸(7px)の地と、アクセントカラーのアイコンと文字で示す。本図のアイコンの形は例示で、SF Symbols の歯車とチェックの一覧を使用する。
+      ウィンドウを開くたびに <code>General</code> を表示する。ウィンドウの幅はどのタブでも 600px で、高さは、表示しているタブの内容に合わせる</li>
+    <li><strong>Setup Check のタブ</strong>: 見出し付きの枠 2 つ(Doctor と App)。1 行は、左端に結果の記号(✓ 緑 / ⚠ 黄 / ✗ 赤。13px の太字、幅 16px、間隔 8px)、
+      その右に要約(13px)と、ヒント(11px・二次色。ヒントがある行だけ)である。右の列は無い。枠の下(間隔 14px)の右端に <code>Re-run</code> のボタンを表示する。
+      挙動は DESIGN.md §4.5「Setup Check のタブ」</li>
+    <li><strong>General のタブ</strong>: 見出し付きの枠 2 つ(General と Sounds)を表示する。1 行は、左にラベル(セミボールド)と 1 行の説明(11px・二次色)、
+      右に、幅 240px の列に右端をそろえたコントロール 1 つである。エラーと案内の文字は、説明の下に表示する</li>
+    <li>本図の寸法(余白、枠の角の半径、行の余白、右の列の幅)は、DESIGN.md §9 の値である。コントロールは macOS 標準の部品で、
+      本図の形は例示である。項目と動作は DESIGN.md §4.5「Settings ウィンドウ」</li>
+  </ul>
+
+  <h2>文字の大きさ</h2>
+  <ul>
     <li>通常の調整は <kbd>⌘=</kbd>(<kbd>⌘+</kbd> も同じ)/ <kbd>⌘−</kbd> / <kbd>⌘0</kbd>(13 に戻す)、
-      設定として表示する場所は Settings の General の <strong>Text size</strong>(数値の入力欄とステッパー)。
+      設定として表示する場所は Settings の General の <strong>Text size</strong>(数値の入力欄とステッパー。上記「Settings ウィンドウ」)。
       範囲と既定は DESIGN.md §9、挙動は同 §4.5「文字の大きさ」/ §4.6「会話ペインの文字の大きさ」</li>
     <li><strong>対象はポップオーバーとウィンドウの全体</strong>(一覧、見出し行、下部パネル、会話ペイン)。
       本ページの寸法は、文字の大きさが 13 のときの値である。文字の大きさ、行の高さ、上下の余白、アイコン、検索欄の高さ、
@@ -1401,11 +1491,11 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     <li>本ページの色の CSS 値(選択の地・行の枠の地と枠線・区切り線・ハイライト色・帯の明度・ホバーの濃度・ドラッグできない理由の表示の地と文字を含む)は
       紙面上の例示で、実装はシステムの色に追従させる(ライトとダークの両方で、行の枠・区切り線・選択中の行(青と灰色)・
       ホバー中の行・見出しの帯・一覧の地を判別できる値にする。アクセントカラーはシステムの設定に従う)。
-      例外はスターの黄色と未確認の赤で、本ページの値を使用する</li>
-    <li><strong>一覧の地・行の枠の地・帯の地の色の規則</strong>: 一覧の地は、ライトでは <code>controlBackgroundColor</code> に <code>systemGray</code> を 5% 混ぜた色、
+      例外はスターの黄色で、本ページの値を使用する。waiting のオレンジは <code>systemOrange</code>、未確認の点は <code>controlAccentColor</code> である(DESIGN.md §9「状態の色」)</li>
+    <li><strong>一覧の地・行の枠の地・帯の地の色の規則</strong>: 一覧の地は、ライトでは <code>controlBackgroundColor</code> に <code>systemGray</code> を 10% 混ぜた色、
       ダークでは <code>windowBackgroundColor</code> に黒を 30% 混ぜた色である。行の枠の地は、ライトでは <code>controlBackgroundColor</code>、
-      ダークでは、一覧の地に白を不透明度 0.07 で重ねた色である。見出しの帯の地は、一覧の地に <code>systemGray</code> を、ライトでは不透明度 0.09、
-      ダークでは不透明度 0.12 で重ねた色である。帯の上端と下端の線と、文字と線の見出しの線は <code>separatorColor</code> である。
+      ダークでは、一覧の地に白を不透明度 0.10 で重ねた色である。見出しの帯の地は、一覧の地に <code>systemGray</code> を、ライトでは不透明度 0.12、
+      ダークでは不透明度 0.08 で重ねた色である。明るさの順は、ライトでは 帯 &lt; 一覧の地 &lt; 行の枠、ダークでは 一覧の地 &lt; 帯 &lt; 行の枠 である。帯の上端と下端の線と、文字と線の見出しの線は <code>separatorColor</code> である。
       帯と行の枠は、色に加えて、形(端から端までの帯と線、角丸の枠)で区別する</li>
     <li>行の状態記号は文字グリフ(<code>✻</code> は素の U+273B)と自前描画の吹き出しで構成する。
       寸法は本ページの SVG(20 単位のボックス)が正</li>

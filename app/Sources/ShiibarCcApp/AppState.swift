@@ -47,10 +47,30 @@ final class AppState: ObservableObject {
     /// the Settings window records its combination.
     let hotKey: GlobalHotKeyModel
     private let lifecycle: DaemonLifecycleManager
-    /// Not `private`: the Setup Check window (§4.5, M5 T5) also needs it to
-    /// run `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /
+    /// Not `private`: the Setup Check tab (§4.5) also needs it to run
+    /// `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /
     /// `runReconcile` below.
     let helpersDirectory: URL?
+    /// The Settings window's tabs and models (§4.5 "Settings window"),
+    /// created on first use and kept for the app's lifetime, like the
+    /// window scene that shows it.
+    lazy var settingsWindow: SettingsWindowModel = {
+        let notificationManager = notificationManager
+        let helpersDirectory = helpersDirectory
+        return SettingsWindowModel(
+            general: SettingsViewModel(
+                notificationManager: notificationManager,
+                loginItemEnabledProvider: { [weak self] in self?.loginItemEnabled ?? false },
+                toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
+                appearanceSetting: appearanceSetting,
+                setAppearance: { [weak self] in self?.setAppearanceSetting($0) }),
+            textSizeField: TextSizeFieldModel(store: textSize),
+            hotKey: hotKey,
+            setupCheck: SetupCheckViewModel(
+                helpersDirectory: helpersDirectory,
+                notificationManager: notificationManager,
+                loginItemEnabledProvider: { [weak self] in self?.loginItemEnabled ?? false }))
+    }()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
     /// `PeriodicReconcile` (ShiibarCcCore) — the scheduler itself is
@@ -66,8 +86,8 @@ final class AppState: ObservableObject {
     /// Set by `MainSurfaceController`: the app menu's Close Window closes
     /// the popover while it is key, else the key window (§4.5).
     var closeKeySurface: () -> Void = { NSApp.keyWindow?.performClose(nil) }
-    /// Set by `MainSurfaceController`: opening About / Settings / Setup
-    /// Check closes the popover (§4.5 "popover" close triggers).
+    /// Set by `MainSurfaceController`: opening About / Settings closes the
+    /// popover (§4.5 "popover" close triggers).
     var willOpenAuxiliaryWindow: () -> Void = {}
     /// Set by `MainSurfaceController`: Dock click / reopen raises the window.
     var raiseMainWindow: () -> Void = {}
@@ -381,10 +401,10 @@ final class AppState: ObservableObject {
 
     // MARK: - Derived display state
 
-    /// ⌄ menu "Clear badges" enabled state (§4.5/§8.24): disabled when no
-    /// agent currently carries the unreviewed flag.
+    /// ⌄ menu "Mark all as read" enabled state (§4.5/§8.24): disabled when
+    /// no agent currently carries the unreviewed flag.
     var hasUnreviewed: Bool {
-        agents.contains { $0.unreviewed }
+        MarkAllAsRead.isEnabled(agents: agents)
     }
 
     var trayIcon: TrayIconState {
@@ -405,7 +425,7 @@ final class AppState: ObservableObject {
     }
 
     /// §4.5: System = `NSApp.appearance = nil` (follow the OS); Light /
-    /// Dark pin the whole app — popover, window, Settings, Setup Check — to aqua / darkAqua. The name strings live in
+    /// Dark pin the whole app — popover, window, Settings — to aqua / darkAqua. The name strings live in
     /// `AppearanceSetting` (ShiibarCcCore) where a unit test pins them to
     /// the real `NSAppearance.Name` constants.
     private func applyAppearance() {
@@ -441,15 +461,16 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// ⌄ menu "Clear badges" (§4.5/§8.24): calls `shiibar-cc seen <target>`
-    /// for every currently-unreviewed target. No feedback UI on success —
-    /// the badges disappearing (via the subscribe stream's `status_changed`
-    /// events, same path as any other state change) IS the feedback. Only
-    /// the unreviewed flag is touched; delivered Notification Center
-    /// notifications are left alone (§8.24 — the user clears those
-    /// themselves).
-    func clearBadges() {
-        let targets = agents.filter(\.unreviewed).map(\.target)
+    /// ⌄ menu "Mark all as read" (§4.5/§8.24): calls `shiibar-cc seen
+    /// <target>` for every currently-unreviewed target. No feedback UI on
+    /// success — the accent-color dots disappearing (via the subscribe
+    /// stream's `status_changed` events, same path as any other state
+    /// change) IS the feedback; a waiting session's orange stays until it
+    /// stops waiting (§3.1). Only the unreviewed flag is touched; delivered
+    /// Notification Center notifications are left alone (§8.24 — the user
+    /// clears those themselves).
+    func markAllAsRead() {
+        let targets = MarkAllAsRead.targets(agents: agents)
         guard !targets.isEmpty else { return }
         DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
             for target in targets {

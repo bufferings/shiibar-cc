@@ -89,7 +89,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     /// Current notification authorization, reduced to `NotificationPermissionState`
-    /// for the Setup Check window's row (§4.5, M5 T5). `getNotificationSettings`'s
+    /// for the Setup Check tab's row (§4.5). `getNotificationSettings`'s
     /// completion runs off the main actor, so it hops back before calling
     /// `completion` (same pattern as `refreshPermissionStatus` above).
     /// `.provisional`/`.ephemeral` (quiet delivery, still permitted) count as

@@ -1,7 +1,9 @@
 // AppKit renderer for the tray icon (the tray section of menubar-design.html,
 // DESIGN.md §4.5 / M24 T1's "window + one glyph" geometry): draws the
 // rounded window frame + one emblem-slot glyph (+ three dots while
-// working, + red unreviewed badge) into an NSImage, redrawn on every state change.
+// working, + the corner dot: orange while a session is waiting, else the
+// accent color while one is unreviewed) into an NSImage, redrawn when what
+// it depicts changes.
 // Every state, `working` included, is a static image: each change of the
 // status item's image makes AppKit re-snapshot the status item on the main
 // thread at a fixed cost, so an animated icon would use CPU for as long as
@@ -15,15 +17,21 @@
 // compositing, redrawn per state change"); a plain `Image` is the reliably
 // supported label content.
 //
-// Two-layer rule (menubar-design.html implementation notes) — unchanged by
-// the M24 T1 redesign:
-//   - no badge -> ONE template image (glyph only). Auto-tints to the menu
-//                 bar's foreground color; the dim level is baked into the
-//                 alpha channel, which template rendering preserves.
-//   - badge    -> ONE non-template image: glyph drawn in a light/dark
-//                 appearance-matched monochrome + red badge with its light
-//                 halo. This is the spec's sanctioned fallback
-//                 (appearance-observed non-template compositing).
+// Two-layer rule (menubar-design.html implementation notes):
+//   - no dot -> ONE template image (glyph only). Auto-tints to the menu
+//               bar's foreground color; the dim level is baked into the
+//               alpha channel, which template rendering preserves.
+//   - dot    -> ONE non-template image: glyph drawn in a light/dark
+//               appearance-matched monochrome + the colored dot with its
+//               light halo. This is the spec's sanctioned fallback
+//               (appearance-observed non-template compositing).
+//
+// The dot's color (`systemOrange` or `controlAccentColor`) arrives already
+// resolved to sRGB components against the status item button's appearance
+// (`TrayDotColor.resolve`): the drawing handler runs under whatever
+// appearance is current when AppKit draws the image, so a dynamic color
+// must not be resolved inside it (DESIGN.md §4.5 "visual source of
+// truth").
 //
 // The emblem slot holds one glyph (top-left, x 6.4): idle/none show the static `✻` (plain U+273B, forced to text
 // presentation with trailing U+FE0E so it never renders as a colored emoji
@@ -82,42 +90,43 @@ enum TrayIconMetrics {
     ]
     static let workingDotRadius: CGFloat = 0.9
 
-    // Red unreviewed badge, overhanging the frame's top-right corner, with a
-    // light halo ring always drawn (invisible on light bars by design).
-    // Radius 3.6: r 2.2 is too small to register as a badge next to real
-    // menu bar neighbors. The center is pulled slightly inward so dot +
-    // halo still fit the 18pt canvas.
-    static let badgeCenter = NSPoint(x: 15.6, y: 13.9)
-    static let badgeRadius: CGFloat = 3.6
+    // The corner dot, overhanging the frame's top-right corner, with a
+    // light halo ring always drawn (invisible on light bars by design). The
+    // position and size are the same for both colors. Radius 3.6: r 2.2 is
+    // too small to register next to real menu bar neighbors. The center is
+    // pulled slightly inward so dot + halo still fit the 18pt canvas.
+    static let dotCenter = NSPoint(x: 15.6, y: 13.9)
+    static let dotRadius: CGFloat = 3.6
     static let haloLineWidth: CGFloat = 0.9
-    static let badgeColor = NSColor(srgbRed: 0.95, green: 0.30, blue: 0.32, alpha: 1)
     static let haloColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85)
 
-    // Glyph monochrome for the non-template (badge) variant.
+    // Glyph monochrome for the non-template (dot) variant.
     static let lightAppearanceGlyph = NSColor.black.withAlphaComponent(0.9)
     static let darkAppearanceGlyph = NSColor.white.withAlphaComponent(0.95)
 }
 
 enum TrayIconRenderer {
-    /// Render the tray image for `state`. `darkMenuBar` only matters for
-    /// the non-template (badge) variant; the template variant tints itself.
-    static func render(state: TrayIconState, darkMenuBar: Bool) -> NSImage {
+    /// Render the tray image for `state`. `dotColor` is the corner dot's
+    /// color, already resolved (nil = no dot: a template image).
+    /// `darkMenuBar` only matters for the non-template (dot) variant; the
+    /// template variant tints itself.
+    static func render(state: TrayIconState, darkMenuBar: Bool, dotColor: ResolvedRGBA?) -> NSImage {
         let size = NSSize(width: TrayIconMetrics.canvasWidth, height: TrayIconMetrics.canvasHeight)
         let image = NSImage(size: size, flipped: false) { _ in
-            draw(state: state, darkMenuBar: darkMenuBar)
+            draw(state: state, darkMenuBar: darkMenuBar, dotColor: dotColor)
             return true
         }
-        image.isTemplate = !state.hasUnreviewedDot
+        image.isTemplate = dotColor == nil
         return image
     }
 
-    private static func draw(state: TrayIconState, darkMenuBar: Bool) {
+    private static func draw(state: TrayIconState, darkMenuBar: Bool, dotColor: ResolvedRGBA?) {
         let m = TrayIconMetrics.self
         let dim = CGFloat(state.dim)
 
         // Template images carry meaning only in the alpha channel, so the
         // dim level is applied as alpha either way.
-        let base: NSColor = state.hasUnreviewedDot
+        let base: NSColor = dotColor != nil
             ? (darkMenuBar ? m.darkAppearanceGlyph : m.lightAppearanceGlyph)
             : .black
         let glyphColor = base.withAlphaComponent(base.alphaComponent * dim)
@@ -163,20 +172,22 @@ enum TrayIconRenderer {
             drawGlyphText(m.emblemText, center: m.emblemCenter, size: m.emblemFontSize, weight: .regular, color: glyphColor)
         }
 
-        // 3. Red badge + halo (non-template variant only; also dimmed,
+        // 3. The corner dot + halo (non-template variant only; also dimmed,
         // since the whole tray grays out together, menubar-design.html).
-        // Unchanged by M24 T1.
-        if state.hasUnreviewedDot {
-            let badgeRect = NSRect(
-                x: m.badgeCenter.x - m.badgeRadius,
-                y: m.badgeCenter.y - m.badgeRadius,
-                width: m.badgeRadius * 2,
-                height: m.badgeRadius * 2
+        if let dotColor {
+            let dotRect = NSRect(
+                x: m.dotCenter.x - m.dotRadius,
+                y: m.dotCenter.y - m.dotRadius,
+                width: m.dotRadius * 2,
+                height: m.dotRadius * 2
             )
-            let badge = NSBezierPath(ovalIn: badgeRect)
-            m.badgeColor.withAlphaComponent(m.badgeColor.alphaComponent * dim).setFill()
-            badge.fill()
-            let halo = NSBezierPath(ovalIn: badgeRect)
+            let dot = NSBezierPath(ovalIn: dotRect)
+            NSColor(
+                srgbRed: CGFloat(dotColor.red), green: CGFloat(dotColor.green), blue: CGFloat(dotColor.blue),
+                alpha: CGFloat(dotColor.alpha) * dim
+            ).setFill()
+            dot.fill()
+            let halo = NSBezierPath(ovalIn: dotRect)
             halo.lineWidth = m.haloLineWidth
             m.haloColor.withAlphaComponent(m.haloColor.alphaComponent * dim).setStroke()
             halo.stroke()
@@ -194,5 +205,95 @@ enum TrayIconRenderer {
             x: center.x - bounds.width / 2,
             y: center.y - bounds.height / 2
         ))
+    }
+}
+
+/// The corner dot's color (DESIGN.md §4.5 "visual source of truth", §9
+/// "state colors"): `systemOrange` for waiting, `controlAccentColor` for
+/// unreviewed, resolved to sRGB components under the status item button's
+/// appearance before the image is made.
+enum TrayDotColor {
+    static func nsColor(for dot: StateDot) -> NSColor {
+        switch dot {
+        case .waiting: return SurfaceColors.waitingNSColor
+        case .unreviewed: return SurfaceColors.unreviewedNSColor
+        }
+    }
+
+    /// The dot's color resolved under `appearance` (nil = no dot).
+    static func resolve(_ dot: StateDot?, appearance: NSAppearance) -> ResolvedRGBA? {
+        guard let dot else { return nil }
+        var resolved: ResolvedRGBA?
+        appearance.performAsCurrentDrawingAppearance {
+            // `usingColorSpace` resolves a dynamic system color against the
+            // current drawing appearance.
+            if let srgb = nsColor(for: dot).usingColorSpace(.sRGB) {
+                resolved = ResolvedRGBA(
+                    red: Double(srgb.redComponent), green: Double(srgb.greenComponent),
+                    blue: Double(srgb.blueComponent), alpha: Double(srgb.alphaComponent))
+            }
+        }
+        return resolved
+    }
+}
+
+/// Sets the status item button's image (DESIGN.md §4.5 "visual source of
+/// truth", §8.51): only when what the image depicts — the state, whether
+/// the menu bar is dark, and the dot's resolved color — differs from the
+/// last image set. The dot color is resolved once per refresh and that same
+/// value is compared and drawn. A change of the system colors (the accent
+/// color setting, `NSColor.systemColorsDidChangeNotification`) refreshes
+/// too, so the dot follows the new accent color.
+@MainActor
+final class TrayImageUpdater {
+    typealias Render = (TrayIconState, Bool, ResolvedRGBA?) -> NSImage
+
+    private let state: () -> TrayIconState
+    private let appearance: () -> NSAppearance?
+    private let setImage: (NSImage) -> Void
+    private let resolve: (StateDot?, NSAppearance) -> ResolvedRGBA?
+    private let render: Render
+    private let center: NotificationCenter
+    private var gate = TrayImageGate()
+    private var systemColorsObserver: NSObjectProtocol?
+
+    init(
+        state: @escaping () -> TrayIconState,
+        appearance: @escaping () -> NSAppearance?,
+        setImage: @escaping (NSImage) -> Void,
+        resolve: @escaping (StateDot?, NSAppearance) -> ResolvedRGBA? = TrayDotColor.resolve,
+        render: @escaping Render = TrayIconRenderer.render,
+        center: NotificationCenter = .default
+    ) {
+        self.state = state
+        self.appearance = appearance
+        self.setImage = setImage
+        self.resolve = resolve
+        self.render = render
+        self.center = center
+        // No queue: AppKit posts the notification on the main thread.
+        systemColorsObserver = center.addObserver(
+            forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+    }
+
+    deinit {
+        if let systemColorsObserver { center.removeObserver(systemColorsObserver) }
+    }
+
+    func refresh() {
+        guard let appearance = appearance() else { return }
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let icon = state()
+        let dotColor = resolve(icon.dot, appearance)
+        // Assign only when the depicted state, the menu bar appearance or the
+        // dot's color changed: setting the image schedules a replicant
+        // redraw that sets the button's appearance and re-fires the
+        // appearance observation, so an unconditional assignment never stops
+        // redrawing.
+        guard gate.shouldRender(state: icon, darkMenuBar: dark, dotColor: dotColor) else { return }
+        setImage(render(icon, dark, dotColor))
     }
 }

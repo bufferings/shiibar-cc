@@ -91,24 +91,34 @@ public struct ConversationMessage: Codable, Equatable, Identifiable {
 }
 
 /// The `conversations show --json` payload
-/// (`{"session_id","cwd","title","messages":[...]}`, §4.4).
+/// (`{"session_id","cwd","title","updated_at","messages":[...]}`, §4.4).
+/// `updated_at` equals the `updated_at` that `search` returns for the same
+/// conversation; the end marker's elapsed time comes from it (§4.6
+/// "conversation pane reload"). A missing key (older CLI) decodes to nil and
+/// the caller falls back to the search result's value.
 public struct ConversationDetail: Codable, Equatable {
     public let sessionID: String
     public let cwd: String?
     public let title: String?
+    public let updatedAt: Int64?
     public let messages: [ConversationMessage]
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case cwd
         case title
+        case updatedAt = "updated_at"
         case messages
     }
 
-    public init(sessionID: String, cwd: String?, title: String?, messages: [ConversationMessage]) {
+    public init(
+        sessionID: String, cwd: String?, title: String?, updatedAt: Int64? = nil,
+        messages: [ConversationMessage]
+    ) {
         self.sessionID = sessionID
         self.cwd = cwd
         self.title = title
+        self.updatedAt = updatedAt
         self.messages = messages
     }
 
