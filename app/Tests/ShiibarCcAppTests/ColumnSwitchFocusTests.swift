@@ -466,10 +466,18 @@ final class ColumnSwitchFocusTests: XCTestCase {
                 // extends past that rect by an amount that differs between
                 // macOS versions.
                 let segmented = try XCTUnwrap(Self.find(NSSegmentedControl.self, in: contentView))
-                let control = segmented.convert(segmented.alignmentRect(forFrame: segmented.bounds), to: nil)
                 let font = NSFont.systemFont(ofSize: SurfaceScale(ratio: CGFloat(points) / 13).findBarFont)
                 let text = (try XCTUnwrap(model.hitCounterText) as NSString).size(withAttributes: [.font: font]).width
-                let counterLeft = control.minX - SurfaceMetrics.headerSpacing - text
+                let controlRect = { segmented.convert(segmented.alignmentRect(forFrame: segmented.bounds), to: nil) }
+                let counterLeftNow = { controlRect().minX - SurfaceMetrics.headerSpacing - text }
+                // A text size change re-lays out the header over several
+                // run loop turns, and the field's host settles after the
+                // counter does; wait for the row to settle before measuring.
+                pump(until: {
+                    abs(self.frameInWindow(host).maxX - (counterLeftNow() - SurfaceMetrics.headerSpacing)) <= 1
+                })
+                let control = controlRect()
+                let counterLeft = counterLeftNow()
                 XCTAssertEqual(frameInWindow(host).maxX, counterLeft - SurfaceMetrics.headerSpacing, accuracy: 1,
                                "\(width) at \(points): one gap before the counter")
                 XCTAssertEqual(control.maxX, try refreshButtonFrame(in: window).minX - SurfaceMetrics.headerSpacing,
