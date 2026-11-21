@@ -29,6 +29,9 @@ struct ConversationsSearchField: NSViewRepresentable {
     /// The text size's scale (§4.5 "text size"): the field's height, text,
     /// magnifier and clear button follow it.
     var scale: SurfaceScale = .base
+    /// The placeholder (`UnifiedListState.searchPlaceholder`: the normal
+    /// list's, or `Search archived` in the Archive view — §4.6).
+    var placeholder: String = Self.placeholder
 
     static let placeholder = "Search (2+ characters)"
 
@@ -39,6 +42,7 @@ struct ConversationsSearchField: NSViewRepresentable {
     func makeNSView(context: Context) -> SearchFieldView {
         let view = SearchFieldView()
         view.scale = scale
+        view.placeholder = placeholder
         view.textField.delegate = context.coordinator
         context.coordinator.view = view
         // The clear button feeds the emptied text through the same handler
@@ -57,6 +61,9 @@ struct ConversationsSearchField: NSViewRepresentable {
         let field = view.textField
         context.coordinator.textBinding = $text
         view.scale = scale
+        // Switching between the normal list and the Archive view changes
+        // the placeholder only; the text stays (§4.6 "Archive view").
+        view.placeholder = placeholder
         field.isEnabled = isEnabled
         field.isKeyViewLoopMember = isKeyViewLoopMember
         // Never clobber an active composition from the binding side.
@@ -158,6 +165,11 @@ final class SearchFieldView: NSView {
 
     let textField = SearchTextField()
     let clearButton = SearchClearButton()
+    /// The text field's placeholder.
+    var placeholder: String {
+        get { textField.placeholderString ?? "" }
+        set { if textField.placeholderString != newValue { textField.placeholderString = newValue } }
+    }
     /// Propagates the emptied text after the clear button empties the field.
     var onTextCleared: () -> Void = {}
     /// Puts keyboard focus in the text field after a clear. Replaceable so

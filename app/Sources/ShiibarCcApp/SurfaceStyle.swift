@@ -9,19 +9,21 @@ import AppKit
 import SwiftUI
 
 enum SurfaceColors {
-    /// The list's pale, opaque ground in the popover and the window: a
-    /// shade off the system backgrounds so white row frames stand out on
-    /// light and veiled ones on dark (window-design.html `--cardsbg`). The
-    /// popover paints its arrow with the same color.
+    /// The list's pale, opaque ground in the popover and the window
+    /// (window-design.html "implementation notes": light = the control
+    /// background with 5% system gray; dark = the window background with
+    /// 30% black), so white row frames stand out on light and veiled ones on
+    /// dark. The popover paints its arrow with the same color.
     static let listBackgroundNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor.windowBackgroundColor.blended(withFraction: 0.3, of: .black) ?? .windowBackgroundColor
             : NSColor.controlBackgroundColor.blended(withFraction: lightListGrayFraction, of: .systemGray)
                 ?? .windowBackgroundColor
     }
-    /// The share of gray in the light list ground: enough that the ground is
-    /// visibly off the white row frames.
-    static let lightListGrayFraction: CGFloat = 0.10
+    /// The share of gray in the light list ground (window-design.html
+    /// "implementation notes": 5%), close to the row frames' white so the
+    /// heading bands stand out on it.
+    static let lightListGrayFraction: CGFloat = 0.05
     static let listBackground = Color(nsColor: listBackgroundNSColor)
     /// The conversation pane: the plain reading background.
     static let paneBackground = Color(nsColor: .controlBackgroundColor)
@@ -49,14 +51,16 @@ enum SurfaceColors {
     static let secondary = Color(nsColor: .secondaryLabelColor)
     /// Neutral chip / key-hint ground (`rgba(127,127,127,.09)`).
     static let chip = Color.gray.opacity(0.09)
-    /// The section heading band (window-design.html `.rows .sec`: gray at
-    /// 12%). The system gray, a little denser on dark, where the veiled
-    /// frames are close in value to the list ground, so the band, the frames
-    /// and the ground stay apart in both appearances.
+    /// The heading band's ground, drawn over the list's ground
+    /// (window-design.html "implementation notes": the system gray at 0.09
+    /// on light, 0.12 on dark). Its top and bottom lines are `line`.
     static let sectionBand = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor.systemGray.withAlphaComponent(
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.18 : 0.12)
+        NSColor.systemGray.withAlphaComponent(sectionBandOpacity(dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua))
     })
+    static func sectionBandOpacity(dark: Bool) -> CGFloat { dark ? 0.12 : 0.09 }
+    /// The more button's box while its menu is open (window-design.html
+    /// `.sym.open`: gray at 16%).
+    static let moreButtonOpenGround = Color.gray.opacity(0.16)
     /// The Running mark: the unreviewed badge's red (DESIGN.md §4.5
     /// "collapsing sections"; `RowSymbolView`).
     static let runningMark = Color.red
@@ -94,12 +98,31 @@ enum SurfaceMetrics {
     /// `.hrow` gap between its items (fixed; the buttons' corner radius 7 is
     /// fixed too — `HoverChipButtonStyle`).
     static let headerSpacing: CGFloat = 8
-    /// The section heading band (`.rows .sec`): inner left 10 / right 8,
-    /// 8 between its parts, radius 6. Its edges are the row frames' edges.
-    static let sectionBandLeading: CGFloat = 10
-    static let sectionBandTrailing: CGFloat = 8
+    /// The list's horizontal padding (`.rows`): the row frames and the
+    /// text-and-line headings sit this far in from the list's edges; the
+    /// bands do not (they span the list's whole width).
+    static let listSide: CGFloat = 10
+    /// 8 between a heading's parts (`.rows .sec` gap).
     static let sectionBandSpacing: CGFloat = 8
-    static let sectionBandRadius: CGFloat = 6
+    /// The band (Running, History and the Archive view's band —
+    /// window-design.html `.rows .sec`): inner left 22 / right 19, so the
+    /// name starts where the rows' text does and the chevron ends where the
+    /// rows' symbol-and-time column does. Lines 1pt along its top and
+    /// bottom edges; 8 above and below it, whatever the text size (§9).
+    static let sectionBandLeading: CGFloat = listSide + rowFrameBorder + rowLeading
+    static let sectionBandTrailing: CGFloat = listSide + rowFrameBorder + rowTrailing
+    static let sectionBandLine: CGFloat = 1
+    static let sectionBandGap: CGFloat = 8
+    /// The text-and-line heading (Starred and Recent — `.sec.sub`): inner
+    /// left 12 / right 9 from the frames' edges (the band's name and
+    /// chevron places), and the radius of its drop-target emphasis.
+    static let subHeadingLeading: CGFloat = rowFrameBorder + rowLeading
+    static let subHeadingTrailing: CGFloat = rowFrameBorder + rowTrailing
+    static let subHeadingRadius: CGFloat = 6
+    /// Between the star's box and the more button's box (`.rc .tops` gap 4).
+    static let rowSymbolBoxSpacing: CGFloat = 4
+    /// The more button's box while its menu is open: radius 5.
+    static let moreButtonOpenRadius: CGFloat = 5
     /// A frame of rows (`.group`): radius 10, a 1pt border; the rows'
     /// grounds stay inside its corners (radius 9). The divider between two
     /// rows starts at the rows' text (11 in from the border) and runs to the
@@ -196,19 +219,20 @@ struct SurfaceScale: Equatable {
     var hiddenRowsVertical: CGFloat { scaled(6) }
     /// Below the last row.
     var listBottom: CGFloat { scaled(8) }
-    /// Headings (`.rows .sec`): bold name and count, 4 inside at the top
-    /// and the bottom. The band (Running and History, also while searching
-    /// without its ground) has 8 above it and 6 below it; the text-only
-    /// headings under History (`.sec.sub`) 6 above and 4 below. Two
-    /// neighbors are apart by the larger of the upper one's space below and
-    /// the lower one's space above; a frame of rows has none of its own.
+    /// Headings (`.rows .sec`): bold name and count. The band is 30pt tall
+    /// at 13, its two 1pt lines included; only the part between the lines
+    /// follows the text size (§9). The text-and-line headings under History
+    /// (`.sec.sub`) are 4 inside at the top and the bottom, with 6 above
+    /// and 4 below them. Two neighbors are apart by the larger of the upper
+    /// one's space below and the lower one's space above; a frame of rows
+    /// has none of its own.
     var sectionTitleFont: CGFloat { scaled(12) }
     var sectionCountFont: CGFloat { scaled(11) }
-    var sectionHeaderTop: CGFloat { scaled(8) }
-    var sectionHeaderBottom: CGFloat { scaled(6) }
+    var sectionBandContentHeight: CGFloat { scaled(28) }
+    var sectionBandHeight: CGFloat { sectionBandContentHeight + 2 * SurfaceMetrics.sectionBandLine }
     var subHeadingTop: CGFloat { scaled(6) }
     var subHeadingBottom: CGFloat { scaled(4) }
-    var sectionBandVertical: CGFloat { scaled(4) }
+    var subHeadingVertical: CGFloat { scaled(4) }
     /// The chevron: a 12pt line-art icon (stroke 1.8) in a 14pt box.
     var sectionChevronBox: CGFloat { scaled(14) }
     var sectionChevronIcon: CGFloat { scaled(12) }
@@ -223,9 +247,20 @@ struct SurfaceScale: Equatable {
 
     // MARK: Row
 
-    /// The symbol-and-time column's width (§9: 28pt at 13). The elapsed
-    /// time widens it when it does not fit (§4.5).
+    /// The symbol-and-time column's smallest width with one symbol box
+    /// (§9: 28pt at 13 — Running rows and the Archive view's rows). The
+    /// elapsed time widens it when it does not fit (§4.5).
     var rowSymbolColumn: CGFloat { scaled(28) }
+
+    /// The column's smallest width for `boxCount` symbol boxes (§9): one box
+    /// takes `rowSymbolColumn`; the normal list's History rows (the star and
+    /// the more button) take the two boxes and the fixed 4pt between them —
+    /// 44pt at 13.
+    func rowSymbolColumnWidth(boxCount: Int) -> CGFloat {
+        guard boxCount > 1 else { return rowSymbolColumn }
+        return max(rowSymbolColumn,
+                   CGFloat(boxCount) * rowSymbol + CGFloat(boxCount - 1) * SurfaceMetrics.rowSymbolBoxSpacing)
+    }
     /// The column's symbol box, 20×20 (§9): the status symbol's size, and the
     /// star's click area (§4.6 "stars").
     var rowSymbol: CGFloat { scaled(20) }
@@ -235,6 +270,8 @@ struct SurfaceScale: Equatable {
     /// The History star (§9: 16pt at 13, smaller than the status symbol and
     /// centered in the symbol box) and its strokes.
     var star: CGFloat { scaled(16) }
+    /// The more button's three dots (§9: 16pt at 13, centered in the box).
+    var moreButtonIcon: CGFloat { scaled(16) }
     var starFilledLine: CGFloat { scaled(0.7) }
     var starOutlineLine: CGFloat { scaled(1.1) }
     /// The row's three lines (§4.5): the label and the last prompt in the
@@ -337,7 +374,7 @@ extension EnvironmentValues {
 // MARK: - Line-art icons (window-design.html `<symbol>`s, 16-unit box)
 
 enum SurfaceIcon {
-    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, popover, star
+    case search, refresh, pin, chevronDown, chevronUp, chevronRight, back, window, popover, star, more
 
     /// The icon's outline on a 16-unit box, y down.
     func path(in rect: CGRect) -> Path {
@@ -401,6 +438,9 @@ enum SurfaceIcon {
             polyline(&path, [(2, 5.6), (14, 5.6)])
             polyline(&path, [(8, 11.6), (8, 8)])
             polyline(&path, [(6.1, 9.7), (8, 7.8), (9.9, 9.7)])
+        case .more:
+            // `i-more`: three dots side by side, drawn filled.
+            for x: CGFloat in [3.5, 8, 12.5] { circle(&path, x, 8, 1.3) }
         case .star:
             polyline(&path, [
                 (8, 1.8), (9.9, 5.7), (14.2, 6.3), (11.1, 9.3), (11.8, 13.6),

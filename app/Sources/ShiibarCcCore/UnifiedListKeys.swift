@@ -56,6 +56,14 @@ public enum ListPage: Equatable, Sendable {
     case detail
 }
 
+/// What the list shows (§4.6 "Archive view"): the normal list (Running,
+/// Starred, Recent) or the Archive view. Shared by the popover and the
+/// window; never persisted.
+public enum ListMode: Equatable, Sendable {
+    case normal
+    case archive
+}
+
 /// Everything the key decision depends on.
 public struct ListKeyContext: Equatable, Sendable {
     public var columns: ColumnMode
@@ -78,6 +86,8 @@ public struct ListKeyContext: Equatable, Sendable {
     public var hasMarkedText: Bool
     /// A row drag is in progress (§4.5 "row drag").
     public var cardDragging: Bool
+    /// The Archive view is shown (§4.6 "Archive view").
+    public var isArchiveView: Bool
 
     public init(
         columns: ColumnMode,
@@ -90,7 +100,8 @@ public struct ListKeyContext: Equatable, Sendable {
         conversationPaneVisible: Bool,
         isPopover: Bool,
         hasMarkedText: Bool,
-        cardDragging: Bool = false
+        cardDragging: Bool = false,
+        isArchiveView: Bool = false
     ) {
         self.columns = columns
         self.page = page
@@ -103,6 +114,7 @@ public struct ListKeyContext: Equatable, Sendable {
         self.isPopover = isPopover
         self.hasMarkedText = hasMarkedText
         self.cardDragging = cardDragging
+        self.isArchiveView = isArchiveView
     }
 }
 
@@ -148,6 +160,9 @@ public enum ListKeyCommand: Equatable, Sendable {
     case resetTextSize
     /// Esc during a row drag: cancel the drag only (§4.5 "row drag").
     case cancelCardDrag
+    /// Esc while the Archive view is shown: back to the normal list only
+    /// (the popover stays open — §4.5 "key operations").
+    case leaveArchiveView
 }
 
 public enum ListKeyDecision: Equatable, Sendable {
@@ -188,6 +203,8 @@ public enum UnifiedListKeys {
     ///   it unchanged (the conversation pane scrolls with Space; see
     ///   `isTyping` for the app's no-beep guard);
     /// - Esc: closes the popover; consumed with no effect in the window;
+    ///   while the Archive view is shown, returns to the normal list only
+    ///   (the popover stays open), on every page and with either focus;
     /// - ⌘G / ⇧⌘G: only while the conversation pane is visible (consumed
     ///   otherwise);
     /// - ⌘F: with list focus only (consumed with no effect in the search
@@ -241,6 +258,7 @@ public enum UnifiedListKeys {
             return .passThrough
         case .escape:
             guard modifiers.isEmpty else { return .passThrough }
+            if context.isArchiveView { return .perform(.leaveArchiveView) }
             return context.isPopover ? .perform(.closePopover) : .ignore
         case .other(let characters):
             if let command = ConversationsKeyCommands.command(

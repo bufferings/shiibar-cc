@@ -27,11 +27,10 @@ final class SurfaceScaleTests: XCTestCase {
         ("listBottom", \.listBottom, 8),
         ("sectionTitleFont", \.sectionTitleFont, 12),
         ("sectionCountFont", \.sectionCountFont, 11),
-        ("sectionHeaderTop", \.sectionHeaderTop, 8),
-        ("sectionHeaderBottom", \.sectionHeaderBottom, 6),
+        ("sectionBandContentHeight", \.sectionBandContentHeight, 28),
         ("subHeadingTop", \.subHeadingTop, 6),
         ("subHeadingBottom", \.subHeadingBottom, 4),
-        ("sectionBandVertical", \.sectionBandVertical, 4),
+        ("subHeadingVertical", \.subHeadingVertical, 4),
         ("sectionChevronBox", \.sectionChevronBox, 14),
         ("sectionChevronIcon", \.sectionChevronIcon, 12),
         ("sectionChevronLine", \.sectionChevronLine, 1.8),
@@ -42,6 +41,7 @@ final class SurfaceScaleTests: XCTestCase {
         ("rowSymbol", \.rowSymbol, 20),
         ("rowSymbolTop", \.rowSymbolTop, 1),
         ("star", \.star, 16),
+        ("moreButtonIcon", \.moreButtonIcon, 16),
         ("starFilledLine", \.starFilledLine, 0.7),
         ("starOutlineLine", \.starOutlineLine, 1.1),
         ("rowTitleFont", \.rowTitleFont, 13),
@@ -102,33 +102,114 @@ final class SurfaceScaleTests: XCTestCase {
         }
     }
 
+    private static let textSizes: [CGFloat] = [9, 13, 18]
+
     /// window-design.html "collapsing sections and the row drag": two
     /// neighbors are apart by the larger of the upper one's space below and
-    /// the lower one's space above (band and plain headings 8 / 6, Starred
-    /// and Recent headings 6 / 4, frames none), following the text size.
+    /// the lower one's space above — bands 8 / 8 at every text size (§9),
+    /// Starred and Recent headings 6 / 4 following the text size, frames,
+    /// the `N more` line and the Archive view's line none — and a band that
+    /// is the list's first element has no space above it (§4.5).
     func testTheSpaceBetweenBlocks() {
         func heading(_ heading: ListHeading, _ style: ListHeadingStyle) -> ListBlock {
             .heading(ListHeadingModel(heading: heading, style: style, countText: nil))
         }
         let frame = ListBlock.frame(ListFrameModel(id: .starred, rows: []))
-        let blocks: [ListBlock] = [
-            heading(.running, .band), frame, heading(.history, .band), heading(.starred, .sub), frame,
-            heading(.recent, .sub), frame, .moreLine("1 more"),
-        ]
-        let expected: [CGFloat] = [8, 6, 8, 6, 4, 6, 4, 0]
-        for scale in [SurfaceScale.base, SurfaceScale(ratio: 18.0 / 13.0)] {
-            let ratio = scale.sectionHeaderTop / 8
-            for (index, value) in expected.enumerated() {
-                XCTAssertEqual(ListBlockSpacing.gap(before: index, in: blocks, scale: scale), value * ratio,
-                               accuracy: 1e-9, "block \(index)")
-            }
+        func gaps(_ blocks: [ListBlock], _ scale: SurfaceScale) -> [CGFloat] {
+            blocks.indices.map { ListBlockSpacing.gap(before: $0, in: blocks, scale: scale) }
         }
-        let closed: [ListBlock] = [heading(.running, .band), heading(.history, .band), heading(.starred, .sub),
-                                   heading(.recent, .sub)]
-        XCTAssertEqual((0..<4).map { ListBlockSpacing.gap(before: $0, in: closed, scale: .base) }, [8, 8, 6, 6],
-                       "closed band under a band: 8; closed Starred under History: 6; Recent under a closed Starred: 6")
-        let searching: [ListBlock] = [heading(.running, .plain), frame, heading(.history, .plain), frame]
-        XCTAssertEqual((0..<4).map { ListBlockSpacing.gap(before: $0, in: searching, scale: .base) }, [8, 6, 8, 6])
+        for points in Self.textSizes {
+            let scale = SurfaceScale(ratio: points / 13)
+            let r = scale.ratio
+            let open: [ListBlock] = [
+                heading(.running, .band), frame, heading(.history, .band), heading(.starred, .sub), frame,
+                heading(.recent, .sub), frame, .moreLine("1 more"),
+            ]
+            let expected: [CGFloat] = [0, 8, 8, max(8, 6 * r), 4 * r, 6 * r, 4 * r, 0]
+            for (index, (gap, value)) in zip(gaps(open, scale), expected).enumerated() {
+                XCTAssertEqual(gap, value, accuracy: 1e-9, "\(points): block \(index)")
+            }
+            let closed: [ListBlock] = [heading(.running, .band), heading(.history, .band), heading(.starred, .sub),
+                                       heading(.recent, .sub)]
+            for (gap, value) in zip(gaps(closed, scale), [0, 8, max(8, 6 * r), 6 * r]) {
+                XCTAssertEqual(gap, value, accuracy: 1e-9, "\(points): closed headings")
+            }
+            let searching: [ListBlock] = [heading(.running, .band), frame, heading(.history, .band), frame]
+            XCTAssertEqual(gaps(searching, scale), [0, 8, 8, 8], "\(points): searching keeps the bands")
+            let archive: [ListBlock] = [.archiveHeading(ArchiveHeadingModel(countText: "3")), frame, .moreLine("1 more")]
+            XCTAssertEqual(gaps(archive, scale), [0, 8, 0], "\(points): the Archive view")
+            let archiveEmpty: [ListBlock] = [.archiveHeading(ArchiveHeadingModel(countText: "0")), .emptyLine("x")]
+            XCTAssertEqual(gaps(archiveEmpty, scale), [0, 8], "\(points): the Archive view's line")
+        }
+        // A first element that is no band keeps its own space above.
+        XCTAssertEqual(ListBlockSpacing.gap(before: 0, in: [heading(.starred, .sub)], scale: .base), 6)
+    }
+
+    /// §9: the band is 30pt at 13, its two 1pt lines included; only the
+    /// part between the lines follows the text size.
+    func testBandHeightAtEachTextSize() {
+        for points in Self.textSizes {
+            let scale = SurfaceScale(ratio: points / 13)
+            XCTAssertEqual(scale.sectionBandHeight, 28 * points / 13 + 2, accuracy: 1e-9, "\(points)")
+        }
+        XCTAssertEqual(SurfaceScale.base.sectionBandHeight, 30)
+        XCTAssertEqual(SurfaceMetrics.sectionBandLine, 1)
+        XCTAssertEqual(SurfaceMetrics.sectionBandGap, 8)
+    }
+
+    /// §4.5: in two columns the first band draws no top line (the line
+    /// under the header row is the boundary); every other band does, and
+    /// in one column the first band's top line is the boundary.
+    func testTheFirstBandDrawsNoTopLineInTwoColumns() {
+        XCTAssertFalse(ListBlockSpacing.drawsBandTopLine(at: 0, columns: .two))
+        XCTAssertTrue(ListBlockSpacing.drawsBandTopLine(at: 2, columns: .two))
+        XCTAssertTrue(ListBlockSpacing.drawsBandTopLine(at: 0, columns: .one))
+        XCTAssertTrue(ListBlockSpacing.drawsBandTopLine(at: 2, columns: .one))
+    }
+
+    /// window-design.html: the band's name starts where the rows' text does
+    /// and its chevron ends where the rows' symbol-and-time column does; the
+    /// text-and-line heading has the same two places from the frames' edges.
+    func testHeadingInsetsLineUpWithTheRows() {
+        XCTAssertEqual(SurfaceMetrics.listSide, 10)
+        XCTAssertEqual(SurfaceMetrics.sectionBandLeading, 22)
+        XCTAssertEqual(SurfaceMetrics.sectionBandTrailing, 19)
+        XCTAssertEqual(SurfaceMetrics.subHeadingLeading, 12)
+        XCTAssertEqual(SurfaceMetrics.subHeadingTrailing, 9)
+        XCTAssertEqual(SurfaceMetrics.sectionBandLeading,
+                       SurfaceMetrics.listSide + SurfaceMetrics.rowFrameBorder + SurfaceMetrics.rowLeading)
+        XCTAssertEqual(SurfaceMetrics.sectionBandTrailing,
+                       SurfaceMetrics.listSide + SurfaceMetrics.rowFrameBorder + SurfaceMetrics.rowTrailing)
+        XCTAssertEqual(SurfaceMetrics.sectionBandLeading - SurfaceMetrics.listSide, SurfaceMetrics.subHeadingLeading)
+        XCTAssertEqual(SurfaceMetrics.sectionBandTrailing - SurfaceMetrics.listSide, SurfaceMetrics.subHeadingTrailing)
+    }
+
+    /// §9: the symbol-and-time column's smallest width — one box (Running
+    /// rows, the Archive view's rows) 28pt at 13; the normal list's History
+    /// rows (star + more button, 4pt apart, the gap fixed) 44pt at 13.
+    func testSymbolColumnWidthAtEachTextSize() {
+        for points in Self.textSizes {
+            let scale = SurfaceScale(ratio: points / 13)
+            let r = points / 13
+            XCTAssertEqual(scale.rowSymbolColumnWidth(boxCount: 1), 28 * r, accuracy: 1e-9, "\(points): one box")
+            XCTAssertEqual(scale.rowSymbolColumnWidth(boxCount: 2), 40 * r + 4, accuracy: 1e-9, "\(points): two boxes")
+            XCTAssertEqual(scale.rowSymbol, 20 * r, accuracy: 1e-9)
+        }
+        XCTAssertEqual(SurfaceScale.base.rowSymbolColumnWidth(boxCount: 2), 44)
+        XCTAssertEqual(SurfaceMetrics.rowSymbolBoxSpacing, 4)
+        let running = RowColumnSymbol.status(.idle, unreviewed: false)
+        XCTAssertEqual(running.boxes, [.status])
+        XCTAssertEqual(RowColumnSymbol.star(isStarred: false).boxes, [.star, .moreButton],
+                       "the more button at the right end, where a Running row's status symbol sits")
+        XCTAssertEqual(RowColumnSymbol.moreButtonOnly.boxes, [.moreButton])
+    }
+
+    /// window-design.html "implementation notes": the light list ground has
+    /// 5% system gray; the band's gray is 0.09 on light and 0.12 on dark.
+    func testListAndBandColorRules() {
+        XCTAssertEqual(SurfaceColors.lightListGrayFraction, 0.05)
+        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: false), 0.09)
+        XCTAssertEqual(SurfaceColors.sectionBandOpacity(dark: true), 0.12)
     }
 
     func testFixedValues() {

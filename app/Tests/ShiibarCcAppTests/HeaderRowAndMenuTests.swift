@@ -177,37 +177,66 @@ final class HeaderRowAndMenuTests: XCTestCase {
     }
 
     /// Refresh is not in the ⌄ menu (it is the header row's button and ⌘R).
+    /// `Archived` follows the separator under `Setup Check…`, before
+    /// `Clear badges` (§4.5 "⌄ menu").
     func testMenuItemsAndOrder() {
-        let entries = HeaderMenu.entries(hasUnreviewed: true)
+        let entries = HeaderMenu.entries(hasUnreviewed: true, hasArchived: true, showsArchive: false)
         XCTAssertEqual(titles(entries), [
             "About Shiibar CC", "---", "Settings\u{2026}", "Setup Check\u{2026}", "---",
-            "Clear badges", "---", "Quit",
+            "Archived", "Clear badges", "---", "Quit",
         ])
         for entry in entries {
             if case .item(let item) = entry {
                 XCTAssertTrue(item.isEnabled, item.title)
+                XCTAssertFalse(item.isChecked, item.title)
                 XCTAssertFalse(item.title.contains("Refresh"), item.title)
             }
         }
     }
 
     func testClearBadgesIsDisabledWithNothingUnreviewed() {
-        XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: false), .clearBadges)?.isEnabled, false)
-        XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: true), .clearBadges)?.isEnabled, true)
+        XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: false),
+                            .clearBadges)?.isEnabled, false)
+        XCTAssertEqual(item(HeaderMenu.entries(hasUnreviewed: true, hasArchived: true, showsArchive: false),
+                            .clearBadges)?.isEnabled, true)
+    }
+
+    /// §4.5 "⌄ menu": `Archived` is disabled while nothing is archived and
+    /// checked while the Archive view is shown.
+    func testArchivedIsEnabledByTheArchivedListAndCheckedInTheArchiveView() {
+        let cases: [(hasArchived: Bool, showsArchive: Bool, enabled: Bool, checked: Bool)] = [
+            (false, false, false, false),
+            (true, false, true, false),
+            (true, true, true, true),
+        ]
+        for c in cases {
+            let archived = item(HeaderMenu.entries(hasUnreviewed: false, hasArchived: c.hasArchived,
+                                                   showsArchive: c.showsArchive), .archived)
+            XCTAssertEqual(archived?.title, "Archived")
+            XCTAssertEqual(archived?.isEnabled, c.enabled, "\(c)")
+            XCTAssertEqual(archived?.isChecked, c.checked, "\(c)")
+        }
+        let handler = HeaderMenuHandler(controller: nil)
+        let checked = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: true))
+        XCTAssertEqual(checked.items[5].title, "Archived")
+        XCTAssertEqual(checked.items[5].state, .on)
+        let unchecked = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: false, showsArchive: false))
+        XCTAssertEqual(unchecked.items[5].state, .off)
+        XCTAssertFalse(unchecked.items[5].isEnabled)
     }
 
     // MARK: - ⌄ menu as built
 
     func testBuiltMenuHasTheItemsAndTheEnabledFlags() {
         let handler = HeaderMenuHandler(controller: nil)
-        let menu = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false))
+        let menu = handler.menu(for: HeaderMenu.entries(hasUnreviewed: false, hasArchived: true, showsArchive: false))
         XCTAssertFalse(menu.autoenablesItems, "the flags keep the values of the moment the menu opened")
         XCTAssertEqual(menu.items.map { $0.isSeparatorItem ? "---" : $0.title }, [
             "About Shiibar CC", "---", "Settings\u{2026}", "Setup Check\u{2026}", "---",
-            "Clear badges", "---", "Quit",
+            "Archived", "Clear badges", "---", "Quit",
         ])
-        XCTAssertFalse(menu.items[5].isEnabled, "Clear badges")
-        for index in [0, 2, 3, 7] {
+        XCTAssertFalse(menu.items[6].isEnabled, "Clear badges")
+        for index in [0, 2, 3, 5, 8] {
             XCTAssertTrue(menu.items[index].isEnabled, menu.items[index].title)
         }
         for menuItem in menu.items where !menuItem.isSeparatorItem {
@@ -215,7 +244,8 @@ final class HeaderRowAndMenuTests: XCTestCase {
             XCTAssertTrue(menuItem.target === handler, menuItem.title)
             XCTAssertNotNil(menuItem.action, menuItem.title)
         }
-        let withUnreviewed = handler.menu(for: HeaderMenu.entries(hasUnreviewed: true))
-        XCTAssertTrue(withUnreviewed.items[5].isEnabled)
+        let withUnreviewed = handler.menu(for: HeaderMenu.entries(hasUnreviewed: true, hasArchived: true,
+                                                                  showsArchive: false))
+        XCTAssertTrue(withUnreviewed.items[6].isEnabled)
     }
 }

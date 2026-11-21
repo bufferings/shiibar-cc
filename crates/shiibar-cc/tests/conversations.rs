@@ -256,6 +256,175 @@ fn unchanged_stat_means_no_reread() {
     assert!(search_ids(&deps, Some("stible")).is_empty());
 }
 
+// ---------- files without a human utterance (§4.6 "index contents") ----------
+
+/// A transcript that only ran a slash command: the command record and its
+/// output are excluded from the utterance sequence (§4.6).
+fn slash_command_only() -> Vec<String> {
+    vec![
+        r#"{"type":"user","uuid":"cn","parentUuid":null,"isSidechain":false,"cwd":"/Users/example/project","message":{"role":"user","content":"<command-name>/model</command-name>"}}"#.to_string(),
+        r#"{"type":"user","uuid":"cs","parentUuid":"cn","isSidechain":false,"cwd":"/Users/example/project","message":{"role":"user","content":"<local-command-stdout>Set model</local-command-stdout>"}}"#.to_string(),
+    ]
+}
+
+fn title_only() -> Vec<String> {
+    vec![r#"{"type":"custom-title","customTitle":"Named only","sessionId":"x"}"#.to_string()]
+}
+
+fn assistant_only() -> Vec<String> {
+    vec![assistant_line("a1", None, "a reply with no prompt")]
+}
+
+/// No utterance line at all: only bookkeeping records.
+fn no_utterance_lines() -> Vec<String> {
+    vec![r#"{"type":"file-history-snapshot","messageId":"m1"}"#.to_string()]
+}
+
+fn unregistered_ids(db_path: &Path) -> Vec<String> {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT session_id FROM unregistered_files ORDER BY session_id")
+        .unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn done_event(deps: &Deps) -> ProgressEvent {
+    let mut events = Vec::new();
+    run_index(deps, &mut |e| events.push(e)).unwrap();
+    *events.last().unwrap()
+}
+
+#[test]
+fn transcripts_without_a_human_utterance_are_not_conversations() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "slash", &slash_command_only(), 1_000);
+    fx.write_transcript("slug", "titled", &title_only(), 1_100);
+    fx.write_transcript("slug", "reply", &assistant_only(), 1_200);
+    fx.write_transcript("slug", "bare", &no_utterance_lines(), 1_300);
+    fx.write_transcript(
+        "slug",
+        "real",
+        &simple_conversation("project question", "ok"),
+        900,
+    );
+    let deps = fx.deps();
+
+    // Browse and query alike leave them out; the real conversation's
+    // result is the same as without them.
+    assert_eq!(search_ids(&deps, None), vec!["real"]);
+    assert!(search_ids(&deps, Some("Named")).is_empty());
+    assert!(search_ids(&deps, Some("reply")).is_empty());
+    assert_eq!(search_ids(&deps, Some("example")), vec!["real"]);
+    let rows = run_search(&deps, Some("project"), &mut || {}).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].session_id, "real");
+    assert_eq!(rows[0].last_prompt.as_deref(), Some("project question"));
+
+    // show answers as for an id that is not in the index (exit 2).
+    for id in ["slash", "titled", "reply", "bare"] {
+        assert!(run_show(&deps, id).unwrap().is_none(), "{id}");
+    }
+    assert!(run_show(&deps, "real").unwrap().is_some());
+}
+
+#[test]
+fn a_file_that_gains_a_human_utterance_is_registered_on_the_next_catch_up() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &slash_command_only(), 1_000);
+    let deps = fx.deps();
+    assert!(search_ids(&deps, None).is_empty());
+
+    let mut lines = slash_command_only();
+    lines.push(user_line("u1", Some("cs"), "now a real prompt"));
+    fx.write_transcript("slug", "s1", &lines, 2_000);
+    assert_eq!(search_ids(&deps, None), vec!["s1"]);
+    assert_eq!(search_ids(&deps, Some("real prompt")), vec!["s1"]);
+    let shown = run_show(&deps, "s1").unwrap().expect("registered");
+    assert_eq!(shown.messages[0].text, "now a real prompt");
+    assert!(unregistered_ids(&fx.db_path).is_empty());
+}
+
+#[test]
+fn a_conversation_that_loses_its_human_utterances_is_removed_and_counted() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("soon gone", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    assert_eq!(search_ids(&deps, None), vec!["s1"]);
+
+    // A rewind or rewrite can leave the file without a human utterance.
+    fx.write_transcript("slug", "s1", &assistant_only(), 2_000);
+    assert_eq!(
+        done_event(&deps),
+        ProgressEvent::Done {
+            indexed: 1,
+            removed: 1
+        }
+    );
+    assert!(search_ids(&deps, None).is_empty());
+    assert!(search_ids(&deps, Some("soon")).is_empty());
+    assert!(run_show(&deps, "s1").unwrap().is_none());
+}
+
+#[test]
+fn an_unchanged_unregistered_file_is_not_re_read() {
+    let fx = Fixture::new();
+    let original = vec![user_line("u1", None, "<command-name>/stat</command-name>")];
+    fx.write_transcript("slug", "s1", &original, 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["s1"]);
+
+    // Nothing changed: the catch-up re-reads nothing.
+    let mut events = Vec::new();
+    run_index(&deps, &mut |e| events.push(e)).unwrap();
+    assert_eq!(
+        events.first(),
+        Some(&ProgressEvent::Start {
+            total: 0,
+            full_build: false
+        })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&ProgressEvent::Done {
+            indexed: 0,
+            removed: 0
+        })
+    );
+
+    // Same byte length, same pinned mtime, now with a human utterance:
+    // the file is still not re-read (proof that the recorded stat skips it).
+    let swapped = vec![user_line("u1", None, "a plain prompt that is thirty four")];
+    assert_eq!(swapped[0].len(), original[0].len());
+    fx.write_transcript("slug", "s1", &swapped, 1_000);
+    assert!(search_ids(&deps, None).is_empty());
+}
+
+#[test]
+fn a_deleted_unregistered_file_loses_its_record_without_counting_as_removed() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &title_only(), 1_000);
+    fx.write_transcript("slug", "real", &simple_conversation("kept", "ok"), 900);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["s1"]);
+
+    fs::remove_file(fx.projects.join("slug/s1.jsonl")).unwrap();
+    assert_eq!(
+        done_event(&deps),
+        ProgressEvent::Done {
+            indexed: 0,
+            removed: 0
+        }
+    );
+    assert!(unregistered_ids(&fx.db_path).is_empty());
+    assert_eq!(search_ids(&deps, None), vec!["real"]);
+}
+
 // ---------- live/past ----------
 
 #[test]
@@ -603,6 +772,43 @@ fn a_previous_schema_without_last_prompt_is_rebuilt_and_gains_it() {
 }
 
 #[test]
+fn a_previous_schema_index_holding_a_conversation_without_a_human_utterance_drops_it() {
+    // An index written by the previous schema (version 3) registered every
+    // file as a conversation. The version mismatch rebuilds it in full, and
+    // the rebuild leaves the utterance-less file out (§4.6 "index contents").
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "ghost", &title_only(), 2_000);
+    fx.write_transcript("slug", "real", &simple_conversation("kept", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+
+    let conn = rusqlite::Connection::open(&fx.db_path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE unregistered_files;
+         INSERT INTO conversations(session_id, path, mtime_ns, size, cwd, title, live, updated_at, last_prompt)
+             VALUES('ghost', '/Users/example/ghost.jsonl', 0, 0, NULL, 'Named only', 0, 2000, NULL);
+         UPDATE meta SET value='3' WHERE key='schema_version';",
+    )
+    .unwrap();
+    drop(conn);
+    assert!(run_show(&deps, "ghost").unwrap().is_some());
+
+    let mut full_build_seen = false;
+    let ids: Vec<String> = run_search(&deps, None, &mut || full_build_seen = true)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.session_id)
+        .collect();
+    assert!(
+        full_build_seen,
+        "an older schema version must be a full build"
+    );
+    assert_eq!(ids, vec!["real"]);
+    assert!(run_show(&deps, "ghost").unwrap().is_none());
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["ghost"]);
+}
+
+#[test]
 fn corrupt_database_file_is_rebuilt_automatically() {
     let fx = Fixture::new();
     fx.write_transcript(
@@ -922,7 +1128,9 @@ fn binary_search_json_has_the_contract_fields() {
 }
 
 #[test]
-fn binary_search_json_last_prompt_is_null_without_a_human_utterance() {
+fn binary_search_and_show_leave_out_a_transcript_without_a_human_utterance() {
+    // §4.4 / §4.6 "index contents": a file without a human utterance is
+    // not a conversation — absent from search, exit 2 from show.
     let home = tempfile::tempdir().unwrap();
     write_home_transcript(
         home.path(),
@@ -932,14 +1140,25 @@ fn binary_search_json_last_prompt_is_null_without_a_human_utterance() {
             assistant_line("a1", None, "an answer without any prompt"),
         ],
     );
+    write_home_transcript(
+        home.path(),
+        "with-prompt",
+        &simple_conversation("a real prompt", "ok"),
+    );
     let out = run_binary(home.path(), &["search", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
-    let conv = &v["conversations"][0];
-    assert_eq!(conv["session_id"], "no-prompt");
-    // Present as an explicit null, not omitted (§4.4: null-allowed field).
-    assert!(conv.as_object().unwrap().contains_key("last_prompt"));
-    assert!(conv["last_prompt"].is_null());
+    let ids: Vec<&str> = v["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["session_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["with-prompt"]);
+
+    let missing = run_binary(home.path(), &["show", "no-prompt", "--json"]);
+    assert_eq!(missing.code, 2);
+    assert!(!missing.stderr.is_empty());
 }
 
 #[test]

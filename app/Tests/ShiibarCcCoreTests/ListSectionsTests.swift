@@ -171,15 +171,17 @@ final class ListSectionsTests: XCTestCase {
             [UL.summary("s1"), UL.summary("h2"), UL.summary("b"), UL.summary("c"), UL.summary("h1")],
             isFiltered: true))
         XCTAssertEqual(state.blocks.map(\.id), [.heading(.running), .frame(.running), .heading(.history), .frame(.history)])
-        XCTAssertEqual(state.headings.map(\.style), [.plain, .plain], "text only")
+        XCTAssertEqual(state.headings.map(\.style), [.band, .band], "the bands keep their shape (§4.5)")
         XCTAssertEqual(state.headings.map(\.isCollapsible), [false, false], "no chevron")
+        XCTAssertEqual(state.headings.map(\.showsAttentionMark), [false, false], "no Running mark")
         XCTAssertEqual(state.headings.map(\.isOpen), [true, true])
         XCTAssertEqual(state.headings.map(\.countText), ["1", "4"], "History counts the Starred and Recent rows")
         XCTAssertEqual(frames(state)[.history], ["c", "b", "h2", "h1"], "Starred rows first, in the stars' order")
         XCTAssertEqual(state.visibleRows.map(\.sessionID), ["s1", "c", "b", "h2", "h1"])
-        for section in UnifiedListSection.allCases {
+        for section in UnifiedListSection.normalList {
             XCTAssertTrue(state.isSectionShown(section), "\(section)")
         }
+        XCTAssertFalse(state.isSectionShown(.archived), "the Archive view's rows belong to the Archive view only")
 
         // A star change moves the row inside the same frame.
         state.handle(.starToggled(sessionID: "h1"))
@@ -187,6 +189,22 @@ final class ListSectionsTests: XCTestCase {
         state.handle(.starToggled(sessionID: "c"))
         XCTAssertEqual(frames(state)[.history], ["b", "h1", "h2", "c"])
         XCTAssertEqual(state.collapsedSections, [.running, .history, .starred, .recent])
+    }
+
+    /// §4.5 "collapsing sections": a closed Running with a waiting row
+    /// shows the Running mark on its band; while searching the band keeps
+    /// its shape without the mark and the chevron.
+    func testSearchingBandsShowNoRunningMarkAndNoChevron() {
+        var state = UnifiedListState(home: UL.home, now: UL.now, collapsedSections: [.running])
+        state.handle(.agentsUpdated([UL.agent("t1", status: .waiting, session: "s1")]))
+        state.handle(.historyDelivered([UL.summary("s1")], isFiltered: false))
+        XCTAssertEqual(heading(state, .running)?.style, .band)
+        XCTAssertEqual(heading(state, .running)?.showsAttentionMark, true)
+        XCTAssertEqual(heading(state, .running)?.isCollapsible, true)
+        state.handle(.queryValidityChanged(true))
+        XCTAssertEqual(heading(state, .running)?.style, .band)
+        XCTAssertEqual(heading(state, .running)?.showsAttentionMark, false)
+        XCTAssertEqual(heading(state, .running)?.isCollapsible, false)
     }
 
     func testSearchingCountsFirstWhileTheCapLeavesRecentRowsOut() {

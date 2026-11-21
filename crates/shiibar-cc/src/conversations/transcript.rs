@@ -59,6 +59,15 @@ pub struct Extracted {
     pub last_prompt: Option<String>,
 }
 
+impl Extracted {
+    /// Whether the utterance sequence holds at least one human utterance.
+    /// A file without one is not a conversation and is not registered in
+    /// the index (DESIGN.md §4.6 "index contents", §8.64).
+    pub fn has_user_utterance(&self) -> bool {
+        self.messages.iter().any(|m| m.role == Role::User)
+    }
+}
+
 /// Head of a user prompt (the title fallback and `last_prompt`): first
 /// line, at most this many characters (same value as §9's task truncation
 /// length, DESIGN.md §4.4/§4.6).
@@ -667,6 +676,22 @@ mod tests {
         let e = extract(&content);
         assert_eq!(e.last_prompt, None);
         assert_eq!(e.messages.len(), 1);
+        assert!(!e.has_user_utterance());
+    }
+
+    #[test]
+    fn has_user_utterance_requires_a_kept_user_message() {
+        // Only a human utterance on the active path counts (DESIGN.md §4.6,
+        // §8.64): a slash-command record is excluded from the sequence.
+        let command = r#"{"type":"user","uuid":"cn","parentUuid":null,"isSidechain":false,"message":{"role":"user","content":"<command-name>/model</command-name>"}}"#;
+        assert!(!extract(command).has_user_utterance());
+        assert!(!extract("").has_user_utterance());
+        let content = [
+            command.to_string(),
+            user_line("u1", Some("cn"), "a real prompt"),
+        ]
+        .join("\n");
+        assert!(extract(&content).has_user_utterance());
     }
 
     #[test]

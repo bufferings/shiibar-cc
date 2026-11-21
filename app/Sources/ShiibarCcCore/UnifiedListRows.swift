@@ -12,12 +12,20 @@
 
 import Foundation
 
-/// The three row sections, top to bottom (§4.5 "the list has three
-/// sections"): Running, then Starred and Recent under the History heading.
+/// The row sections. The normal list shows the first three, top to bottom
+/// (§4.5 "the list has three sections"): Running, then Starred and Recent
+/// under the History heading. The Archive view shows `archived` alone
+/// (§4.6 "Archive view").
 public enum UnifiedListSection: CaseIterable, Equatable, Hashable, Sendable {
     case running
     case starred
     case recent
+    /// The Archive view's rows: archived conversations from the search
+    /// result.
+    case archived
+
+    /// The normal list's sections, top to bottom.
+    public static let normalList: [UnifiedListSection] = [.running, .starred, .recent]
 }
 
 /// The four headings that open and close (§4.5 "collapsing sections"):
@@ -39,12 +47,15 @@ public enum ListHeading: String, CaseIterable, Equatable, Hashable, Sendable {
         }
     }
 
-    /// The heading of a row section.
-    public init(_ section: UnifiedListSection) {
+    /// The heading of a normal list section; nil for the Archive view's
+    /// rows, which have no heading that opens or closes (§4.5 "collapsing
+    /// sections").
+    public init?(_ section: UnifiedListSection) {
         switch section {
         case .running: self = .running
         case .starred: self = .starred
         case .recent: self = .recent
+        case .archived: return nil
         }
     }
 }
@@ -122,9 +133,11 @@ public struct RowButton: Equatable, Sendable {
 }
 
 /// The symbol at the top of the row's symbol-and-time column (§4.5 "the
-/// list has three sections", §4.6 "stars"): the status symbol on Running
-/// rows, the star on Starred and Recent rows. The star is smaller than the
-/// status symbol and centered in the same box (§9).
+/// list has three sections", §4.6 "stars" / "Archive"): the status symbol
+/// on Running rows, the star (left of the more button) on the normal list's
+/// Starred and Recent rows, and nothing but the more button on the Archive
+/// view's rows. The star is smaller than the status symbol and centered in
+/// a box of the same size (§9).
 public enum RowColumnSymbol: Equatable, Sendable {
     /// Running row: status symbol, plus the red badge when unreviewed.
     case status(RowSymbolKind, unreviewed: Bool)
@@ -132,14 +145,73 @@ public enum RowColumnSymbol: Equatable, Sendable {
     /// Recent row: an outline star shown only while the row is hovered.
     /// Clicking the star toggles it and never selects the row (§4.6).
     case star(isStarred: Bool)
+    /// Archive view row: no star; the column's top is the more button alone
+    /// (§4.6 "Archive view").
+    case moreButtonOnly
 
-    /// Tooltip of the star (§4.6: `Star` / `Unstar`), nil for status.
+    /// Tooltip of the star (§4.6: `Star` / `Unstar`), nil otherwise.
     public var tooltip: String? {
         switch self {
-        case .status: return nil
+        case .status, .moreButtonOnly: return nil
         case .star(let isStarred): return isStarred ? "Unstar" : "Star"
         }
     }
+
+    /// The symbol boxes at the top of the column, left to right (§4.5 "the
+    /// list has three sections"): the more button's box sits at the column's
+    /// right end, where a Running row's status symbol sits, and the star's
+    /// box left of it.
+    public var boxes: [RowColumnBox] {
+        switch self {
+        case .status: return [.status]
+        case .star: return [.star, .moreButton]
+        case .moreButtonOnly: return [.moreButton]
+        }
+    }
+}
+
+/// One symbol box at the top of a row's symbol-and-time column (§9: every
+/// box is the status symbol's size).
+public enum RowColumnBox: Equatable, Sendable {
+    case status
+    case star
+    case moreButton
+}
+
+/// The command of a row's more-button menu item (§4.6 "Archive").
+public enum RowMenuCommand: Equatable, Sendable {
+    case archive
+    case unarchive
+}
+
+/// One item of the menu the more button opens (§4.6 "Archive"): the title
+/// and the enabled flag, decided apart from the menu that shows them.
+public struct RowMenuItem: Equatable, Sendable {
+    public let command: RowMenuCommand
+    public let title: String
+    public let isEnabled: Bool
+
+    public init(command: RowMenuCommand, title: String, isEnabled: Bool) {
+        self.command = command
+        self.title = title
+        self.isEnabled = isEnabled
+    }
+
+    /// The normal list's Starred and Recent rows: `Archive`, disabled on a
+    /// live conversation's row (the `· running` mark) so a session that
+    /// runs is never taken off the list (§4.6 "Archive").
+    public static func archive(isEnabled: Bool) -> RowMenuItem {
+        RowMenuItem(command: .archive, title: "Archive", isEnabled: isEnabled)
+    }
+
+    /// The Archive view's rows.
+    public static let unarchive = RowMenuItem(command: .unarchive, title: "Unarchive", isEnabled: true)
+}
+
+/// The more button's texts (§4.6 "Archive").
+public enum RowMoreButton {
+    public static let tooltip = "More"
+    public static let accessibilityLabel = "More actions"
 }
 
 /// One row in the list (§4.5/§4.6).
@@ -171,6 +243,9 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
     /// spaces. nil = draw an empty line so row heights stay equal.
     public let lastPrompt: String?
     public let symbol: RowColumnSymbol
+    /// The more button's menu (§4.6 "Archive"); empty on a Running row,
+    /// which has no more button.
+    public let menuItems: [RowMenuItem]
     /// The bottom panel's primary button while this row is selected: Jump
     /// (Running, or disabled Jump for a live History row) or Resume.
     public let primaryButton: RowButton
@@ -201,7 +276,8 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
         primaryButton: RowButton,
         branchButton: RowButton,
         headerTitle: String,
-        headerLabelAndElapsed: String
+        headerLabelAndElapsed: String,
+        menuItems: [RowMenuItem] = []
     ) {
         self.id = id
         self.section = section
@@ -215,6 +291,7 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
         self.showsRunningMark = showsRunningMark
         self.lastPrompt = lastPrompt
         self.symbol = symbol
+        self.menuItems = menuItems
         self.primaryButton = primaryButton
         self.branchButton = branchButton
         self.headerTitle = headerTitle
@@ -229,21 +306,21 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
             label: label, elapsedSeconds: elapsedSeconds, labelLine: labelLine,
             showsRunningMark: showsRunningMark, lastPrompt: lastPrompt, symbol: symbol,
             primaryButton: primaryButton.disabled(), branchButton: branchButton.disabled(),
-            headerTitle: headerTitle, headerLabelAndElapsed: headerLabelAndElapsed
+            headerTitle: headerTitle, headerLabelAndElapsed: headerLabelAndElapsed,
+            menuItems: menuItems
         )
     }
 }
 
-/// The look of a heading (§4.5 "the list has three sections";
-/// window-design.html `.rows .sec`, `.sec.sub`, `.sec.plain`).
+/// The look of a heading (§4.5 "the list has three sections", §8.63;
+/// window-design.html `.rows .sec`, `.sec.sub`).
 public enum ListHeadingStyle: Equatable, Sendable {
-    /// Running and History: a gray band.
+    /// Running and History: a band across the list's whole width, with a
+    /// line along its top and bottom edges. Kept while searching, without
+    /// the chevron and the Running mark (§4.5 "collapsing sections").
     case band
-    /// Running and History while searching: text only, with the band's
-    /// spacing and padding.
-    case plain
-    /// Starred and Recent: text only, with the smaller spacing of the
-    /// headings under History.
+    /// Starred and Recent: text and a line, no ground, with the smaller
+    /// spacing of the headings under History.
     case sub
 }
 
@@ -310,6 +387,23 @@ public enum ListFrameID: Hashable, Sendable {
     /// While searching: the Starred rows, then the Recent rows, in one frame
     /// under the History heading (§4.6 "search scope").
     case history
+    /// The Archive view's rows (§4.6 "Archive view").
+    case archived
+}
+
+/// The band at the top of the Archive view (§4.6 "Archive view"): a
+/// left-pointing chevron, the name and the count; no chevron at the right
+/// end. A click anywhere on it returns to the normal list.
+public struct ArchiveHeadingModel: Equatable, Sendable {
+    /// The row count, `first 100` while the cap leaves rows out, or nil
+    /// before the first search result.
+    public let countText: String?
+
+    public init(countText: String?) {
+        self.countText = countText
+    }
+
+    public static let title = "Archived"
 }
 
 /// The rows of one section in one frame, separated by divider lines
@@ -330,22 +424,40 @@ public struct ListFrameModel: Equatable, Identifiable, Sendable {
 
 public enum ListBlockID: Hashable, Sendable {
     case heading(ListHeading)
+    case archiveHeading
     case frame(ListFrameID)
     case moreLine
+    case emptyLine
 }
 
 /// One element of the list page, top to bottom: a heading, a frame of rows,
-/// or the `N more` line below the Recent rows (§4.6 "Recent section").
+/// or the `N more` line below the Recent rows (§4.6 "Recent section"). The
+/// Archive view has its band, its frame, its `N more` line, or the line
+/// that says no archived conversation matches (§4.6 "Archive view").
 public enum ListBlock: Equatable, Identifiable, Sendable {
     case heading(ListHeadingModel)
+    case archiveHeading(ArchiveHeadingModel)
     case frame(ListFrameModel)
     case moreLine(String)
+    /// One line under the Archive view's band while no row is shown.
+    case emptyLine(String)
 
     public var id: ListBlockID {
         switch self {
         case .heading(let model): return .heading(model.heading)
+        case .archiveHeading: return .archiveHeading
         case .frame(let model): return .frame(model.id)
         case .moreLine: return .moreLine
+        case .emptyLine: return .emptyLine
+        }
+    }
+
+    /// The block is drawn as a band (§4.5 "the list has three sections").
+    public var isBand: Bool {
+        switch self {
+        case .heading(let model): return model.style == .band
+        case .archiveHeading: return true
+        case .frame, .moreLine, .emptyLine: return false
         }
     }
 }
@@ -490,6 +602,80 @@ public enum StarredSessions {
     }
 }
 
+/// The archived conversations (§4.6 "Archive", §8.63): an ordered list of
+/// session IDs, the most recently archived first — the Archive view's
+/// order. Archive is an app display setting persisted in UserDefaults
+/// (`ArchivedSessions`), like the stars.
+public struct ArchivedList: Equatable, Sendable, ExpressibleByArrayLiteral {
+    /// The session IDs, each once, newest archive first.
+    public private(set) var sessionIDs: [String]
+
+    /// A repeated session ID keeps its first position only.
+    public init(_ sessionIDs: [String] = []) {
+        var seen = Set<String>()
+        self.sessionIDs = sessionIDs.filter { seen.insert($0).inserted }
+    }
+
+    public init(arrayLiteral sessionIDs: String...) {
+        self.init(sessionIDs)
+    }
+
+    public var isEmpty: Bool { sessionIDs.isEmpty }
+
+    public func contains(_ sessionID: String) -> Bool {
+        sessionIDs.contains(sessionID)
+    }
+
+    /// `Archive`: the conversation goes to the head of the list; one that
+    /// is already archived keeps its place.
+    public func archiving(_ sessionID: String) -> ArchivedList {
+        guard !contains(sessionID) else { return self }
+        return ArchivedList([sessionID] + sessionIDs)
+    }
+
+    /// `Unarchive` (and the automatic unarchive of a live conversation):
+    /// the conversation leaves the list; the others keep their order.
+    public func unarchiving(_ sessionID: String) -> ArchivedList {
+        removing([sessionID])
+    }
+
+    /// Every conversation in `sessionIDs` leaves the list.
+    public func removing(_ sessionIDs: Set<String>) -> ArchivedList {
+        ArchivedList(self.sessionIDs.filter { !sessionIDs.contains($0) })
+    }
+
+    /// §4.6 "Archive": when an empty-query (browse) list is fetched, drop
+    /// the session IDs that are not in it (the transcript was deleted).
+    /// Returns nil when nothing changes. Never call this with a filtered
+    /// (search) result.
+    public func pruned(browseResults: [ConversationSummary]) -> ArchivedList? {
+        let present = Set(browseResults.map(\.sessionID))
+        let result = ArchivedList(sessionIDs.filter { present.contains($0) })
+        return result == self ? nil : result
+    }
+}
+
+/// Reading and writing the archived conversations (§4.6 "Archive") in an
+/// injected `UserDefaults`.
+public enum ArchivedSessions {
+    /// The stored list (`MainSurfaceDefaultsKeys.archivedSessionList`) when
+    /// it is an array of strings (a repeated session ID counts once);
+    /// otherwise none.
+    public static func load(from defaults: UserDefaults) -> ArchivedList {
+        decode(defaults.object(forKey: MainSurfaceDefaultsKeys.archivedSessionList))
+    }
+
+    /// A stored value that is not an array of strings reads as none.
+    public static func decode(_ stored: Any?) -> ArchivedList {
+        guard let ids = stored as? [String] else { return ArchivedList() }
+        return ArchivedList(ids)
+    }
+
+    public static func save(_ sessionIDs: [String], to defaults: UserDefaults) {
+        defaults.set(sessionIDs, forKey: MainSurfaceDefaultsKeys.archivedSessionList)
+    }
+}
+
 /// The remembered set of closed headings (Running, Starred, Recent,
 /// History — §4.5 "collapsing sections"), shared by the popover and the
 /// window, in an injected `UserDefaults`.
@@ -604,14 +790,27 @@ public enum UnifiedListBuilder {
 
     /// Build one History row: a Starred row (`isStarred`) or a Recent row
     /// (§4.6 "Starred section": the same content and behavior as a Recent
-    /// row, with the filled star). The summary is never one that matches a Running row
-    /// (those are excluded before this), so a `live` summary is a
-    /// conversation running in a terminal this app cannot drive.
+    /// row, with the filled star).
+    public static func historyRow(
+        summary: ConversationSummary,
+        isStarred: Bool,
+        now: Int64,
+        home: String?
+    ) -> UnifiedListRow {
+        historyRow(summary: summary, section: isStarred ? .starred : .recent, now: now, home: home)
+    }
+
+    /// Build one conversation row of `section` (Starred, Recent, or the
+    /// Archive view — §4.6 "Archive view": the same lines, elapsed time and
+    /// buttons as a Recent row; the column's top is the more button alone,
+    /// whose menu is `Unarchive`). The summary is never one that matches a
+    /// Running row (those are excluded before this), so a `live` summary is
+    /// a conversation running in a terminal this app cannot drive.
     ///
     /// Assumption (spec silent): with no title and no cwd, the title is empty.
     public static func historyRow(
         summary: ConversationSummary,
-        isStarred: Bool,
+        section: UnifiedListSection,
         now: Int64,
         home: String?
     ) -> UnifiedListRow {
@@ -630,9 +829,19 @@ public enum UnifiedListBuilder {
         let primary = ConversationAction.derive(for: summary, agents: [])
             .button(sessionID: summary.sessionID, cwd: summary.cwd)
         let branch = ConversationAction.branchButton(sessionID: summary.sessionID, cwd: summary.cwd)
+        let symbol: RowColumnSymbol
+        let menu: [RowMenuItem]
+        switch section {
+        case .archived:
+            symbol = .moreButtonOnly
+            menu = [.unarchive]
+        case .running, .starred, .recent:
+            symbol = .star(isStarred: section == .starred)
+            menu = [.archive(isEnabled: !summary.live)]
+        }
         return UnifiedListRow(
             id: .conversation(sessionID: summary.sessionID),
-            section: isStarred ? .starred : .recent,
+            section: section,
             sessionID: summary.sessionID,
             cwd: summary.cwd,
             title: title,
@@ -641,11 +850,12 @@ public enum UnifiedListBuilder {
             labelLine: labelLine(label: label, runningMark: summary.live),
             showsRunningMark: summary.live,
             lastPrompt: prompt,
-            symbol: .star(isStarred: isStarred),
+            symbol: symbol,
             primaryButton: primary,
             branchButton: branch,
             headerTitle: title,
-            headerLabelAndElapsed: headerLabelAndElapsed(label: label, elapsedSeconds: elapsed)
+            headerLabelAndElapsed: headerLabelAndElapsed(label: label, elapsedSeconds: elapsed),
+            menuItems: menu
         )
     }
 
@@ -684,27 +894,41 @@ public enum UnifiedListBuilder {
             }
     }
 
+    /// The session IDs of the Running rows: only agents that produce a row
+    /// count (an unknown status has none — §4.2).
+    static func runningSessionIDs(agents: [Agent]) -> Set<String> {
+        Set(agents.filter { $0.status != .unknown }.map(\.sessionId).filter { !$0.isEmpty })
+    }
+
+    /// The live conversations (§4.6 "Archive": automatic unarchive): the
+    /// session_id of a Running row, or a search result that reports
+    /// `live: true` (a conversation resumed in a terminal this app cannot
+    /// drive has no Running row).
+    public static func liveSessionIDs(agents: [Agent], results: [ConversationSummary]?) -> Set<String> {
+        runningSessionIDs(agents: agents).union((results ?? []).filter(\.live).map(\.sessionID))
+    }
+
     /// The Starred and Recent sections' rows (§4.6 "Starred section" /
     /// "Recent section"): the search result minus every conversation whose
     /// session_id matches a Running row (any tracked agent — the exclusion
-    /// applies on every render). Starred: the starred conversations in the
-    /// stars' order (an unordered list: newest first). Recent: the rest in
-    /// the result's own order (`updated_at` descending, as search returns
-    /// it), uncapped here.
+    /// applies on every render) and minus the archived conversations.
+    /// Starred: the starred conversations in the stars' order (an unordered
+    /// list: newest first). Recent: the rest in the result's own order
+    /// (`updated_at` descending, as search returns it), uncapped here.
     public static func conversationRows(
         results: [ConversationSummary]?,
         agents: [Agent],
         stars: StarredList,
+        archived: ArchivedList = ArchivedList(),
         now: Int64,
         home: String?
     ) -> (starred: [UnifiedListRow], recent: [UnifiedListRow]) {
         guard let results else { return ([], []) }
         // Only agents that produce a Running row exclude (an unknown status
         // has no row, so its conversation must not vanish from every section).
-        let runningIDs = Set(
-            agents.filter { $0.status != .unknown }.map(\.sessionId).filter { !$0.isEmpty }
-        )
-        let remaining = results.filter { !runningIDs.contains($0.sessionID) }
+        let runningIDs = runningSessionIDs(agents: agents)
+        let archivedIDs = Set(archived.sessionIDs)
+        let remaining = results.filter { !runningIDs.contains($0.sessionID) && !archivedIDs.contains($0.sessionID) }
         let order = stars.materialized(results: results).sessionIDs
         let rank = Dictionary(order.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
         let starred = remaining.enumerated()
@@ -719,5 +943,25 @@ public enum UnifiedListBuilder {
             .filter { rank[$0.sessionID] == nil }
             .map { historyRow(summary: $0, isStarred: false, now: now, home: home) }
         return (starred, recent)
+    }
+
+    /// The Archive view's rows (§4.6 "Archive view"): the archived
+    /// conversations that are in the search result, in the archived list's
+    /// order (newest archive first), uncapped here. A conversation of a
+    /// Running row is never shown (it is live, so it is unarchived).
+    public static func archivedRows(
+        results: [ConversationSummary]?,
+        agents: [Agent],
+        archived: ArchivedList,
+        now: Int64,
+        home: String?
+    ) -> [UnifiedListRow] {
+        guard let results else { return [] }
+        let runningIDs = runningSessionIDs(agents: agents)
+        let byID = Dictionary(results.map { ($0.sessionID, $0) }, uniquingKeysWith: { first, _ in first })
+        return archived.sessionIDs.compactMap { sessionID in
+            guard !runningIDs.contains(sessionID), let summary = byID[sessionID] else { return nil }
+            return historyRow(summary: summary, section: .archived, now: now, home: home)
+        }
     }
 }

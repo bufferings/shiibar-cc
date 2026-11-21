@@ -104,6 +104,10 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         model.onCloseWindowForPopover = { [weak self] in self?.closeWindowForPopover() }
         model.onShowPopoverFromWindow = { [weak self] in self?.showPopoverFromWindow() }
         model.onPresentMenu = { [weak self] anchor, surface in self?.presentMenu(anchor: anchor, surface: surface) }
+        model.onPresentRowMenu = { [weak self] items, anchor, _, completion in
+            guard let self else { return completion(nil) }
+            self.presentRowMenu(items: items, anchor: anchor, completion: completion)
+        }
         model.onKeepOnTopChanged = { [weak self] _ in
             self?.applyWindowLevel()
             self?.applyAuxiliaryWindowLevels()
@@ -932,7 +936,10 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // The titles and enabled flags are decided now, from the state at
         // the moment the menu opens, and do not change while it is open
         // (§4.5 "⌄ menu").
-        let menu = menuHandler.menu(for: HeaderMenu.entries(hasUnreviewed: state.hasUnreviewed))
+        let menu = menuHandler.menu(for: HeaderMenu.entries(
+            hasUnreviewed: state.hasUnreviewed,
+            hasArchived: !model.list.archived.isEmpty,
+            showsArchive: model.list.isArchiveView))
         guard let hostWindow = anchor.window else { return }
         let screenRect = hostWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
         menu.popUp(positioning: nil, at: NSPoint(x: screenRect.minX, y: screenRect.minY - 4), in: nil)
@@ -940,6 +947,33 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // run by then); hand key status back — unless that item opened
         // another window, which must stay key and frontmost.
         if !menuHandler.openedWindow, hostWindow.isVisible { hostWindow.makeKey() }
+    }
+
+    // MARK: - A row's more-button menu (§4.6 "Archive")
+
+    /// Opens the OS's standard menu at the more button, its right edge on
+    /// the button's right edge and its top just below the button. Opened on
+    /// the next main-queue turn, so the button's open-menu ground (set as
+    /// the menu is requested) is drawn first. `completion` gets the chosen
+    /// command, or nil when the menu closes without a choice; then the
+    /// surface's window takes key status back.
+    private func presentRowMenu(items: [RowMenuItem], anchor: NSView,
+                                completion: @escaping @MainActor (RowMenuCommand?) -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard let hostWindow = anchor.window, hostWindow.isVisible else { return completion(nil) }
+                let handler = RowMenuHandler()
+                let menu = handler.menu(for: items)
+                let rect = hostWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+                menu.popUp(positioning: nil,
+                           at: RowMenuPlacement.origin(anchorScreenRect: rect, menuWidth: menu.size.width),
+                           in: nil)
+                // popUp returns when the menu closes, after the chosen item's
+                // action has run.
+                completion(handler.chosen)
+                if hostWindow.isVisible { hostWindow.makeKey() }
+            }
+        }
     }
 
     fileprivate func showAbout(from surface: MainSurface) {
@@ -968,6 +1002,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     }
 
     fileprivate var appState: AppState { state }
+
+    fileprivate func archivedMenuItemChosen() { model.archivedMenuItemChosen() }
 }
 
 /// The window level of the auxiliary windows — Settings, Setup Check and
@@ -1070,6 +1106,7 @@ struct HeaderMenuItem: Equatable {
         case about
         case settings
         case setupCheck
+        case archived
         case clearBadges
         case quit
     }
@@ -1077,21 +1114,28 @@ struct HeaderMenuItem: Equatable {
     let command: Command
     let title: String
     let isEnabled: Bool
+    /// Shown with a check mark.
+    var isChecked = false
 }
 
 /// The ⌄ menu's entries (§4.5 "⌄ menu"): About Shiibar CC / — / Settings… /
-/// Setup Check… / — / Clear badges / — / Quit. Refresh is the header row's
-/// button and ⌘R.
+/// Setup Check… / — / Archived / Clear badges / — / Quit. Refresh is the
+/// header row's button and ⌘R.
 enum HeaderMenu {
-    /// `hasUnreviewed` is the state when the menu opens: Clear badges is
-    /// disabled when nothing is unreviewed (§8.24).
-    static func entries(hasUnreviewed: Bool) -> [HeaderMenuEntry] {
+    /// The state when the menu opens: Clear badges is disabled when nothing
+    /// is unreviewed (§8.24); `Archived` is disabled while no conversation
+    /// is archived (`hasArchived`: the stored archived list, not waiting
+    /// for a search result) and checked while the Archive view is shown
+    /// (`showsArchive`).
+    static func entries(hasUnreviewed: Bool, hasArchived: Bool, showsArchive: Bool) -> [HeaderMenuEntry] {
         [
             .item(HeaderMenuItem(command: .about, title: "About Shiibar CC", isEnabled: true)),
             .separator,
             .item(HeaderMenuItem(command: .settings, title: "Settings\u{2026}", isEnabled: true)),
             .item(HeaderMenuItem(command: .setupCheck, title: "Setup Check\u{2026}", isEnabled: true)),
             .separator,
+            .item(HeaderMenuItem(command: .archived, title: "Archived", isEnabled: hasArchived,
+                                 isChecked: showsArchive)),
             .item(HeaderMenuItem(command: .clearBadges, title: "Clear badges", isEnabled: hasUnreviewed)),
             .separator,
             .item(HeaderMenuItem(command: .quit, title: "Quit", isEnabled: true)),
@@ -1126,6 +1170,7 @@ final class HeaderMenuHandler: NSObject {
                 let menuItem = NSMenuItem(title: item.title, action: Self.selector(for: item.command), keyEquivalent: "")
                 menuItem.target = self
                 menuItem.isEnabled = item.isEnabled
+                menuItem.state = item.isChecked ? .on : .off
                 menu.addItem(menuItem)
             }
         }
@@ -1137,6 +1182,7 @@ final class HeaderMenuHandler: NSObject {
         case .about: return #selector(showAbout(_:))
         case .settings: return #selector(openSettings(_:))
         case .setupCheck: return #selector(openSetupCheck(_:))
+        case .archived: return #selector(toggleArchived(_:))
         case .clearBadges: return #selector(clearBadges(_:))
         case .quit: return #selector(quit(_:))
         }
@@ -1154,8 +1200,51 @@ final class HeaderMenuHandler: NSObject {
         openedWindow = true
         controller?.openScene(SetupCheckWindow.id, title: SetupCheckWindow.title, from: surface)
     }
+    @objc func toggleArchived(_ sender: Any?) { controller?.archivedMenuItemChosen() }
     @objc func clearBadges(_ sender: Any?) { controller?.appState.clearBadges() }
     @objc func quit(_ sender: Any?) { controller?.appState.quit() }
+}
+
+/// Where a row's more-button menu opens (§4.6 "Archive"): the menu's
+/// top-left corner in screen coordinates (y up), so its right edge lines up
+/// with the button's right edge and its top sits 4pt below the button.
+enum RowMenuPlacement {
+    static let gapBelowButton: CGFloat = 4
+
+    static func origin(anchorScreenRect rect: NSRect, menuWidth: CGFloat) -> NSPoint {
+        NSPoint(x: rect.maxX - menuWidth, y: rect.minY - gapBelowButton)
+    }
+}
+
+/// NSMenu action target for a row's more-button menu (§4.6 "Archive").
+/// Builds the menu from the items' values and records the chosen command.
+@MainActor
+final class RowMenuHandler: NSObject {
+    /// The command of the item chosen while the menu was open.
+    private(set) var chosen: RowMenuCommand?
+    private var commands: [RowMenuCommand] = []
+
+    /// The menu for `items`, its items targeting this handler. The enabled
+    /// flags are set by hand (no automatic validation), so they keep the
+    /// values of the moment the menu opened.
+    func menu(for items: [RowMenuItem]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        commands = items.map(\.command)
+        for (index, item) in items.enumerated() {
+            let menuItem = NSMenuItem(title: item.title, action: #selector(choose(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.tag = index
+            menuItem.isEnabled = item.isEnabled
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    @objc func choose(_ sender: NSMenuItem) {
+        guard commands.indices.contains(sender.tag) else { return }
+        chosen = commands[sender.tag]
+    }
 }
 
 /// The opaque ground behind the popover's content and arrow. The color is

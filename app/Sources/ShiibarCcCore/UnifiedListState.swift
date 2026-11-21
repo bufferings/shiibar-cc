@@ -219,6 +219,24 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// drag") follows this at once — before the search result arrives, and
     /// also when the search fails.
     case queryValidityChanged(Bool)
+    /// A click on a row's more button (§4.6 "Archive"): opens the row's
+    /// menu (`.showRowMenu`) — never selects, never counts toward a
+    /// double-click, never starts a drag — unless the click continues a
+    /// click sequence begun on a heading (§4.5 "collapsing sections").
+    case moreButtonClicked(UnifiedRowKey)
+    /// `Archive` chosen in a row's menu (§4.6 "Archive").
+    case archiveRequested(sessionID: String)
+    /// `Unarchive` chosen in an Archive view row's menu.
+    case unarchiveRequested(sessionID: String)
+    /// The ⌄ menu's `Archived` (§4.5 "⌄ menu"): shows the Archive view, or
+    /// returns to the normal list while the Archive view is shown.
+    case archivedMenuItemChosen
+    /// A click on the Archive view's band (§4.6 "Archive view"): returns to
+    /// the normal list — only the first click of consecutive clicks, like a
+    /// heading. The keyboard focus stays; the surface becomes key.
+    case archiveHeadingClicked
+    /// Esc while the Archive view is shown: return to the normal list.
+    case leaveArchiveView
 }
 
 public enum UnifiedListEffect: Equatable, Sendable {
@@ -248,6 +266,17 @@ public enum UnifiedListEffect: Equatable, Sendable {
     case persistStars([String])
     /// Persist the set of closed headings (`CollapsedSections.save`).
     case persistCollapsedSections(Set<ListHeading>)
+    /// Persist the archived conversations (`ArchivedSessions.save`).
+    case persistArchive([String])
+    /// Open the menu of this row's more button at the button (§4.6
+    /// "Archive"); its items are the row's `menuItems`.
+    case showRowMenu(UnifiedRowKey)
+    /// The Archive view was shown: keep the normal list's scroll position
+    /// and show the Archive view from its top (§4.6 "Archive view").
+    case scrollListToTop
+    /// The normal list is back: restore the scroll position it had when the
+    /// Archive view was shown.
+    case restoreListScroll
     /// Make the visible surface the key window without moving the keyboard
     /// focus (a click on a section heading — §4.5 "collapsing sections").
     case makeSurfaceKey
@@ -401,6 +430,28 @@ public struct ConversationPaneModel: Equatable, Sendable {
     public static let nextTooltip = "Next conversation"
 }
 
+/// What the conversation pane shows after `conversations show` (§4.6
+/// "conversation pane"): the messages; the centered `No conversation to
+/// show` line for a Running row's conversation the index does not have yet
+/// (no message sent — §4.6 "index contents", §8.64); or a one-line error
+/// (exit 2 on a History or Archive view row, any other failure).
+public enum ConversationShowOutcome: Equatable, Sendable {
+    case messages
+    case noConversation
+    /// Exit 2: not in the index.
+    case unavailable
+    case failed
+
+    /// `isRunningRow`: the selected row is a Running row.
+    public static func classify(exitCode: Int32, isRunningRow: Bool) -> ConversationShowOutcome {
+        switch exitCode {
+        case 0: return .messages
+        case 2: return isRunningRow ? .noConversation : .unavailable
+        default: return .failed
+        }
+    }
+}
+
 /// The one-column detail page's find bar sentence (§4.6 "hit navigation"):
 /// `Matches for` (secondary color) followed by the query in typographic
 /// quotes (primary color, middle-truncated when long).
@@ -429,8 +480,15 @@ public struct UnifiedListState: Equatable, Sendable {
     /// while searching and for headings not shown.
     public private(set) var collapsedSections: Set<ListHeading>
     public private(set) var isFullBuild = false
+    /// The archived conversations (§4.6 "Archive"). Never holds a live one:
+    /// every rebuild drops those (the automatic unarchive).
+    public private(set) var archived: ArchivedList
 
     // MARK: View state
+
+    /// The normal list or the Archive view (§4.6 "Archive view"), shared by
+    /// the popover and the window and never persisted.
+    public private(set) var listMode: ListMode = .normal
 
     public private(set) var columns: ColumnMode = .one
     /// Meaningful in one column only; normalized to `.list` in two columns.
@@ -509,17 +567,24 @@ public struct UnifiedListState: Equatable, Sendable {
     public private(set) var recentRows: [UnifiedListRow] = []
     /// How many Recent rows the cap hides (0 when none).
     public private(set) var hiddenRecentCount = 0
+    /// The Archive view's rows: at most `RecentDisplayLimit.maxRows`, from
+    /// the head of the archived order (§4.6 "Archive view").
+    public private(set) var archivedRows: [UnifiedListRow] = []
+    /// How many archived rows the cap hides (0 when none).
+    public private(set) var hiddenArchivedCount = 0
 
     public init(
         home: String?,
         now: Int64,
         stars: StarredList = StarredList(),
-        collapsedSections: Set<ListHeading> = []
+        collapsedSections: Set<ListHeading> = [],
+        archived: ArchivedList = ArchivedList()
     ) {
         self.home = home
         self.now = now
         self.stars = stars
         self.collapsedSections = collapsedSections
+        self.archived = archived
     }
 
     // MARK: Derived properties
@@ -531,12 +596,22 @@ public struct UnifiedListState: Equatable, Sendable {
     /// The search text is valid (`.queryValidityChanged`).
     public private(set) var isQueryValid = false
 
+    /// The Archive view is shown (§4.6 "Archive view").
+    public var isArchiveView: Bool { listMode == .archive }
+
+    /// The search field's placeholder (§4.6 "search field" / "Archive
+    /// view").
+    public var searchPlaceholder: String {
+        isArchiveView ? "Search archived" : "Search (2+ characters)"
+    }
+
     /// Every row of a section, shown or not.
     public func rows(of section: UnifiedListSection) -> [UnifiedListRow] {
         switch section {
         case .running: return runningRows
         case .starred: return starredRows
         case .recent: return recentRows
+        case .archived: return archivedRows
         }
     }
 
@@ -544,14 +619,18 @@ public struct UnifiedListState: Equatable, Sendable {
     /// not when the section is closed, and Starred and Recent not while
     /// History is closed. While History stands for the Recent heading (no
     /// Starred rows), Recent shows only while both are open — the same
-    /// rule. Every section while searching.
+    /// rule. Every section of the normal list while searching. The Archive
+    /// view shows its own rows only, whatever is remembered (§4.6 "Archive
+    /// view").
     public func isSectionShown(_ section: UnifiedListSection) -> Bool {
+        if isArchiveView { return section == .archived }
+        guard let heading = ListHeading(section) else { return false }
         if isSearching { return true }
         switch section {
         case .running:
             return !collapsedSections.contains(.running)
-        case .starred, .recent:
-            return !collapsedSections.contains(.history) && !collapsedSections.contains(ListHeading(section))
+        case .starred, .recent, .archived:
+            return !collapsedSections.contains(.history) && !collapsedSections.contains(heading)
         }
     }
 
@@ -583,7 +662,7 @@ public struct UnifiedListState: Equatable, Sendable {
     /// The Running mark (§4.5 "collapsing sections"): while Running is
     /// closed — not while searching — and has a waiting or unreviewed row.
     public var showsRunningAttentionMark: Bool {
-        guard !isSectionShown(.running) else { return false }
+        guard !isArchiveView, !isSectionShown(.running) else { return false }
         return runningRows.contains { row in
             if case .status(let kind, let unreviewed) = row.symbol {
                 return kind == .waiting || unreviewed
@@ -605,12 +684,15 @@ public struct UnifiedListState: Equatable, Sendable {
     /// without rows is not shown, heading included; a closed heading shows
     /// alone.
     public var blocks: [ListBlock] {
+        if isArchiveView { return archiveBlocks }
         var blocks: [ListBlock] = []
         let drag = cardDrag
         if isSearching {
+            // §4.5 "collapsing sections": the bands keep their shape while
+            // searching, without the chevron and the Running mark.
             if !runningRows.isEmpty {
                 blocks.append(.heading(ListHeadingModel(
-                    heading: .running, style: .plain, countText: "\(runningRows.count)", isCollapsible: false)))
+                    heading: .running, style: .band, countText: "\(runningRows.count)", isCollapsible: false)))
                 blocks.append(.frame(ListFrameModel(id: .running, rows: runningRows)))
             }
             let history = starredRows + recentRows
@@ -620,7 +702,7 @@ public struct UnifiedListState: Equatable, Sendable {
                 // leaves Recent rows out.
                 let count = hiddenRecentCount > 0 ? "first \(history.count)" : "\(history.count)"
                 blocks.append(.heading(ListHeadingModel(
-                    heading: .history, style: .plain, countText: count, isCollapsible: false)))
+                    heading: .history, style: .band, countText: count, isCollapsible: false)))
                 blocks.append(.frame(ListFrameModel(id: .history, rows: history)))
                 if let more = hiddenRecentText { blocks.append(.moreLine(more)) }
             }
@@ -671,6 +753,34 @@ public struct UnifiedListState: Equatable, Sendable {
         return blocks
     }
 
+    /// The Archive view, top to bottom (§4.6 "Archive view"): the band, then
+    /// the archived rows in one frame and the `N more` line below it — or,
+    /// with no row matching the search, one line under the band.
+    /// Before the first search result (and during a full index build) the
+    /// band has no count and nothing is under it, as the normal list shows
+    /// nothing while it loads.
+    private var archiveBlocks: [ListBlock] {
+        let countText: String?
+        if history == nil {
+            countText = nil
+        } else if hiddenArchivedCount > 0 {
+            countText = "first \(RecentDisplayLimit.maxRows)"
+        } else {
+            countText = "\(archivedRows.count)"
+        }
+        var blocks: [ListBlock] = [.archiveHeading(ArchiveHeadingModel(countText: countText))]
+        if !archivedRows.isEmpty {
+            blocks.append(.frame(ListFrameModel(id: .archived, rows: archivedRows)))
+            if let more = hiddenArchivedText { blocks.append(.moreLine(more)) }
+        } else if !isFullBuild, history != nil, historyIsFiltered {
+            // Only a filtered result can leave the Archive view without rows:
+            // a browse result prunes every archived conversation it does not
+            // hold, and a live one is unarchived.
+            blocks.append(.emptyLine("No matching conversations"))
+        }
+        return blocks
+    }
+
     /// The headings shown, top to bottom (`blocks`).
     public var headings: [ListHeadingModel] {
         blocks.compactMap { block in
@@ -712,8 +822,11 @@ public struct UnifiedListState: Equatable, Sendable {
     /// "Searching" means the shown result came from a query with a valid
     /// term (assumption: a query with only 1-character words shows the
     /// browse list, so it reads as empty).
+    /// Archived conversations do not count (§4.6 "empty state"). nil in the
+    /// Archive view, whose line sits under its band (`blocks`).
     public var emptyStateText: String? {
-        guard !isFullBuild, history != nil, runningRows.isEmpty, starredRows.isEmpty, recentRows.isEmpty
+        guard !isArchiveView, !isFullBuild, history != nil, runningRows.isEmpty, starredRows.isEmpty,
+              recentRows.isEmpty
         else { return nil }
         return historyIsFiltered ? "No matching conversations" : "No conversations"
     }
@@ -724,8 +837,19 @@ public struct UnifiedListState: Equatable, Sendable {
     /// never selectable.
     public var hiddenRecentText: String? {
         guard hiddenRecentCount > 0, isSectionShown(.recent) else { return nil }
+        return hiddenRowsText(hiddenRecentCount)
+    }
+
+    /// The line below the Archive view's frame when the cap hides rows (the
+    /// Recent rule — §4.6 "Archive view"); nil outside the Archive view.
+    public var hiddenArchivedText: String? {
+        guard hiddenArchivedCount > 0, isArchiveView else { return nil }
+        return hiddenRowsText(hiddenArchivedCount)
+    }
+
+    private func hiddenRowsText(_ count: Int) -> String {
         let hint = historyIsFiltered ? "refine your search" : "search to narrow down"
-        return "\(hiddenRecentCount) more \u{2014} \(hint)"
+        return "\(count) more \u{2014} \(hint)"
     }
 
     /// The selected row's look (§4.5 "row selection"): accent while the
@@ -797,7 +921,8 @@ public struct UnifiedListState: Equatable, Sendable {
             conversationPaneVisible: isConversationPaneVisible,
             isPopover: isPopover,
             hasMarkedText: hasMarkedText,
-            cardDragging: cardDrag != nil
+            cardDragging: cardDrag != nil,
+            isArchiveView: isArchiveView
         )
     }
 
@@ -808,7 +933,7 @@ public struct UnifiedListState: Equatable, Sendable {
     /// double-click on that row. `clickCount` is the system's click count
     /// of the press.
     public func canStartCardDrag(key: UnifiedRowKey, clickCount: Int, onStar: Bool) -> Bool {
-        guard !onStar, cardDrag == nil, dragRefusal(key: key, onStar: onStar) == nil,
+        guard !isArchiveView, !onStar, cardDrag == nil, dragRefusal(key: key, onStar: onStar) == nil,
               let row = visibleRows.first(where: { $0.id == key }), !row.sessionID.isEmpty else { return false }
         return !isRepeatPress(on: key, clickCount: clickCount)
     }
@@ -820,11 +945,13 @@ public struct UnifiedListState: Equatable, Sendable {
     }
 
     /// Why a press on `key` cannot start a drag (§4.5 "row drag": rows that
-    /// cannot be dragged); nil on the star, on a row not on screen, and on
-    /// a row that can be dragged. When several apply, the first of: a
-    /// Running row, searching, a Recent row while Starred has no rows.
+    /// cannot be dragged); nil on the star or the more button, on a row not
+    /// on screen, on the Archive view's rows (they cannot be dragged and no
+    /// reason is shown — §4.6 "Archive view"), and on a row that can be
+    /// dragged. When several apply, the first of: a Running row, searching,
+    /// a Recent row while Starred has no rows.
     public func dragRefusal(key: UnifiedRowKey, onStar: Bool) -> RowDragRefusal? {
-        guard !onStar, let row = visibleRows.first(where: { $0.id == key }) else { return nil }
+        guard !isArchiveView, !onStar, let row = visibleRows.first(where: { $0.id == key }) else { return nil }
         if row.section == .running { return .running }
         if isSearching { return .searching }
         if row.section == .recent, starredRows.isEmpty { return .noStarredSection }
@@ -837,6 +964,8 @@ public struct UnifiedListState: Equatable, Sendable {
     @discardableResult
     public mutating func handle(_ event: UnifiedListEvent) -> [UnifiedListEffect] {
         let before = Observation(self)
+        let archivedBefore = archived
+        let starsBefore = stars
         var effects: [UnifiedListEffect] = []
         var movedSelection = false
 
@@ -850,6 +979,9 @@ public struct UnifiedListState: Equatable, Sendable {
             if !isFiltered, let pruned = stars.pruned(browseResults: results) {
                 stars = pruned
                 effects.append(.persistStars(stars.sessionIDs))
+            }
+            if !isFiltered, let pruned = archived.pruned(browseResults: results) {
+                archived = pruned
             }
             rebuild()
             if let pending = awaitingRefetchRow {
@@ -1038,6 +1170,9 @@ public struct UnifiedListState: Equatable, Sendable {
             }
 
         case .surfaceHidden:
+            // §4.6 "Archive view": not remembered — closing the surface
+            // (switching the form included) returns to the normal list.
+            leaveArchiveView(effects: &effects)
             pendingDeselect = nil
             pointerPress = nil
             clickSequence = nil
@@ -1065,6 +1200,7 @@ public struct UnifiedListState: Equatable, Sendable {
                 pointerPress = nil
                 break
             }
+            guard !isArchiveView else { break }
             // §4.6 "stars": shown at once, without a new search; a new star
             // goes to the end of Starred. A row that moves into a closed
             // section deselects (§4.5 "row selection").
@@ -1085,8 +1221,8 @@ public struct UnifiedListState: Equatable, Sendable {
             headingClickCount = press?.clickCount ?? 1
             // Only the first click of consecutive clicks toggles, and
             // nothing toggles while searching (Running and History show
-            // open).
-            guard !continues, !isSearching else { break }
+            // open). The Archive view has no heading that toggles.
+            guard !continues, !isSearching, !isArchiveView else { break }
             if heading == .history, historyHeadingIsRecentHeading {
                 // The History heading stands for the Recent heading: open
                 // closes History; closed opens both, so the click always
@@ -1178,6 +1314,86 @@ public struct UnifiedListState: Equatable, Sendable {
             // (§4.5 "collapsing sections").
             reconcileSelection()
 
+        case .moreButtonClicked(let key):
+            // Like the star: a click continuing a click sequence begun on a
+            // heading does nothing (§4.5 "collapsing sections").
+            if pressContinuesHeadingClick {
+                pressContinuesHeadingClick = false
+                pointerPress = nil
+                break
+            }
+            // §4.6 "Archive": a surface that is not key becomes key, and the
+            // same click opens the menu.
+            effects.append(.makeSurfaceKey)
+            if let row = visibleRows.first(where: { $0.id == key }), !row.menuItems.isEmpty {
+                effects.append(.showRowMenu(key))
+            }
+
+        case .archiveRequested(let sessionID):
+            // A live conversation is never archived (§4.6 "Archive"): a
+            // choice from a menu opened before it became live changes
+            // nothing — not even its star.
+            guard !sessionID.isEmpty,
+                  !UnifiedListBuilder.liveSessionIDs(agents: agents, results: history).contains(sessionID)
+            else { break }
+            // §4.6 "Archive": off the normal list at once (no new search);
+            // a starred conversation loses its star.
+            archived = archived.archiving(sessionID)
+            if let unstarred = stars.removing(sessionID, results: history ?? []) {
+                stars = unstarred
+                effects.append(.persistStars(stars.sessionIDs))
+            }
+            rebuild()
+            reconcileSelection()
+
+        case .unarchiveRequested(let sessionID):
+            // §4.6 "Archive view": the conversation goes back to Recent (its
+            // star does not come back).
+            archived = archived.unarchiving(sessionID)
+            rebuild()
+            reconcileSelection()
+
+        case .archivedMenuItemChosen:
+            if isArchiveView {
+                leaveArchiveView(effects: &effects)
+            } else {
+                enterArchiveView(effects: &effects)
+            }
+
+        case .archiveHeadingClicked:
+            // The band acts like a heading for the click sequence: only the
+            // first click of consecutive clicks returns to the normal list,
+            // since that click changes what is under the pointer (§4.5
+            // "collapsing sections").
+            let press = pointerPress
+            pointerPress = nil
+            clickSequence = nil
+            effects.append(.makeSurfaceKey)
+            let continues = pressContinuesHeadingClick
+            pressContinuesHeadingClick = false
+            headingClickCount = press?.clickCount ?? 1
+            guard !continues else { break }
+            leaveArchiveView(effects: &effects)
+
+        case .leaveArchiveView:
+            leaveArchiveView(effects: &effects)
+
+        }
+
+        // §4.6 "Archive view": once no conversation is archived (the last
+        // Unarchive, the automatic unarchive, pruning), the normal list is
+        // back. The selected row left the Archive view before this, so it
+        // is already deselected.
+        if isArchiveView, archived.isEmpty {
+            leaveArchiveView(effects: &effects)
+        }
+        if archived != archivedBefore {
+            effects.append(.persistArchive(archived.sessionIDs))
+        }
+        // The rebuild can drop a star (an archived conversation never keeps
+        // one): persist the stars as they ended up.
+        if stars != starsBefore, !effects.contains(.persistStars(stars.sessionIDs)) {
+            effects.append(.persistStars(stars.sessionIDs))
         }
 
         updateCardDrag()
@@ -1235,6 +1451,7 @@ public struct UnifiedListState: Equatable, Sendable {
         case .nextMatch: return [.nextMatch]
         case .previousMatch: return [.previousMatch]
         case .closePopover: return [.closePopover]
+        case .leaveArchiveView: return handle(.leaveArchiveView)
         case .refresh: return [.refresh]
         case .increaseTextSize: return [.increaseTextSize]
         case .decreaseTextSize: return [.decreaseTextSize]
@@ -1297,16 +1514,71 @@ public struct UnifiedListState: Equatable, Sendable {
         }
     }
 
+    /// Recompute every section's rows. First the automatic unarchive (§4.6
+    /// "Archive"): a live conversation is never archived, so whenever the
+    /// agents, the search result or the archived list change, a live one
+    /// leaves the archived list; then an archived conversation's star goes
+    /// (`handle` persists both changes).
     private mutating func rebuild() {
+        let live = UnifiedListBuilder.liveSessionIDs(agents: agents, results: history)
+        if archived.sessionIDs.contains(where: live.contains) {
+            archived = archived.removing(live)
+        }
+        // An archived conversation has no star (§4.6 "Archive"); stored
+        // values holding both lose the star, so an Unarchive never brings a
+        // hidden star back.
+        for sessionID in archived.sessionIDs where stars.contains(sessionID) {
+            if let unstarred = stars.removing(sessionID, results: history ?? []) {
+                stars = unstarred
+            }
+        }
         runningRows = UnifiedListBuilder.runningRows(
             agents: agents, results: history, isFiltered: historyIsFiltered, now: now, home: home
         )
         let conversations = UnifiedListBuilder.conversationRows(
-            results: history, agents: agents, stars: stars, now: now, home: home
+            results: history, agents: agents, stars: stars, archived: archived, now: now, home: home
         )
         starredRows = conversations.starred
         recentRows = Array(conversations.recent.prefix(RecentDisplayLimit.maxRows))
         hiddenRecentCount = conversations.recent.count - recentRows.count
+        let archivedAll = UnifiedListBuilder.archivedRows(
+            results: history, agents: agents, archived: archived, now: now, home: home
+        )
+        archivedRows = Array(archivedAll.prefix(RecentDisplayLimit.maxRows))
+        hiddenArchivedCount = archivedAll.count - archivedRows.count
+    }
+
+    /// Show the Archive view (§4.6 "Archive view"; the ⌄ menu's item is
+    /// disabled while nothing is archived). A selected row that is not in
+    /// it deselects; the view starts at its top.
+    private mutating func enterArchiveView(effects: inout [UnifiedListEffect]) {
+        guard !isArchiveView, !archived.isEmpty else { return }
+        listMode = .archive
+        cardDrag = nil
+        rowPress = nil
+        dragRefusal = nil
+        deselectUnlessShown()
+        effects.append(.scrollListToTop)
+    }
+
+    /// Back to the normal list (§4.6 "Archive view"): a selected row that
+    /// is not in it deselects (one column: the list page), and the normal
+    /// list's scroll position comes back.
+    private mutating func leaveArchiveView(effects: inout [UnifiedListEffect]) {
+        guard isArchiveView else { return }
+        listMode = .normal
+        deselectUnlessShown()
+        effects.append(.restoreListScroll)
+    }
+
+    /// After switching between the normal list and the Archive view: the
+    /// selection stays only on a row shown in the list now (§4.6 "Archive
+    /// view": selection after switching).
+    private mutating func deselectUnlessShown() {
+        guard let current = selection else { return }
+        if awaitingRefetchRow != nil || !visibleRows.contains(where: { $0.id == current.key }) {
+            deselect()
+        }
     }
 
     /// After every event: a drag ends when searching starts or when the

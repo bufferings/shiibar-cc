@@ -139,6 +139,22 @@ Drag the rows in Starred to reorder them; dragging a row from Recent
 into Starred stars it where you drop it, and dragging one back to Recent
 removes the star. Dragging is off while you search.
 
+To put a past conversation away, click the **···** button at the top right
+of its row and choose **Archive**. Archived conversations leave Starred and
+Recent (a starred one loses its star) and no longer show in a search. To see
+them, open the `⌄` menu and choose **Archived**: the list shows only the
+archived conversations, most recently archived first, and the search field searches
+only them. Open, resume or branch one from there as usual, or choose
+**Unarchive** from its **···** button to put it back in Recent. Click the
+**‹ Archived** heading (or press Esc) to return to the normal list; closing
+the popover or the window returns to it too. A session that is running
+cannot be archived, and an archived conversation that is running again (for
+example after you resume it) leaves the archive. Archiving never deletes
+anything.
+
+A Claude Code session that ended before you sent a prompt (for example one
+where you only ran a slash command) is not listed as a conversation.
+
 <img src="docs/assets/conversations-window.png" width="700"
      alt="The Shiibar CC window, wide enough for two columns: the Running
           and History list with the search field on the left, and the

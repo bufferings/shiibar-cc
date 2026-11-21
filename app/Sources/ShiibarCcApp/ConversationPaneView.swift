@@ -167,6 +167,13 @@ struct ConversationPaneView: View {
                     centeredLine(error)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(surface == .window ? SurfaceColors.paneBackground : Color(nsColor: .windowBackgroundColor))
+                } else if model.paneShowsNoConversation {
+                    // §4.6: a Running row's conversation the index does not
+                    // have yet (no message sent) — the same line as a row
+                    // without a session_id.
+                    centeredLine(ConversationPaneModel.noMessagesText)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(surface == .window ? SurfaceColors.paneBackground : Color(nsColor: .windowBackgroundColor))
                 }
             } else {
                 centeredLine(ConversationPaneModel.noMessagesText)

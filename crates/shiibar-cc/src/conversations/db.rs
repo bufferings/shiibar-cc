@@ -26,7 +26,11 @@ use std::time::Duration;
 // v3: per-conversation `last_prompt` column (DESIGN.md 4.6 - head of the
 // last human utterance, surfaced as search's `last_prompt`, 4.4); the bump
 // rebuilds the index once so every existing row gets the new column.
-const SCHEMA_VERSION: i64 = 3;
+// v4: files without a human utterance are not conversations (DESIGN.md
+// 4.6 / 8.64) and are recorded in `unregistered_files` instead; the bump
+// rebuilds the index once so conversations registered under the earlier
+// rule without a human utterance are dropped.
+const SCHEMA_VERSION: i64 = 4;
 
 /// Explicit SQLite lock wait (DESIGN.md §4.6: never rely on the default).
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -191,6 +195,7 @@ impl Db {
         tx.execute_batch(
             "DROP TABLE IF EXISTS conversations;
              DROP TABLE IF EXISTS messages;
+             DROP TABLE IF EXISTS unregistered_files;
              DROP TABLE IF EXISTS meta;
              CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE conversations(
@@ -203,6 +208,16 @@ impl Db {
                  live       INTEGER NOT NULL DEFAULT 0,
                  updated_at INTEGER NOT NULL,
                  last_prompt TEXT
+             );
+             -- Files read by the catch-up that hold no human utterance
+             -- (DESIGN.md 4.6): only their stat is kept, so an unchanged
+             -- file is not re-read on every catch-up. A session id is in
+             -- at most one of `conversations` and `unregistered_files`.
+             CREATE TABLE unregistered_files(
+                 session_id TEXT PRIMARY KEY,
+                 path       TEXT NOT NULL,
+                 mtime_ns   INTEGER NOT NULL,
+                 size       INTEGER NOT NULL
              );
              CREATE VIRTUAL TABLE messages USING fts5(
                  text,
@@ -219,11 +234,22 @@ impl Db {
         tx.commit()
     }
 
-    /// What the index currently holds, keyed by session id (for the diff).
+    /// The registered conversations' files, keyed by session id (for the
+    /// diff).
     pub fn indexed_files(&self) -> rusqlite::Result<HashMap<String, IndexedFile>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT session_id, path, mtime_ns, size FROM conversations")?;
+        self.files_in("conversations")
+    }
+
+    /// The files recorded as not being conversations (no human utterance —
+    /// DESIGN.md §4.6), keyed by session id (for the diff).
+    pub fn unregistered_files(&self) -> rusqlite::Result<HashMap<String, IndexedFile>> {
+        self.files_in("unregistered_files")
+    }
+
+    fn files_in(&self, table: &str) -> rusqlite::Result<HashMap<String, IndexedFile>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT session_id, path, mtime_ns, size FROM {table}"
+        ))?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -260,6 +286,12 @@ impl Db {
         )?;
         tx.execute(
             "DELETE FROM conversations WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        // A file that gained a human utterance moves from the unregistered
+        // record to the conversations in the same commit.
+        tx.execute(
+            "DELETE FROM unregistered_files WHERE session_id = ?1",
             params![session_id],
         )?;
         tx.execute(
@@ -301,6 +333,53 @@ impl Db {
         }
         write_progress(&tx, progress_done, progress_total)?;
         tx.commit()
+    }
+
+    /// Record a re-read file that holds no human utterance (DESIGN.md
+    /// §4.6): drop the conversation registered under its session id, if
+    /// any, and keep only the file's stat so it is not re-read until it
+    /// changes. One commit, together with the progress counter. Returns
+    /// whether a registered conversation was dropped (it counts toward the
+    /// `removed` of the `done` event — §4.4).
+    pub fn record_unregistered_file(
+        &mut self,
+        session_id: &str,
+        path: &str,
+        mtime_ns: i64,
+        size: i64,
+        progress_done: u64,
+        progress_total: u64,
+    ) -> rusqlite::Result<bool> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        let dropped = tx.execute(
+            "DELETE FROM conversations WHERE session_id = ?1",
+            params![session_id],
+        )? > 0;
+        tx.execute(
+            "INSERT INTO unregistered_files(session_id, path, mtime_ns, size)
+             VALUES(?1, ?2, ?3, ?4)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 path = excluded.path, mtime_ns = excluded.mtime_ns, size = excluded.size",
+            params![session_id, path, mtime_ns, size],
+        )?;
+        write_progress(&tx, progress_done, progress_total)?;
+        tx.commit()?;
+        Ok(dropped)
+    }
+
+    /// Forget the record of a vanished file that was not a conversation.
+    pub fn remove_unregistered_file(&mut self, session_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM unregistered_files WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
     }
 
     pub fn remove_conversation(&mut self, session_id: &str) -> rusqlite::Result<()> {

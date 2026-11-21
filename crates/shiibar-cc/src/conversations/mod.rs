@@ -14,7 +14,7 @@ pub mod live;
 pub mod lock;
 pub mod transcript;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -280,6 +280,11 @@ struct CatchUpOutcome {
 /// wholesale row replacement (one commit per conversation) -> removal of
 /// vanished files -> live/past flag update. Caller must hold the flock.
 /// `full_build` is what `db::open_rw` reported for this open.
+///
+/// A re-read file without a human utterance is not a conversation (§4.6,
+/// §8.64): it is not registered (a conversation registered under its
+/// session id is dropped), and only its stat is recorded, so the diff
+/// skips it until it changes like any other file.
 fn catch_up(
     deps: &Deps,
     db: &mut db::Db,
@@ -287,25 +292,33 @@ fn catch_up(
     emit: &mut dyn FnMut(ProgressEvent),
 ) -> anyhow::Result<CatchUpOutcome> {
     let swept = sweep(&deps.projects_dir)?;
-    let existing = db.indexed_files()?;
+    let conversations = db.indexed_files()?;
+    let unregistered = db.unregistered_files()?;
 
     let changed: Vec<&SweptFile> = swept
         .iter()
         .filter(|f| {
-            existing.get(&f.session_id)
-                != Some(&db::IndexedFile {
-                    path: f.path.to_string_lossy().into_owned(),
-                    mtime_ns: f.mtime_ns,
-                    size: f.size,
-                })
+            let current = db::IndexedFile {
+                path: f.path.to_string_lossy().into_owned(),
+                mtime_ns: f.mtime_ns,
+                size: f.size,
+            };
+            let known = conversations
+                .get(&f.session_id)
+                .or_else(|| unregistered.get(&f.session_id));
+            known != Some(&current)
         })
         .collect();
     let swept_ids: HashSet<&str> = swept.iter().map(|f| f.session_id.as_str()).collect();
-    let removed_ids: Vec<String> = existing
-        .keys()
-        .filter(|id| !swept_ids.contains(id.as_str()))
-        .cloned()
-        .collect();
+    let vanished = |known: &HashMap<String, db::IndexedFile>| -> Vec<String> {
+        known
+            .keys()
+            .filter(|id| !swept_ids.contains(id.as_str()))
+            .cloned()
+            .collect()
+    };
+    let removed_ids = vanished(&conversations);
+    let vanished_unregistered_ids = vanished(&unregistered);
 
     let total = changed.len() as u64;
     db.reset_progress(total, full_build)?;
@@ -314,21 +327,34 @@ fn catch_up(
     let mut throttle_mark = Instant::now();
     let mut last_emitted_done: u64 = 0;
     let mut done: u64 = 0;
+    let mut dropped: u64 = 0;
     for file in changed {
         // A file that vanished between sweep and read is simply skipped;
         // the next catch-up removes it (§4.6: skip and continue).
         if let Ok(content) = std::fs::read_to_string(&file.path) {
             let extracted = transcript::extract(&content);
-            db.replace_conversation(
+            let path = file.path.to_string_lossy();
+            if extracted.has_user_utterance() {
+                db.replace_conversation(
+                    &file.session_id,
+                    &path,
+                    file.mtime_ns,
+                    file.size,
+                    file.updated_at,
+                    &extracted,
+                    done + 1,
+                    total,
+                )?;
+            } else if db.record_unregistered_file(
                 &file.session_id,
-                &file.path.to_string_lossy(),
+                &path,
                 file.mtime_ns,
                 file.size,
-                file.updated_at,
-                &extracted,
                 done + 1,
                 total,
-            )?;
+            )? {
+                dropped += 1;
+            }
         }
         done += 1;
         if done - last_emitted_done >= PROGRESS_EMIT_FILES
@@ -343,13 +369,18 @@ fn catch_up(
     for id in &removed_ids {
         db.remove_conversation(id)?;
     }
+    // Forgetting the record of a vanished non-conversation file is not a
+    // removed conversation, so it does not count toward `removed` (§4.4).
+    for id in &vanished_unregistered_ids {
+        db.remove_unregistered_file(id)?;
+    }
 
     let live = live::live_session_ids(&deps.sessions_dir, deps.probe.as_ref());
     db.update_live_flags(&live)?;
 
     Ok(CatchUpOutcome {
         indexed: done,
-        removed: removed_ids.len() as u64,
+        removed: removed_ids.len() as u64 + dropped,
     })
 }
 

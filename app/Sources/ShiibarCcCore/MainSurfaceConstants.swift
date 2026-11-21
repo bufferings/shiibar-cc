@@ -24,6 +24,9 @@ public enum MainSurfaceDefaultsKeys {
     /// The stars as an ordered list of session IDs, [String]: the Starred
     /// section's order (§4.6 "stars").
     public static let starredSessionList = "cc.shiibar.starredSessionList"
+    /// The archived conversations as an ordered list of session IDs,
+    /// [String], the most recently archived first (§4.6 "Archive").
+    public static let archivedSessionList = "cc.shiibar.archivedSessionList"
     /// The closed headings' names (`ListHeading` raw values: running,
     /// history, starred, recent), [String] (§4.5 "collapsing sections").
     public static let collapsedSections = "cc.shiibar.collapsedSections"
@@ -75,10 +78,11 @@ public enum MainSurfaceRefresh {
 
 /// The Recent section's display cap (§4.6 "Recent section", §9).
 public enum RecentDisplayLimit {
-    /// §9: Recent shows at most this many rows (after the Running and
-    /// Starred exclusions). The Running and Starred sections are never
-    /// capped, and the cap applies to display only — the search result
-    /// itself (star pruning, Running titles, the result count) is whole.
+    /// §9: Recent shows at most this many rows (after the Running, Starred
+    /// and archived exclusions), and so does the Archive view. The Running
+    /// and Starred sections are never capped, and the cap applies to
+    /// display only — the search result itself (star and archive pruning,
+    /// Running titles, the result count) is whole.
     public static let maxRows = 100
 }
 

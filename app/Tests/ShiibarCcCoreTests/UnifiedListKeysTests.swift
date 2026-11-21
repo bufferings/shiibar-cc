@@ -96,7 +96,11 @@ final class UnifiedListKeysTests: XCTestCase {
         case "⌘F": return field ? .ignore : .perform(.focusSearch)
         // Refresh with either focus and on every page (§4.6).
         case "⌘R": return .perform(.refresh)
-        case "Esc": return c.isPopover ? .perform(.closePopover) : .ignore
+        // The Archive view: back to the normal list only, on every page and
+        // with either focus (the popover stays open).
+        case "Esc":
+            if c.isArchiveView { return .perform(.leaveArchiveView) }
+            return c.isPopover ? .perform(.closePopover) : .ignore
         case "⌘+", "⌘=": return .perform(.increaseTextSize)
         case "⌘−": return .perform(.decreaseTextSize)
         case "⌘0": return .perform(.resetTextSize)
@@ -123,14 +127,16 @@ final class UnifiedListKeysTests: XCTestCase {
                                 for searchFieldFocused in bools {
                                     for hasMarkedText in bools {
                                         for isPopover in (columns == .one ? bools : [false]) {
-                                            let paneVisible = columns == .two ? hasSelection : page == .detail
-                                            result.append(ListKeyContext(
-                                                columns: columns, page: page,
-                                                searchFieldFocused: searchFieldFocused, hasRows: hasRows,
-                                                hasSelection: hasSelection,
-                                                primaryEnabled: primaryEnabled, branchEnabled: branchEnabled,
-                                                conversationPaneVisible: paneVisible, isPopover: isPopover,
-                                                hasMarkedText: hasMarkedText))
+                                            for isArchiveView in bools {
+                                                let paneVisible = columns == .two ? hasSelection : page == .detail
+                                                result.append(ListKeyContext(
+                                                    columns: columns, page: page,
+                                                    searchFieldFocused: searchFieldFocused, hasRows: hasRows,
+                                                    hasSelection: hasSelection,
+                                                    primaryEnabled: primaryEnabled, branchEnabled: branchEnabled,
+                                                    conversationPaneVisible: paneVisible, isPopover: isPopover,
+                                                    hasMarkedText: hasMarkedText, isArchiveView: isArchiveView))
+                                            }
                                         }
                                     }
                                 }
@@ -145,10 +151,11 @@ final class UnifiedListKeysTests: XCTestCase {
 
     func testTableRowsAcrossEveryContext() {
         let all = contexts
-        // Per focus × marked text (4 combinations): one column list page
-        // (no selection 2 rows-states × 2 surfaces + selection 2 × 4 buttons
-        // × 2) = 20, detail page 2 × 4 × 2 = 16, two columns 2 + 2 × 4 = 10.
-        XCTAssertEqual(all.count, (20 + 16 + 10) * 4)
+        // Per focus × marked text × normal list or Archive view (8
+        // combinations): one column list page (no selection 2 rows-states ×
+        // 2 surfaces + selection 2 × 4 buttons × 2) = 20, detail page 2 × 4
+        // × 2 = 16, two columns 2 + 2 × 4 = 10.
+        XCTAssertEqual(all.count, (20 + 16 + 10) * 8)
         for keyCase in tableKeys {
             for context in all {
                 XCTAssertEqual(

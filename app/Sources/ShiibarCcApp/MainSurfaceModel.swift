@@ -92,6 +92,23 @@ final class MainSurfaceModel: ObservableObject {
     /// restored by a surface's list when that surface is shown. Deliberately
     /// not published: a scroll tick must not re-render the surfaces.
     var listScrollAnchor: ListScrollAnchor?
+    /// The normal list's scroll position, kept while the Archive view is
+    /// shown (§4.6 "Archive view": back on the normal list, it returns
+    /// there).
+    private var normalListScrollAnchor: ListScrollAnchor?
+    /// Scroll the list to its top (the Archive view was shown).
+    @Published private(set) var scrollToTopRequest = 0
+    /// Scroll the list back to `listScrollAnchor` (the normal list is back).
+    @Published private(set) var scrollRestoreRequest = 0
+    /// Set from a switch to or from the Archive view until the visible
+    /// surface's list has scrolled for it: until then the list records no
+    /// scroll position, so the one just set is not replaced by the other
+    /// view's offset.
+    private(set) var isListScrollRestorePending = false
+
+    /// The visible surface's list carried out the scroll the switch asked
+    /// for.
+    func listScrollRestoreDone() { isListScrollRestorePending = false }
 
     // MARK: - Fixed footer
 
@@ -132,6 +149,11 @@ final class MainSurfaceModel: ObservableObject {
     private let webPaneFactory: @MainActor () -> WebPaneController
     /// One-line error for the message surface (§4.6: show exit 2 / exit 1).
     @Published private(set) var paneLoadError: String?
+    /// The message surface shows `No conversation to show`: show exited 2
+    /// for a Running row's conversation (§4.6 "conversation pane"). Not
+    /// updated on its own — a new selection of the row or Refresh runs show
+    /// again.
+    @Published private(set) var paneShowsNoConversation = false
     /// All in-body hits of the current query, document order (§4.6).
     @Published private(set) var hits: [ConversationHit] = []
     @Published private(set) var currentHitIndex: Int?
@@ -157,6 +179,12 @@ final class MainSurfaceModel: ObservableObject {
     @Published private(set) var paneFocusRequests: [MainSurface: Int] = [:]
     /// Re-attach the shared web view to the visible surface's pane host.
     @Published private(set) var paneAttachRequest = 0
+
+    /// The row whose more-button menu is open (§4.6 "Archive": its box gets
+    /// a pale gray ground meanwhile); nil while none is.
+    @Published private(set) var openRowMenuKey: UnifiedRowKey?
+    /// The more button that was clicked last: where its menu opens.
+    private weak var pendingMoreButtonAnchor: NSView?
 
     // MARK: - Surfaces
 
@@ -189,6 +217,13 @@ final class MainSurfaceModel: ObservableObject {
     var onCloseWindowForPopover: () -> Void = {}
     var onShowPopoverFromWindow: () -> Void = {}
     var onPresentMenu: (_ anchor: NSView, _ surface: MainSurface) -> Void = { _, _ in }
+    /// Open a row's more-button menu with these items at `anchor` (§4.6
+    /// "Archive"); `completion` receives the chosen item's command, or nil
+    /// when the menu closes without a choice.
+    var onPresentRowMenu: (
+        _ items: [RowMenuItem], _ anchor: NSView, _ surface: MainSurface,
+        _ completion: @escaping @MainActor (RowMenuCommand?) -> Void
+    ) -> Void = { _, _, _, completion in completion(nil) }
     var onKeepOnTopChanged: (Bool) -> Void = { _ in }
     /// Move keyboard focus to the list on this surface: the search field
     /// resigns first responder, so its caret disappears (§4.5 "key
@@ -255,6 +290,9 @@ final class MainSurfaceModel: ObservableObject {
     /// The current Refresh's reconcile exit code; nil until it lands.
     private var refreshReconcileExitCode: Int32?
     private var refreshGeneration = 0
+    /// Refresh found `No conversation to show`: show runs again once the
+    /// Refresh's search has landed.
+    private var reloadShowAfterRefreshSearch = false
     private var clockTimer: Timer?
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -286,7 +324,8 @@ final class MainSurfaceModel: ObservableObject {
         self.list = UnifiedListState(
             home: home, now: now,
             stars: StarredSessions.load(from: defaults),
-            collapsedSections: CollapsedSections.load(from: defaults))
+            collapsedSections: CollapsedSections.load(from: defaults),
+            archived: ArchivedSessions.load(from: defaults))
         // A missing key reads as false == `WindowKeepOnTop.defaultEnabled`.
         self.keepOnTop = defaults.object(forKey: MainSurfaceDefaultsKeys.windowKeepOnTop) as? Bool
             ?? WindowKeepOnTop.defaultEnabled
@@ -419,6 +458,19 @@ final class MainSurfaceModel: ObservableObject {
     /// A click on a heading (§4.5 "collapsing sections"; Core decides
     /// whether it toggles).
     func headingClicked(_ heading: ListHeading) { send(.headingClicked(heading)) }
+
+    /// A click on a row's more button (§4.6 "Archive"); `anchor` is the
+    /// button's view, where the menu opens. Core decides whether it opens.
+    func moreButtonClicked(_ key: UnifiedRowKey, anchor: NSView?) {
+        pendingMoreButtonAnchor = anchor
+        send(.moreButtonClicked(key))
+    }
+
+    /// The ⌄ menu's `Archived` (§4.5 "⌄ menu").
+    func archivedMenuItemChosen() { send(.archivedMenuItemChosen) }
+
+    /// A click on the Archive view's band (§4.6 "Archive view").
+    func archiveHeadingClicked() { send(.archiveHeadingClicked) }
 
     // MARK: - Row drag (§4.5 "row drag")
 
@@ -631,6 +683,10 @@ final class MainSurfaceModel: ObservableObject {
         setTransient(.refreshing, autoClear: false)
         debounceTask?.cancel()
         performSearch()
+        // §4.6 "conversation pane": `No conversation to show` is not updated
+        // on its own; Refresh runs show again — once its search has landed,
+        // since show reads the index as it is and the search catches it up.
+        reloadShowAfterRefreshSearch = paneShowsNoConversation
         runCommand(CLIRunner.reconcileArguments) { [weak self] exitCode in
             guard let self, generation == self.refreshGeneration, self.isRefreshing else { return }
             self.refreshReconcileExitCode = exitCode
@@ -656,6 +712,14 @@ final class MainSurfaceModel: ObservableObject {
 
     private func send(_ event: UnifiedListEvent) {
         run(list.handle(event))
+        // `No conversation to show` belongs to a Running row. When a Running
+        // row that ended hands its selection to the History row with the
+        // same session_id, the shown conversation stays the same (no load
+        // effect), so the pane loads it again.
+        if paneShowsNoConversation, list.isConversationPaneVisible, let selection = list.selection,
+           case .conversation = selection.key, !selection.sessionID.isEmpty {
+            loadConversation(selection.sessionID)
+        }
     }
 
     /// The surface whose key event is being handled (focus effects go
@@ -692,6 +756,29 @@ final class MainSurfaceModel: ObservableObject {
                 StarredSessions.save(stars, to: defaults)
             case .persistCollapsedSections(let sections):
                 CollapsedSections.save(sections, to: defaults)
+            case .persistArchive(let sessionIDs):
+                ArchivedSessions.save(sessionIDs, to: defaults)
+            case .showRowMenu(let key):
+                presentRowMenu(for: key)
+            case .scrollListToTop:
+                normalListScrollAnchor = listScrollAnchor
+                listScrollAnchor = nil
+                isListScrollRestorePending = true
+                scrollToTopRequest += 1
+            case .restoreListScroll:
+                let anchor = normalListScrollAnchor
+                normalListScrollAnchor = nil
+                isListScrollRestorePending = true
+                if let anchor, list.visibleRows.contains(where: { $0.id == anchor.key }) {
+                    listScrollAnchor = anchor
+                    scrollRestoreRequest += 1
+                } else {
+                    // Never scrolled, or its row left the normal list: the
+                    // normal list starts at its top rather than at the
+                    // Archive view's offset.
+                    listScrollAnchor = nil
+                    scrollToTopRequest += 1
+                }
             case .makeSurfaceKey:
                 if let surface = focusSurface { onMakeSurfaceKey(surface) }
             case .invoke(let invocation):
@@ -721,6 +808,26 @@ final class MainSurfaceModel: ObservableObject {
                 textSize.decrease()
             case .resetTextSize:
                 textSize.reset()
+            }
+        }
+    }
+
+    /// Opens the row's menu at its more button (§4.6 "Archive"). The items
+    /// are the row's at this moment; a choice is sent to Core, which applies
+    /// the state rules then (a conversation that became live meanwhile is
+    /// unarchived again).
+    private func presentRowMenu(for key: UnifiedRowKey) {
+        guard let anchor = pendingMoreButtonAnchor, let surface = focusSurface,
+              let row = list.visibleRows.first(where: { $0.id == key }), !row.menuItems.isEmpty else { return }
+        let sessionID = row.sessionID
+        openRowMenuKey = key
+        onPresentRowMenu(row.menuItems, anchor, surface) { [weak self] command in
+            guard let self else { return }
+            self.openRowMenuKey = nil
+            switch command {
+            case .archive: self.send(.archiveRequested(sessionID: sessionID))
+            case .unarchive: self.send(.unarchiveRequested(sessionID: sessionID))
+            case nil: break
             }
         }
     }
@@ -890,6 +997,12 @@ final class MainSurfaceModel: ObservableObject {
     private func noteRefreshSearchFinished(succeeded: Bool) {
         guard isRefreshing, refreshSearchSucceeded == nil else { return }
         refreshSearchSucceeded = succeeded
+        if reloadShowAfterRefreshSearch {
+            reloadShowAfterRefreshSearch = false
+            if paneShowsNoConversation, let sessionID = list.selection?.sessionID, !sessionID.isEmpty {
+                loadConversation(sessionID)
+            }
+        }
         settleRefreshIfFinished()
     }
 
@@ -920,6 +1033,7 @@ final class MainSurfaceModel: ObservableObject {
         hits = []
         currentHitIndex = nil
         paneLoadError = nil
+        paneShowsNoConversation = false
         showProcess?.cancel()
         showGeneration += 1
         let generation = showGeneration
@@ -931,8 +1045,10 @@ final class MainSurfaceModel: ObservableObject {
     }
 
     private func handleShowResult(_ result: CLIRunResult, sessionID: String) {
-        switch result.exitCode {
-        case 0:
+        var isRunningRow = false
+        if case .running = list.selection?.key { isRunningRow = true }
+        switch ConversationShowOutcome.classify(exitCode: result.exitCode, isRunningRow: isRunningRow) {
+        case .messages:
             guard let loaded = ConversationDetail.decode(result.stdout) else {
                 paneLoadError = Self.loadFailedText
                 return
@@ -948,10 +1064,13 @@ final class MainSurfaceModel: ObservableObject {
                 anchorSeq: scrollMemory[sessionID], elapsed: elapsed
             )
             pushHitsToPane(scrollToCurrent: scrollMemory[sessionID] == nil)
-        case 2:
+        case .noConversation:
+            paneLoadError = nil
+            paneShowsNoConversation = true
+        case .unavailable:
             // Assumption (§4.6 gives no wording): the one-line texts below.
             paneLoadError = Self.unavailableText
-        default:
+        case .failed:
             paneLoadError = Self.loadFailedText
         }
     }

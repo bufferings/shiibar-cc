@@ -202,7 +202,8 @@ struct HeaderRowView: View {
                 isEnabled: !model.list.isFullBuild,
                 focusToken: model.searchFocusRequests[surface] ?? 0,
                 isKeyViewLoopMember: !isCoveredByDetailPage,
-                scale: scale
+                scale: scale,
+                placeholder: model.list.searchPlaceholder
             )
             // window-design.html `.search`: 28pt tall at 13; it and the
             // buttons (24pt at 13) follow the text size, and the row
@@ -314,22 +315,26 @@ struct ListBodyView: View {
             // An eager stack: every row has a real frame, so revealing or
             // restoring any row is exact (Recent is capped — §9 — so the
             // row count stays small).
+            // The bands span the list's whole width; every other element
+            // sits `SurfaceMetrics.listSide` in from its edges.
             VStack(alignment: .leading, spacing: 0) {
                 if let empty = list.emptyStateText {
-                    Text(empty)
-                        .font(.system(size: scale.listNoteFont))
-                        .foregroundStyle(SurfaceColors.secondary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, scale.emptyStateVertical)
+                    emptyLine(empty)
                 }
                 ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
                     let gap = ListBlockSpacing.gap(before: index, in: blocks, scale: scale)
+                    let topLine = ListBlockSpacing.drawsBandTopLine(at: index, columns: list.columns)
                     switch block {
                     case .heading(let heading):
-                        SectionHeaderView(heading: heading, model: model)
+                        SectionHeaderView(heading: heading, drawsTopLine: topLine, model: model)
+                            .padding(.horizontal, heading.style == .band ? 0 : SurfaceMetrics.listSide)
+                            .padding(.top, gap)
+                    case .archiveHeading(let heading):
+                        ArchiveHeaderView(heading: heading, drawsTopLine: topLine, model: model)
                             .padding(.top, gap)
                     case .frame(let frame):
                         RowFrameView(frame: frame, model: model)
+                            .padding(.horizontal, SurfaceMetrics.listSide)
                             .padding(.top, gap)
                     case .moreLine(let text):
                         // §4.6: the count of rows the Recent cap hides —
@@ -342,11 +347,14 @@ struct ListBodyView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, scale.hiddenRowsVertical)
                             .background(ListElementFrameReporter(kind: .moreLine))
+                            .padding(.horizontal, SurfaceMetrics.listSide)
+                            .padding(.top, gap)
+                    case .emptyLine(let text):
+                        emptyLine(text)
                             .padding(.top, gap)
                     }
                 }
             }
-            .padding(.horizontal, 10)
             .padding(.bottom, scale.listBottom)
             // Drawn over the rows without moving them (window-design.html
             // `.dropline`), in list-content coordinates.
@@ -375,30 +383,55 @@ struct ListBodyView: View {
         .onChange(of: model.scrollSelectionRequest) {
             scroller.requestReveal()
         }
+        .onChange(of: model.scrollToTopRequest) {
+            scroller.requestScrollToTop()
+        }
+        .onChange(of: model.scrollRestoreRequest) {
+            scroller.requestRestore()
+        }
+    }
+
+    /// The empty-state line (§4.6), and the Archive view's line under its
+    /// band.
+    private func emptyLine(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: scale.listNoteFont))
+            .foregroundStyle(SurfaceColors.secondary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, scale.emptyStateVertical)
+            .padding(.horizontal, SurfaceMetrics.listSide)
     }
 }
 
 /// The vertical space between the list's blocks (window-design.html
-/// "collapsing sections and the row drag": spacing between elements). A
-/// band (and a heading drawn like one while searching) wants 8 above and 6
-/// below; a heading under History 6 above and 4 below; a frame of rows and
-/// the `N more` line nothing. Two neighbors are apart by the larger of the
-/// upper one's space below and the lower one's space above.
+/// "collapsing sections and the row drag": spacing between elements; §9). A
+/// band wants 8 above and 8 below, whatever the text size; a heading under
+/// History 6 above and 4 below (following the text size); a frame of rows,
+/// the `N more` line and the Archive view's line nothing. Two neighbors are
+/// apart by the larger of the upper one's space below and the lower one's
+/// space above. A band that is the list's first element sits right under
+/// the header row, with no space above it (§4.5 "the list has three
+/// sections").
 enum ListBlockSpacing {
     static func gap(before index: Int, in blocks: [ListBlock], scale: SurfaceScale) -> CGFloat {
         let top = margins(blocks[index], scale: scale).top
-        guard index > 0 else { return top }
+        guard index > 0 else { return blocks[index].isBand ? 0 : top }
         return max(margins(blocks[index - 1], scale: scale).bottom, top)
     }
 
+    /// Whether the band at `index` draws its top line: not the first band in
+    /// two columns, where the line under the header row is the boundary
+    /// (§4.5 "the list has three sections").
+    static func drawsBandTopLine(at index: Int, columns: ColumnMode) -> Bool {
+        !(index == 0 && columns == .two)
+    }
+
     private static func margins(_ block: ListBlock, scale: SurfaceScale) -> (top: CGFloat, bottom: CGFloat) {
+        if block.isBand { return (SurfaceMetrics.sectionBandGap, SurfaceMetrics.sectionBandGap) }
         switch block {
-        case .heading(let heading):
-            switch heading.style {
-            case .band, .plain: return (scale.sectionHeaderTop, scale.sectionHeaderBottom)
-            case .sub: return (scale.subHeadingTop, scale.subHeadingBottom)
-            }
-        case .frame, .moreLine:
+        case .heading:
+            return (scale.subHeadingTop, scale.subHeadingBottom)
+        case .archiveHeading, .frame, .moreLine, .emptyLine:
             return (0, 0)
         }
     }
@@ -470,6 +503,8 @@ final class ListScroller: ObservableObject {
     /// shared position).
     private var pendingRestore = false
     private var pendingReveal = false
+    /// The Archive view was shown: it starts at its top (§4.6).
+    private var pendingTop = false
     /// Armed by a text size change until the rows report their new frames
     /// (or its fallback fires): a restore from the old frames would land on
     /// the wrong row.
@@ -591,6 +626,13 @@ final class ListScroller: ObservableObject {
         flushSoon()
     }
 
+    /// Scroll to the list's top (the Archive view was shown — §4.6).
+    func requestScrollToTop() {
+        pendingTop = true
+        pendingRestore = false
+        flushSoon()
+    }
+
     /// Reveal the selected row by the minimum scroll (§4.5).
     func requestReveal() {
         pendingReveal = true
@@ -599,7 +641,7 @@ final class ListScroller: ObservableObject {
 
     /// Runs after the current SwiftUI update, so the row frames reflect it.
     private func flushSoon() {
-        guard pendingRestore || pendingReveal else { return }
+        guard pendingRestore || pendingReveal || pendingTop else { return }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.flush() }
         }
@@ -608,12 +650,29 @@ final class ListScroller: ObservableObject {
     private func flush() {
         guard !relayoutWait.isWaiting, let scrollView, let model,
               !rows.isEmpty || model.list.visibleRows.isEmpty else { return }
+        let switchScroll = pendingTop || pendingRestore
+        if pendingTop {
+            pendingTop = false
+            setTop(0, in: scrollView)
+        }
         if pendingRestore {
-            pendingRestore = false
-            if let anchor = model.listScrollAnchor,
-               let viewport = viewport(), let top = anchor.restoredTop(viewport: viewport, rows: rows) {
-                setTop(top, in: scrollView)
+            if let anchor = model.listScrollAnchor, let viewport = viewport() {
+                if let top = anchor.restoredTop(viewport: viewport, rows: rows) {
+                    pendingRestore = false
+                    setTop(top, in: scrollView)
+                } else if !model.list.visibleRows.contains(where: { $0.id == anchor.key }) {
+                    // The row left the list: the scroll stays where it is.
+                    pendingRestore = false
+                }
+                // Otherwise the row is in the list but not laid out yet (the
+                // list just switched back from the Archive view): the next
+                // row-frame update retries.
+            } else {
+                pendingRestore = false
             }
+        }
+        if switchScroll, !pendingTop, !pendingRestore, model.visibleSurface == surface {
+            model.listScrollRestoreDone()
         }
         if pendingReveal {
             guard let key = model.list.selection?.key else {
@@ -903,7 +962,8 @@ final class ListScroller: ObservableObject {
     /// Keep the shared scroll position (§4.5) — only the surface on screen
     /// writes it.
     private func recordAnchor() {
-        guard !pendingRestore, let model, let surface, model.visibleSurface == surface,
+        guard !pendingRestore, let model, !model.isListScrollRestorePending, let surface,
+              model.visibleSurface == surface,
               let viewport = viewport() else { return }
         if let anchor = ListScrollAnchor.capture(viewport: viewport, rows: rows) {
             model.listScrollAnchor = anchor
@@ -936,75 +996,172 @@ private struct ListScrollProbe: NSViewRepresentable {
 }
 
 /// A heading (§4.5 "the list has three sections" / "collapsing sections" /
-/// "row drag"; window-design.html `.rows .sec`): the Running mark, the bold
-/// name, the count, the drag's hint, and the chevron at the right end. A
-/// band (Running and History) has a gray ground; the headings under History
-/// and every heading while searching are text only, with the same padding,
-/// so the name and the chevron sit where the band's do. Its edges are the
-/// frames' edges, and a click anywhere in that width opens or closes it
-/// (Core decides). It has no hover look.
+/// "row drag", §8.63; window-design.html `.rows .sec`, `.sec.sub`): the
+/// Running mark, the bold name, the count, the drag's hint, and the chevron
+/// at the right end. Running and History are bands across the list's whole
+/// width (`SectionBandView`); Starred and Recent are text and a line,
+/// between the frames' edges. In both the name starts where the rows' text
+/// does and the chevron ends where the rows' symbol-and-time column does. A
+/// click anywhere on the band, or anywhere in the text-and-line heading's
+/// width, opens or closes it (Core decides). It has no hover look.
 struct SectionHeaderView: View {
     let heading: ListHeadingModel
+    /// The band draws its top line (`ListBlockSpacing.drawsBandTopLine`).
+    let drawsTopLine: Bool
     let model: MainSurfaceModel
     @Environment(\.surfaceScale) private var scale
 
-    private var ground: Color {
-        if heading.isDropTarget { return SurfaceColors.selectionTint }
-        return heading.style == .band ? SurfaceColors.sectionBand : .clear
+    var body: some View {
+        switch heading.style {
+        case .band:
+            SectionBandView(drawsTopLine: drawsTopLine) {
+                HStack(alignment: .center, spacing: SurfaceMetrics.sectionBandSpacing) {
+                    if heading.showsAttentionMark {
+                        Circle()
+                            .fill(SurfaceColors.runningMark)
+                            .frame(width: scale.runningMark, height: scale.runningMark)
+                    }
+                    name
+                    count
+                    Spacer(minLength: 0)
+                    chevron
+                }
+            }
+            .onTapGesture { model.headingClicked(heading.heading) }
+            .background(ListElementFrameReporter(kind: .heading(heading.heading)))
+        case .sub:
+            subHeading
+        }
     }
 
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: SurfaceMetrics.sectionBandRadius)
-        HStack(alignment: .center, spacing: SurfaceMetrics.sectionBandSpacing) {
-            if heading.showsAttentionMark {
-                Circle()
-                    .fill(SurfaceColors.runningMark)
-                    .frame(width: scale.runningMark, height: scale.runningMark)
-            }
-            Text(heading.title)
-                .font(.system(size: scale.sectionTitleFont, weight: .bold))
-                .foregroundStyle(heading.isOpen ? AnyShapeStyle(.primary) : AnyShapeStyle(SurfaceColors.secondary))
-            if let count = heading.countText {
-                Text(count)
-                    .font(.system(size: scale.sectionCountFont))
+    private var name: some View {
+        Text(heading.title)
+            .font(.system(size: scale.sectionTitleFont, weight: .bold))
+            .foregroundStyle(heading.isOpen ? AnyShapeStyle(.primary) : AnyShapeStyle(SurfaceColors.secondary))
+    }
+
+    @ViewBuilder
+    private var count: some View {
+        if let count = heading.countText {
+            Text(count)
+                .font(.system(size: scale.sectionCountFont))
+                .foregroundStyle(SurfaceColors.secondary)
+        }
+    }
+
+    /// While searching the chevron is not shown; its box keeps its place.
+    private var chevron: some View {
+        Group {
+            if heading.isCollapsible {
+                SurfaceIconView(
+                    icon: heading.isOpen ? .chevronDown : .chevronRight,
+                    size: scale.sectionChevronIcon,
+                    lineWidth: scale.sectionChevronLine)
                     .foregroundStyle(SurfaceColors.secondary)
+            } else {
+                Color.clear
             }
-            Spacer(minLength: 0)
+        }
+        .frame(width: scale.sectionChevronBox, height: scale.sectionChevronBox)
+    }
+
+    /// Starred and Recent (`.sec.sub`): the name, the count, a 1pt line in
+    /// the separator color across the width left (up to the drag's hint
+    /// while it shows), and the chevron. As the row drag's drop target it
+    /// gets the selection's pale accent ground and a 2pt accent border in
+    /// a rounded shape, the line still drawn (`.sec.over`).
+    private var subHeading: some View {
+        let shape = RoundedRectangle(cornerRadius: SurfaceMetrics.subHeadingRadius)
+        return HStack(alignment: .center, spacing: SurfaceMetrics.sectionBandSpacing) {
+            name
+            count
+            Rectangle()
+                .fill(SurfaceColors.line)
+                .frame(height: SurfaceMetrics.sectionBandLine)
+                .frame(minWidth: SurfaceMetrics.sectionBandSpacing, maxWidth: .infinity)
             if let hint = heading.hint {
                 Text(hint)
                     .font(.system(size: scale.sectionCountFont, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
                     .fixedSize()
             }
-            // While searching the chevron is not shown; its box keeps the
-            // heading's height.
-            Group {
-                if heading.isCollapsible {
-                    SurfaceIconView(
-                        icon: heading.isOpen ? .chevronDown : .chevronRight,
-                        size: scale.sectionChevronIcon,
-                        lineWidth: scale.sectionChevronLine)
-                        .foregroundStyle(SurfaceColors.secondary)
-                } else {
-                    Color.clear
-                }
-            }
-            .frame(width: scale.sectionChevronBox, height: scale.sectionChevronBox)
+            chevron
         }
         .lineLimit(1)
-        .padding(.leading, SurfaceMetrics.sectionBandLeading)
-        .padding(.trailing, SurfaceMetrics.sectionBandTrailing)
-        .padding(.vertical, scale.sectionBandVertical)
-        .background(shape.fill(ground))
+        .padding(.leading, SurfaceMetrics.subHeadingLeading)
+        .padding(.trailing, SurfaceMetrics.subHeadingTrailing)
+        .padding(.vertical, scale.subHeadingVertical)
+        .background(shape.fill(heading.isDropTarget ? SurfaceColors.selectionTint : .clear))
         .overlay {
-            // window-design.html `.sec.over`: the drop target's emphasis.
             if heading.isDropTarget {
                 shape.strokeBorder(Color.accentColor, lineWidth: SurfaceMetrics.dropHeaderBorder)
             }
         }
-        .contentShape(shape)
+        .contentShape(Rectangle())
         .onTapGesture { model.headingClicked(heading.heading) }
         .background(ListElementFrameReporter(kind: .heading(heading.heading)))
+    }
+}
+
+/// A band (§4.5 "the list has three sections", §9; window-design.html
+/// `.rows .sec`): the list's whole width, square corners, 30pt tall at 13
+/// with a 1pt line in the separator color along its top and bottom edges
+/// (the top one left out when `drawsTopLine` is false), the band's gray
+/// over the list's ground, the content between the 22pt and 19pt insets.
+/// The whole band takes the click.
+struct SectionBandView<Content: View>: View {
+    let drawsTopLine: Bool
+    @ViewBuilder let content: Content
+    @Environment(\.surfaceScale) private var scale
+
+    var body: some View {
+        content
+            .lineLimit(1)
+            .padding(.leading, SurfaceMetrics.sectionBandLeading)
+            .padding(.trailing, SurfaceMetrics.sectionBandTrailing)
+            .frame(maxWidth: .infinity)
+            .frame(height: scale.sectionBandContentHeight)
+            .padding(.vertical, SurfaceMetrics.sectionBandLine)
+            .background(SurfaceColors.sectionBand)
+            .overlay(alignment: .top) {
+                if drawsTopLine {
+                    Rectangle().fill(SurfaceColors.line).frame(height: SurfaceMetrics.sectionBandLine)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(SurfaceColors.line).frame(height: SurfaceMetrics.sectionBandLine)
+            }
+            .contentShape(Rectangle())
+    }
+}
+
+/// The Archive view's band (§4.6 "Archive view"; window-design.html
+/// `.sec.arch`): a left-pointing chevron in the chevron's box, `Archived`
+/// and the count; no chevron at the right end. A click anywhere on it
+/// returns to the normal list without moving the keyboard focus.
+struct ArchiveHeaderView: View {
+    let heading: ArchiveHeadingModel
+    let drawsTopLine: Bool
+    let model: MainSurfaceModel
+    @Environment(\.surfaceScale) private var scale
+
+    var body: some View {
+        SectionBandView(drawsTopLine: drawsTopLine) {
+            HStack(alignment: .center, spacing: SurfaceMetrics.sectionBandSpacing) {
+                SurfaceIconView(icon: .back, size: scale.sectionChevronIcon, lineWidth: scale.sectionChevronLine)
+                    .foregroundStyle(SurfaceColors.secondary)
+                    .frame(width: scale.sectionChevronBox, height: scale.sectionChevronBox)
+                Text(ArchiveHeadingModel.title)
+                    .font(.system(size: scale.sectionTitleFont, weight: .bold))
+                if let count = heading.countText {
+                    Text(count)
+                        .font(.system(size: scale.sectionCountFont))
+                        .foregroundStyle(SurfaceColors.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .onTapGesture { model.archiveHeadingClicked() }
     }
 }
 
@@ -1329,17 +1486,24 @@ struct RowView: View {
             .frame(height: scale.rowPromptHeight)
     }
 
-    /// The symbol-and-time column (§4.5 "the list has three sections", §9):
-    /// the symbol at the top, level with the label line, and the elapsed time
-    /// at the bottom, level with the last prompt, both centered in the column.
-    /// The elapsed time takes the label's size and color (§4.5) and is never
-    /// truncated: when it is wider than the column, the column
+    /// The symbol-and-time column (§4.5 "the list has three sections", §9,
+    /// §8.63): the symbol boxes at the top, level with the label line, and
+    /// the elapsed time at the bottom, level with the last prompt, both
+    /// against the column's right edge — so the more button, a Running
+    /// row's status symbol and the elapsed time end at the same place on
+    /// every row. The elapsed time takes the label's size and color (§4.5)
+    /// and is never truncated: when it is wider than the column, the column
     /// widens to fit it and the three lines end earlier.
     private var symbolTimeColumn: some View {
-        VStack(spacing: 0) {
-            columnSymbol
-                .frame(width: scale.rowSymbol, height: scale.rowSymbol)
-                .padding(.top, scale.rowSymbolTop)
+        let boxes = row.symbol.boxes
+        return VStack(alignment: .trailing, spacing: 0) {
+            HStack(spacing: SurfaceMetrics.rowSymbolBoxSpacing) {
+                ForEach(Array(boxes.enumerated()), id: \.offset) { _, box in
+                    columnBox(box)
+                        .frame(width: scale.rowSymbol, height: scale.rowSymbol)
+                }
+            }
+            .padding(.top, scale.rowSymbolTop)
             Spacer(minLength: 0)
             Text(row.elapsedText)
                 .font(.system(size: scale.rowLabelFont))
@@ -1348,31 +1512,74 @@ struct RowView: View {
                 .fixedSize()
                 .frame(height: scale.rowPromptHeight)
         }
-        .frame(minWidth: scale.rowSymbolColumn, maxHeight: .infinity)
+        .frame(minWidth: scale.rowSymbolColumnWidth(boxCount: boxes.count), maxHeight: .infinity,
+               alignment: .trailing)
     }
 
     @ViewBuilder
-    private var columnSymbol: some View {
-        switch row.symbol {
-        case .status(let kind, let unreviewed):
-            RowSymbolView(kind: kind, unreviewed: unreviewed, spinning: spinning && kind == .working,
-                          size: scale.rowSymbol)
-        case .star(let isStarred):
-            // §4.6: a click on the star toggles it and never selects the row
-            // (nor counts toward a double-click). The star is drawn centered
-            // in the symbol box, and the whole box reacts to the click (the
-            // status symbol's size, §4.6 "stars").
-            Button { model.starClicked(sessionID: row.sessionID) } label: {
-                StarView(isStarred: isStarred)
-                    .opacity(isStarred || isHovered ? 1 : 0)
-                    .frame(width: scale.rowSymbol, height: scale.rowSymbol)
-                    .contentShape(Rectangle())
+    private func columnBox(_ box: RowColumnBox) -> some View {
+        switch box {
+        case .status:
+            if case .status(let kind, let unreviewed) = row.symbol {
+                RowSymbolView(kind: kind, unreviewed: unreviewed, spinning: spinning && kind == .working,
+                              size: scale.rowSymbol)
             }
-            .buttonStyle(.plain)
-            .help(row.symbol.tooltip ?? "")
-            // A press on the star never starts a row drag (§4.6 "stars").
-            .background(reportsStarFrame ? ListElementFrameReporter(kind: .star(row.id)) : nil)
+        case .star:
+            if case .star(let isStarred) = row.symbol {
+                // §4.6: a click on the star toggles it and never selects the
+                // row (nor counts toward a double-click). The star is drawn
+                // centered in the symbol box, and the whole box reacts to
+                // the click (§4.6 "stars").
+                Button { model.starClicked(sessionID: row.sessionID) } label: {
+                    StarView(isStarred: isStarred)
+                        .opacity(isStarred || isHovered ? 1 : 0)
+                        .frame(width: scale.rowSymbol, height: scale.rowSymbol)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(row.symbol.tooltip ?? "")
+                // A press on the star never starts a row drag (§4.6 "stars").
+                .background(reportsStarFrame ? ListElementFrameReporter(kind: .star(row.id)) : nil)
+            }
+        case .moreButton:
+            MoreButtonView(row: row, model: model, isMenuOpen: model.openRowMenuKey == row.id,
+                           reportsFrame: reportsStarFrame)
         }
+    }
+}
+
+/// A row's more button (§4.6 "Archive"; window-design.html `i-more`,
+/// `.sym.open`): three dots in the secondary color, always shown, centered
+/// in the symbol box, which takes the click. The click opens the row's menu
+/// at the button (Core decides) and never selects the row, never counts
+/// toward a double-click and never starts a row drag. While the menu is
+/// open the box has a pale gray rounded ground.
+struct MoreButtonView: View {
+    let row: UnifiedListRow
+    let model: MainSurfaceModel
+    let isMenuOpen: Bool
+    /// The list's rows report the box for the drag's press test; the
+    /// floating image does not.
+    let reportsFrame: Bool
+    @State private var anchor: NSView?
+    @Environment(\.surfaceScale) private var scale
+
+    var body: some View {
+        Button { model.moreButtonClicked(row.id, anchor: anchor) } label: {
+            IconShape(icon: .more)
+                .fill(SurfaceColors.secondary)
+                .frame(width: scale.moreButtonIcon, height: scale.moreButtonIcon)
+                .frame(width: scale.rowSymbol, height: scale.rowSymbol)
+                .background(
+                    RoundedRectangle(cornerRadius: SurfaceMetrics.moreButtonOpenRadius)
+                        .fill(isMenuOpen ? SurfaceColors.moreButtonOpenGround : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(RowMoreButton.tooltip)
+        .accessibilityLabel(RowMoreButton.accessibilityLabel)
+        .background(MenuAnchorView { anchor = $0 })
+        .background(reportsFrame ? ListElementFrameReporter(kind: .moreButton(row.id)) : nil)
     }
 }
 

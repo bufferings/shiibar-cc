@@ -88,6 +88,9 @@ public enum ListElementKind: Hashable, Sendable {
     case row(UnifiedRowKey)
     case moreLine
     case star(UnifiedRowKey)
+    /// A row's more button (§4.6 "Archive"): like the star, a press on it
+    /// never starts a drag.
+    case moreButton(UnifiedRowKey)
 }
 
 public struct ListElementExtent: Equatable, Sendable {
@@ -124,13 +127,15 @@ public enum ListPointerHit: Equatable, Sendable {
 
 public enum ListPointerHitTest {
     /// The element at `y` (list-content coordinates). `insideList` = the
-    /// pointer is inside the list's visible area. Star boxes are ignored
-    /// (the row under them counts).
+    /// pointer is inside the list's visible area. Star and more-button
+    /// boxes are ignored (the row under them counts).
     public static func hit(y: Double, insideList: Bool, elements: [ListElementExtent]) -> ListPointerHit {
         guard insideList else { return .outside }
         let rows = elements.filter {
-            if case .star = $0.kind { return false }
-            return true
+            switch $0.kind {
+            case .star, .moreButton: return false
+            case .heading, .row, .moreLine: return true
+            }
         }.sorted { $0.top < $1.top }
         if let element = rows.first(where: { y >= $0.top && y < $0.bottom }) {
             return .element(element.kind, upperHalf: y < (element.top + element.bottom) / 2)
@@ -141,11 +146,14 @@ public enum ListPointerHitTest {
     }
 
     /// The row a press at (x, y) lands on, and whether it lands on the row's
-    /// star box; nil off every row.
+    /// star box or its more button (`onStar`: neither starts a drag); nil
+    /// off every row.
     public static func pressedRow(x: Double, y: Double, elements: [ListElementExtent]) -> (key: UnifiedRowKey, onStar: Bool)? {
         for element in elements {
             guard case .row(let key) = element.kind, element.contains(x: x, y: y) else { continue }
-            let onStar = elements.contains { $0.kind == .star(key) && $0.contains(x: x, y: y) }
+            let onStar = elements.contains {
+                ($0.kind == .star(key) || $0.kind == .moreButton(key)) && $0.contains(x: x, y: y)
+            }
             return (key, onStar)
         }
         return nil
@@ -307,12 +315,12 @@ public struct CardDropResolver: Equatable, Sendable {
         case .heading(.history): return .historyHeading
         case .heading(.starred): return .starred
         case .heading(.recent): return .recent
-        case .row(let key), .star(let key):
+        case .row(let key), .star(let key), .moreButton(let key):
             switch rowSections[key] {
             case .running: return .running
             case .starred: return .starred
             case .recent: return .recent
-            case nil: return nil
+            case .archived, nil: return nil
             }
         case .moreLine: return .recent
         }
