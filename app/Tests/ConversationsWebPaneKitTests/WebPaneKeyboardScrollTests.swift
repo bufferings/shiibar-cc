@@ -83,6 +83,24 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         return current
     }
 
+    /// Taps the key until `#doc.scrollTop` differs from `start`, or the
+    /// attempts run out. The web content process can drop a synthesized key
+    /// that arrives while it is still settling after the render, so one tap
+    /// is not guaranteed to scroll on a slow machine.
+    @MainActor
+    private func tapUntilScrollChanges(
+        _ keyCode: UInt16, _ characters: String, from start: Double,
+        in controller: WebPaneController, window: NSWindow
+    ) -> Double {
+        var current = start
+        for _ in 0..<5 {
+            press(keyCode, characters, in: controller, window: window)
+            current = waitForScrollChange(from: start, in: controller)
+            if current != start { break }
+        }
+        return current
+    }
+
     @MainActor
     func testUpArrowWithNothingFocusedScrollsTheConversation() {
         let (controller, window) = hostedController()
@@ -91,8 +109,7 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         XCTAssertGreaterThan(start, 0, "the page opens at the bottom (latest)")
         XCTAssertEqual(evaluate("document.activeElement === document.body", in: controller) as? Bool, true)
 
-        press(126, "\u{F700}", in: controller, window: window)
-        XCTAssertLessThan(waitForScrollChange(from: start, in: controller), start)
+        XCTAssertLessThan(tapUntilScrollChanges(126, "\u{F700}", from: start, in: controller, window: window), start)
     }
 
     @MainActor
@@ -100,8 +117,7 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         let (controller, window) = hostedController()
         defer { window.close() }
         _ = evaluate("document.getElementById('doc').scrollTop = 0; 0", in: controller)
-        press(125, "\u{F701}", in: controller, window: window)
-        XCTAssertGreaterThan(waitForScrollChange(from: 0, in: controller), 0)
+        XCTAssertGreaterThan(tapUntilScrollChanges(125, "\u{F701}", from: 0, in: controller, window: window), 0)
     }
 
     /// Focusing the scroller on a key must not touch the page's selection
