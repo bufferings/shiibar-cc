@@ -44,25 +44,42 @@ const APPLE_TERMINAL_PREFIX: &str = "apple-terminal:";
 /// `tell application "Terminal"` block lives inside that guard: the
 /// is-running query does NOT launch Terminal.app (§7-7), but a bare `tell`
 /// would — so this is what keeps `focus` from launching it when it isn't
-/// running (same pattern as the iterm2 module). Reading `tty of t` is wrapped
-/// in a `try` so one odd tab can't abort the scan. Prints `FOUND` or
-/// `NOTFOUND` as the last line of stdout.
+/// running (same pattern as the iterm2 module).
+///
+/// Reading `tabs of w` is wrapped in a `try`, and a window whose tabs can't
+/// be read is skipped: after its terminal windows are closed, Terminal.app
+/// can still hold a window object that has no readable `id` and no readable
+/// tabs, and reading its tabs raises — outside a guard that would abort the
+/// whole scan, so a jump to a tab in another, real window would fail.
+/// Reading `tty of t` is wrapped in its own `try` so one odd tab can't abort
+/// the scan either. The `activate` and the `selected` / `frontmost` sets stay
+/// outside every `try`, and the window list itself is read outside any `try`,
+/// so a real error (e.g. a TCC denial, reported on the first Apple event)
+/// still surfaces. Prints `FOUND` or `NOTFOUND` as the last line of stdout.
 pub fn build_focus_script(tty: &str) -> String {
     let tty = escape_as_string_literal(tty);
     format!(
         r#"if application id "com.apple.Terminal" is running then
     tell application "Terminal"
         repeat with w in windows
-            repeat with t in tabs of w
-                try
-                    if (tty of t) is "{tty}" then
+            set theTabs to missing value
+            try
+                set theTabs to tabs of w
+            end try
+            if theTabs is not missing value then
+                repeat with t in theTabs
+                    set theTty to ""
+                    try
+                        set theTty to tty of t
+                    end try
+                    if theTty is "{tty}" then
                         activate
                         set selected of t to true
                         set frontmost of w to true
                         return "FOUND"
                     end if
-                end try
-            end repeat
+                end repeat
+            end if
         end repeat
     end tell
 end if
@@ -74,6 +91,16 @@ return "NOTFOUND"
 /// AppleScript that reports the frontmost Terminal.app tab's tty, if
 /// Terminal.app is the frontmost application (DESIGN.md §4.3). The frontmost
 /// application process is named `Terminal`. Prints `FOCUSED:<tty>` or `NONE`.
+///
+/// Terminal.app can be frontmost with no terminal window at all: with no
+/// window, or with only a window object that has no readable `id` and no
+/// readable tabs (Terminal.app can hold one after its terminal windows are
+/// closed). Reading the selected tab of the front window raises in both
+/// cases, so the read sits in a `try`; on error, a front window without a
+/// readable `id` means there is no terminal window, which prints `NONE`,
+/// while an error on a front window whose `id` reads is re-raised. `count of
+/// windows` runs first, outside any `try`, so a TCC denial (reported on the
+/// first Apple event) still surfaces instead of turning into `NONE`.
 pub fn build_focused_script() -> String {
     r#"if application id "com.apple.Terminal" is running then
     tell application "System Events"
@@ -81,7 +108,18 @@ pub fn build_focused_script() -> String {
     end tell
     if frontAppName is "Terminal" then
         tell application "Terminal"
-            return "FOCUSED:" & (tty of selected tab of front window)
+            count of windows
+            try
+                set theTty to tty of selected tab of front window
+            on error errMsg number errNum
+                try
+                    get id of front window
+                on error
+                    return "NONE"
+                end try
+                error errMsg number errNum
+            end try
+            return "FOCUSED:" & theTty
         end tell
     else
         return "NONE"
@@ -96,7 +134,10 @@ end if
 /// Harmless AppleScript used by `shiibar-cc doctor` to check osascript's TCC
 /// Automation permission for Terminal.app, without side effects (no
 /// `activate`, and no `tell` unless it's already running — so it never
-/// launches it). Prints a window count, or `NOT_RUNNING`.
+/// launches it). Prints a window count, or `NOT_RUNNING`. `count of windows`
+/// also succeeds when Terminal.app holds a window object without an `id` and
+/// without tabs (left after its terminal windows are closed), so that state
+/// still reports "running and permitted".
 pub fn build_probe_script() -> String {
     r#"if application id "com.apple.Terminal" is running then
     tell application "Terminal" to return (count of windows) as string
@@ -135,26 +176,47 @@ return "OK"
 }
 
 /// AppleScript that enumerates every Terminal.app tab's `tty` (DESIGN.md
-/// §3.5/§4.3). Same guarded, `try`-per-tab pattern as `build_focus_script`;
-/// a `try` failure increments a counter instead of aborting the scan, so one
-/// bad tab doesn't erase everything that enumerated cleanly. Output is one
-/// `TAB<TAB>tty` line per tab found, followed by a final `DONE<TAB><failure
-/// count>` line; `failures > 0` marks the scan incomplete (§3.5: skip
-/// pruning that round).
+/// §3.5/§4.3). Same guarded pattern as `build_focus_script`; a `try` failure
+/// increments a counter instead of aborting the scan, so one bad tab doesn't
+/// erase everything that enumerated cleanly. Output is one `TAB<TAB>tty` line
+/// per tab found, followed by a final `DONE<TAB><failure count>` line;
+/// `failures > 0` marks the scan incomplete (§3.5: skip pruning that round).
+///
+/// Reading `tabs of w` is wrapped in its own `try`, outside the per-tab one:
+/// after its terminal windows are closed, Terminal.app can still hold a
+/// window object that has no readable `id` and no readable tabs, and reading
+/// its tabs raises — unguarded, that fails the whole script, so every round
+/// would be incomplete and ended sessions would never be pruned. A window
+/// whose tabs can't be read is classified by its `id`: without a readable
+/// `id` it is not a terminal window and is skipped (no failure); with a
+/// readable `id` it counts as one failure, like a tab whose tty can't be read.
 pub fn build_apple_terminal_targets_script() -> String {
     r#"if application id "com.apple.Terminal" is running then
     tell application "Terminal"
         set failures to 0
         set outputLines to {}
         repeat with w in windows
-            repeat with t in tabs of w
+            set theTabs to missing value
+            try
+                set theTabs to tabs of w
+            on error
                 try
-                    set theTty to tty of t
-                    set end of outputLines to ("TAB" & (ASCII character 9) & theTty)
-                on error
+                    get id of w
                     set failures to failures + 1
+                on error
+                    -- not a terminal window: skip
                 end try
-            end repeat
+            end try
+            if theTabs is not missing value then
+                repeat with t in theTabs
+                    try
+                        set theTty to tty of t
+                        set end of outputLines to ("TAB" & (ASCII character 9) & theTty)
+                    on error
+                        set failures to failures + 1
+                    end try
+                end repeat
+            end if
         end repeat
         set AppleScript's text item delimiters to linefeed
         set outputText to outputLines as text
@@ -411,9 +473,12 @@ mod tests {
             .unwrap();
         let tell_app = script.find(r#"tell application "Terminal""#).unwrap();
         assert!(running_check < tell_app, "must check `is running` before telling the app");
-        // All windows × all tabs (§7-7): a window loop containing a tab loop.
-        assert!(script.contains("repeat with w in windows"));
-        assert!(script.contains("repeat with t in tabs of w"));
+        // All windows × all tabs (§7-7): a window loop containing a tab loop
+        // over the tabs read from that window.
+        let window_loop = script.find("repeat with w in windows").unwrap();
+        let read_tabs = script.find("set theTabs to tabs of w").unwrap();
+        let tab_loop = script.find("repeat with t in theTabs").unwrap();
+        assert!(window_loop < read_tabs && read_tabs < tab_loop);
         assert!(script.contains("tty of t"));
         assert!(script.contains("/dev/ttys006"));
         assert!(script.contains("FOUND"));
@@ -425,7 +490,7 @@ mod tests {
         // Activate-first (DESIGN.md §7-1/§4.3); selected/frontmost keep their
         // relative order, only activate moves to the front of the branch.
         let script = build_focus_script("/dev/ttys006");
-        let if_match = script.find("if (tty of t) is").unwrap();
+        let if_match = script.find("if theTty is").unwrap();
         let activate = script.find("activate").unwrap();
         let set_selected = script.find("set selected of t to true").unwrap();
         let set_frontmost = script.find("set frontmost of w to true").unwrap();
@@ -440,14 +505,14 @@ mod tests {
     fn focus_script_activate_appears_only_inside_the_match_branch() {
         // The scan, the no-match (NOTFOUND) path, and the not-running guard
         // must move nothing: activate exists exactly once, inside the
-        // `if (tty of t) is` branch (DESIGN.md §7-1/§4.3).
+        // `if theTty is` branch (DESIGN.md §7-1/§4.3).
         let script = build_focus_script("/dev/ttys006");
         assert_eq!(
             script.matches("activate").count(),
             1,
             "activate must appear exactly once"
         );
-        let if_match = script.find("if (tty of t) is").unwrap();
+        let if_match = script.find("if theTty is").unwrap();
         // The first `end if` in the text closes the match branch (it nests
         // inside the outer is-running guard), so activate before it proves
         // activate is confined to the match branch.
@@ -459,6 +524,64 @@ mod tests {
         );
         let notfound = script.find("\"NOTFOUND\"").unwrap();
         assert!(activate < notfound);
+    }
+
+    /// Lines of `script` with leading whitespace removed, for checking which
+    /// statements a `try` block encloses.
+    fn trimmed_lines(script: &str) -> Vec<&str> {
+        script.lines().map(str::trim).collect()
+    }
+
+    /// Whether `statement` appears as the first statement of a `try` block
+    /// (the line directly after a bare `try` line).
+    fn is_first_statement_of_a_try(script: &str, statement: &str) -> bool {
+        let lines = trimmed_lines(script);
+        lines
+            .windows(2)
+            .any(|pair| pair[0] == "try" && pair[1] == statement)
+    }
+
+    #[test]
+    fn focus_script_reads_tabs_of_each_window_inside_a_try_and_skips_on_error() {
+        // Terminal.app can hold a window object without an id and without
+        // tabs; reading its tabs raises, so the read must be guarded and the
+        // window skipped, letting the scan reach tabs in other windows.
+        let script = build_focus_script("/dev/ttys006");
+        assert!(is_first_statement_of_a_try(&script, "set theTabs to tabs of w"));
+        assert!(
+            !script.contains("repeat with t in tabs of w"),
+            "the tab loop must not read `tabs of w` outside the guard"
+        );
+        assert!(script.contains("set theTabs to missing value"));
+        assert!(script.contains("if theTabs is not missing value then"));
+        // The tty read keeps its own per-tab guard.
+        assert!(is_first_statement_of_a_try(&script, "set theTty to tty of t"));
+    }
+
+    #[test]
+    fn focus_script_keeps_activate_and_selection_outside_every_try() {
+        // A real error from activate or the selects (e.g. TCC denial) must
+        // surface instead of being swallowed into NOTFOUND (DESIGN.md §4.3).
+        let script = build_focus_script("/dev/ttys006");
+        let mut depth = 0usize;
+        for line in trimmed_lines(&script) {
+            if line == "try" {
+                depth += 1;
+            } else if line == "end try" {
+                depth -= 1;
+            } else if line == "activate"
+                || line == "set selected of t to true"
+                || line == "set frontmost of w to true"
+            {
+                assert_eq!(depth, 0, "`{line}` must not sit inside a try");
+            }
+        }
+        assert_eq!(depth, 0);
+        // The window list is read outside any try, so the first Apple event
+        // (where a TCC denial is reported) is never swallowed.
+        let first_try = script.find("try").unwrap();
+        let window_loop = script.find("repeat with w in windows").unwrap();
+        assert!(window_loop < first_try);
     }
 
     #[test]
@@ -478,6 +601,33 @@ mod tests {
     }
 
     #[test]
+    fn focused_script_reports_none_for_a_front_window_without_an_id() {
+        // Terminal.app can be frontmost with no terminal window (no window,
+        // or only a window object without an id and without tabs): reading
+        // the selected tab raises, which must print NONE rather than fail.
+        let script = build_focused_script();
+        assert!(is_first_statement_of_a_try(
+            &script,
+            "set theTty to tty of selected tab of front window"
+        ));
+        let read = script.find("set theTty to tty of selected tab").unwrap();
+        let on_error = script[read..].find("on error errMsg number errNum").unwrap() + read;
+        let id_check = script[on_error..].find("get id of front window").unwrap() + on_error;
+        let none = script[id_check..].find("return \"NONE\"").unwrap() + id_check;
+        let reraise = script[none..].find("error errMsg number errNum").unwrap() + none;
+        assert!(read < on_error && on_error < id_check && id_check < none && none < reraise);
+        // `count of windows` precedes the guarded read, outside any try, so a
+        // TCC denial on the first Terminal Apple event still surfaces.
+        let lines = trimmed_lines(&script);
+        let count = lines.iter().position(|l| *l == "count of windows").unwrap();
+        assert_eq!(lines[count + 1], "try");
+        let tell_terminal = script.find(r#"tell application "Terminal""#).unwrap();
+        let count_pos = script.find("count of windows").unwrap();
+        let first_try = script.find("try").unwrap();
+        assert!(tell_terminal < count_pos && count_pos < first_try);
+    }
+
+    #[test]
     fn probe_script_never_activates_and_guards_on_running() {
         let script = build_probe_script();
         assert!(!script.contains("activate"));
@@ -492,6 +642,64 @@ mod tests {
         assert!(script.contains(r#"application id "com.apple.Terminal" is running"#));
         assert!(script.contains("TAB"));
         assert!(script.contains("DONE"));
+    }
+
+    #[test]
+    fn targets_script_reads_tabs_of_each_window_inside_a_try() {
+        // Terminal.app can hold a window object without an id and without
+        // tabs; an unguarded tab read there fails the whole scan (§3.5).
+        let script = build_apple_terminal_targets_script();
+        let window_loop = script.find("repeat with w in windows").unwrap();
+        assert!(is_first_statement_of_a_try(&script, "set theTabs to tabs of w"));
+        let read_tabs = script.find("set theTabs to tabs of w").unwrap();
+        let tab_loop = script.find("repeat with t in theTabs").unwrap();
+        assert!(window_loop < read_tabs && read_tabs < tab_loop);
+        assert!(!script.contains("repeat with t in tabs of w"));
+        assert!(script.contains("if theTabs is not missing value then"));
+    }
+
+    #[test]
+    fn targets_script_counts_an_unreadable_window_as_a_failure_only_when_its_id_reads() {
+        // A window whose tabs can't be read: with a readable id it is one
+        // failure (incomplete scan); without one it is not a terminal window
+        // and is skipped without a failure.
+        let script = build_apple_terminal_targets_script();
+        let lines = trimmed_lines(&script);
+        let read_tabs = lines.iter().position(|l| *l == "set theTabs to tabs of w").unwrap();
+        assert_eq!(
+            &lines[read_tabs + 1..read_tabs + 9],
+            &[
+                "on error",
+                "try",
+                "get id of w",
+                "set failures to failures + 1",
+                "on error",
+                "-- not a terminal window: skip",
+                "end try",
+                "end try",
+            ]
+        );
+        // Exactly two places count a failure: the window with a readable id
+        // and the per-tab guard.
+        assert_eq!(script.matches("set failures to failures + 1").count(), 2);
+    }
+
+    #[test]
+    fn targets_script_keeps_the_per_tab_try() {
+        let script = build_apple_terminal_targets_script();
+        let lines = trimmed_lines(&script);
+        let tab_loop = lines.iter().position(|l| *l == "repeat with t in theTabs").unwrap();
+        assert_eq!(
+            &lines[tab_loop + 1..tab_loop + 7],
+            &[
+                "try",
+                "set theTty to tty of t",
+                r#"set end of outputLines to ("TAB" & (ASCII character 9) & theTty)"#,
+                "on error",
+                "set failures to failures + 1",
+                "end try",
+            ]
+        );
     }
 
     // ---- build_resume_script ----

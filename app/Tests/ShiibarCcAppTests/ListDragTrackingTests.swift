@@ -64,7 +64,8 @@ final class ListDragTrackingTests: XCTestCase {
                     return ConversationsProcess(process: Process())
                 }),
             runCommand: { _, _ in },
-            schedule: { _, _ in })
+            schedule: { _, _ in },
+            markReadSchedule: { _, _ in })
         model.surfaceDidShow(.window)
         try XCTUnwrap(indexCompletions.last)(0)
         let json = ["a", "b"].map {

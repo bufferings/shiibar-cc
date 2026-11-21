@@ -1,3 +1,4 @@
+import AppKit
 import ShiibarCcCore
 import Combine
 import XCTest
@@ -90,7 +91,8 @@ final class MainSurfaceModelTests: XCTestCase {
                 spy.commands.append((arguments: arguments, completion: completion))
             },
             resumeTerminal: { "apple-terminal" },
-            schedule: { seconds, action in spy.scheduled.append((seconds: seconds, action: action)) }
+            schedule: { seconds, action in spy.scheduled.append((seconds: seconds, action: action)) },
+            markReadSchedule: { _, _ in }
         )
         model.onClosePopover = { spy.closePopoverCount += 1 }
         model.onPermissionDenied = { spy.permissionDeniedCount += 1 }
@@ -207,6 +209,37 @@ final class MainSurfaceModelTests: XCTestCase {
         waitForSearches(3)
         spy.searches[2].completion(ok(resultJSON(["a"])))
         XCTAssertNil(model.messageError)
+    }
+
+    /// A notification click clears the search: a filtered result of a
+    /// search started before the click is dropped, so the clicked row
+    /// stays in Running and selected until the browse result of the search
+    /// started after the click arrives.
+    func testFilteredResultInFlightAtANotificationClickIsDropped() {
+        let model = makeModel()
+        model.agentsUpdated([agent("process:4242", session: "sp")])
+        openPopover(model, delivering: ["h1"])
+        let clicked = UnifiedRowKey.running(target: "process:4242")
+        model.query = "needle"
+        waitForSearches(2)
+        spy.searches[1].completion(ok(resultJSON(["h1"])))
+        XCTAssertFalse(model.list.runningRows.contains { $0.id == clicked }, "the filtered result hides the row")
+        model.query = "needle more"
+        waitForSearches(3)
+
+        model.notificationClicked(target: "process:4242")
+        XCTAssertEqual(model.query, "")
+        XCTAssertEqual(model.list.selection?.key, clicked)
+        spy.searches[2].completion(ok(resultJSON(["h1"])))
+        XCTAssertEqual(model.list.selection?.key, clicked, "the result of the earlier search is dropped")
+        XCTAssertTrue(model.list.runningRows.contains { $0.id == clicked })
+
+        waitForSearches(4)
+        XCTAssertEqual(spy.searches[3].arguments, ["conversations", "search", "--json"])
+        spy.searches[3].completion(ok(resultJSON(["h1", "h2"])))
+        XCTAssertEqual(model.list.selection?.key, clicked)
+        XCTAssertTrue(model.list.runningRows.contains { $0.id == clicked })
+        XCTAssertEqual(model.list.recentRows.map(\.sessionID), ["h1", "h2"])
     }
 
     // MARK: - Refresh: the header row's Refresh button and ⌘R (§4.6 / §9)
@@ -452,7 +485,7 @@ final class MainSurfaceModelTests: XCTestCase {
         model.openedByHotKey()
         XCTAssertEqual(spy.focusListSurfaces, [.window], "hotkey: the list")
         XCTAssertEqual(model.searchFocusRequests[.window], search + 1)
-        XCTAssertNotNil(model.list.selection, "the first row is selected")
+        XCTAssertNil(model.list.selection, "the selection does not change (§8.66)")
     }
 
     func testRefreshRunsNothingWhileAnInputMethodComposes() {
@@ -827,6 +860,66 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertTrue(spy.commands.isEmpty)
     }
 
+    /// §4.5 "action buttons" / "key operations" / "row double-click": the
+    /// Running row of a session the app cannot jump to has a disabled Jump
+    /// (with the untracked-terminal tooltip) and an enabled Branch. Enter
+    /// and a double-click run no command; in one column they open the
+    /// detail page (Enter on the detail page then does nothing), in two
+    /// columns they move focus to the conversation pane.
+    func testARowThatCannotJumpShowsItsConversationInsteadOfJumping() {
+        let target = "process:48213"
+        let popover = makeModel()
+        popover.agentsUpdated([agent(target, session: "sp")])
+        openPopover(popover, delivering: ["a"])
+        guard let buttons = panelButtons(popover, selecting: .running(target: target)) else { return }
+        XCTAssertFalse(buttons.primary.isEnabled)
+        XCTAssertEqual(buttons.primary.kind, .jump)
+        XCTAssertEqual(buttons.primary.tooltip, "Running in a terminal Shiibar CC can't drive")
+        XCTAssertTrue(buttons.branch.isEnabled)
+        popover.buttonClicked(buttons.primary)
+        XCTAssertTrue(spy.commands.isEmpty, "the disabled Jump runs nothing")
+        let paneFocus = popover.paneFocusRequests[.popover] ?? 0
+        XCTAssertTrue(spy.paneIndexes.isEmpty)
+        XCTAssertEqual(key(popover, .returnKey), .consumed)
+        XCTAssertEqual(popover.list.page, .detail, "one column: Enter opens the detail page")
+        XCTAssertEqual(spy.paneIndexes.count, 1, "the Running row's conversation starts loading (index first)")
+        XCTAssertEqual(popover.paneFocusRequests[.popover], paneFocus + 1)
+        XCTAssertEqual(key(popover, .returnKey), .consumed)
+        XCTAssertEqual(popover.list.page, .detail, "the detail page: Enter does nothing more")
+        XCTAssertEqual(popover.paneFocusRequests[.popover], paneFocus + 1)
+        XCTAssertTrue(spy.commands.isEmpty, "Enter never runs Jump")
+        XCTAssertEqual(key(popover, .returnKey, [.command]), .consumed)
+        XCTAssertEqual(spy.commands.map(\.arguments),
+                       [["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "sp"]],
+                       "⌘Enter still runs Branch")
+
+        for viaDoubleClick in [false, true] {
+            spy.commands = []
+            let window = makeModel()
+            window.windowColumnsChanged(.two)
+            window.windowDidBecomeKey()
+            spy.indexCompletions.last?(0)
+            spy.searches.last?.completion(ok(resultJSON(["a"])))
+            window.agentsUpdated([agent(target, session: "sp")])
+            let windowPaneFocus = window.paneFocusRequests[.window] ?? 0
+            if viaDoubleClick {
+                for count in [1, 2] {
+                    window.pointerDown(surface: .window, surfaceWasKey: true, searchFieldFocused: false,
+                                       clickCount: count, pressedAt: 100 + Double(count) * 0.1)
+                    window.rowClicked(.running(target: target))
+                }
+            } else {
+                window.rowClicked(.running(target: target))
+                XCTAssertEqual(key(window, .returnKey, surface: .window), .consumed)
+            }
+            let name = viaDoubleClick ? "double-click" : "Enter"
+            XCTAssertEqual(window.paneFocusRequests[.window], windowPaneFocus + 1,
+                           "\(name): two columns move focus to the conversation pane")
+            XCTAssertEqual(window.list.selection?.key, .running(target: target), name)
+            XCTAssertTrue(spy.commands.isEmpty, "\(name): runs no command")
+        }
+    }
+
     // MARK: - Keys (§4.5)
 
     private func key(
@@ -914,10 +1007,11 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertTrue(spy.commands.isEmpty)
     }
 
-    /// §4.5 "global hotkey": opened by the hotkey, the list takes focus on
-    /// the shown surface (no selection: the first row); with no rows the
-    /// search field does; on the detail page the conversation pane does.
-    func testOpenedByHotKeyFocusesTheList() {
+    /// §4.5 "global hotkey" / §8.66: opened by the hotkey, the list takes
+    /// focus on the shown surface and the selection stays as it is (none
+    /// stays none; a selected row stays selected); with no rows the search
+    /// field does; on the detail page the conversation pane does.
+    func testOpenedByHotKeyFocusesTheListWithoutSelecting() {
         let empty = makeModel()
         openPopover(empty, delivering: [])
         let searchRequests = empty.searchFocusRequests[.popover] ?? 0
@@ -928,9 +1022,12 @@ final class MainSurfaceModelTests: XCTestCase {
         let withRows = makeModel()
         openPopover(withRows, delivering: ["a", "b"])
         withRows.openedByHotKey()
-        XCTAssertEqual(withRows.list.selection?.key, .conversation(sessionID: "a"))
+        XCTAssertNil(withRows.list.selection, "no selection stays no selection")
         XCTAssertEqual(spy.focusListSurfaces, [.popover])
         XCTAssertTrue(spy.commands.isEmpty, "never runs a verb")
+        withRows.rowClicked(.conversation(sessionID: "b"))
+        withRows.openedByHotKey()
+        XCTAssertEqual(withRows.list.selection?.key, .conversation(sessionID: "b"), "a selection does not change")
 
         openDetailPage(withRows, .conversation(sessionID: "b"))
         let paneRequests = withRows.paneFocusRequests[.popover] ?? 0
@@ -939,19 +1036,29 @@ final class MainSurfaceModelTests: XCTestCase {
         XCTAssertEqual(withRows.paneFocusRequests[.popover] ?? 0, paneRequests + 1)
     }
 
-    /// §4.5: list-focus Enter / ⌘Enter do nothing without a selection or
-    /// with the button disabled.
-    func testListEnterWithoutSelectionOrDisabledDoesNothing() {
+    /// §4.5 "key operations" / §8.66: with list focus and no selection,
+    /// Enter selects the first row (as Enter in the search field does) and
+    /// ⌘Enter does nothing; with a selection, Enter / ⌘Enter do nothing
+    /// while the button is disabled.
+    func testListEnterWithoutSelectionSelectsTheFirstRowAndDisabledButtonsDoNothing() {
         let model = makeModel()
         model.surfaceDidShow(.popover)
         spy.indexCompletions[0](0)
         spy.searches[0].completion(ok(#"{"conversations":[\#(summaryJSON("x", cwd: nil))]}"#))
-        XCTAssertEqual(key(model, .returnKey), .consumed)
         XCTAssertEqual(key(model, .returnKey, [.command]), .consumed)
-        model.rowClicked(.conversation(sessionID: "x"))
+        XCTAssertNil(model.list.selection, "⌘Enter without a selection does nothing")
+        let scrolls = model.scrollSelectionRequest
+        XCTAssertEqual(key(model, .returnKey), .consumed)
+        XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "x"), "Enter selects the first row")
+        XCTAssertEqual(model.scrollSelectionRequest, scrolls + 1)
         XCTAssertEqual(key(model, .returnKey), .consumed)
         XCTAssertEqual(key(model, .returnKey, [.command]), .consumed)
         XCTAssertTrue(spy.commands.isEmpty)
+
+        let empty = makeModel()
+        openPopover(empty, delivering: [])
+        XCTAssertEqual(key(empty, .returnKey), .consumed)
+        XCTAssertNil(empty.list.selection, "no rows: nothing")
     }
 
     /// §4.5: typing with list focus does nothing — the key is not assigned,
@@ -1276,6 +1383,7 @@ final class MainSurfaceModelTests: XCTestCase {
                     }),
                 runCommand: { arguments, completion in spy.commands.append((arguments: arguments, completion: completion)) },
                 schedule: { seconds, action in spy.scheduled.append((seconds: seconds, action: action)) },
+                markReadSchedule: { _, _ in },
                 doubleClickInterval: { 0.5 },
                 uptime: { testCase.now })
             openPopover(model, delivering: ["a"])
@@ -1648,6 +1756,125 @@ final class MainSurfaceModelTests: XCTestCase {
         model.windowWidthChanged(600)
         XCTAssertEqual(model.list.columns, .two)
         XCTAssertEqual(model.list.selection?.key, .conversation(sessionID: "a"))
+    }
+
+    // MARK: - Settings > Terminal (§4.5 "Settings window" > Terminal, §4.6 "Resume and Branch")
+
+    /// The installed apps the Terminal setting's lookup sees, by bundle id,
+    /// and how many lookups ran (no real app is looked up).
+    private final class InstalledApps {
+        var apps: [String: InstalledTerminalApp] = [:]
+        var lookups = 0
+    }
+
+    private func attachTerminalSetting(
+        _ model: MainSurfaceModel, stored: ResumeTerminal, installed: InstalledApps, center: NotificationCenter
+    ) -> ResumeTerminalSetting {
+        ResumeTerminal.save(stored, to: defaults)
+        let setting = ResumeTerminalSetting(defaults: defaults, lookup: { id in
+            installed.lookups += 1
+            return installed.apps[id]
+        }, center: center)
+        setting.attach(to: model)
+        return setting
+    }
+
+    /// Resume and Branch pass the Settings value as `--terminal`; the
+    /// terminals of the sessions in the agent list play no part, and a new
+    /// pick applies to the next click.
+    func testResumeAndBranchPassTheTerminalSettingWhateverTheAgentListShows() {
+        let model = makeModel()
+        let installed = InstalledApps()
+        installed.apps["com.mitchellh.ghostty"] = InstalledTerminalApp(shortVersion: "1.4.0")
+        let setting = attachTerminalSetting(model, stored: .ghostty, installed: installed, center: NotificationCenter())
+        model.agentsUpdated([
+            agent("apple-terminal:/dev/ttys001", session: "s1"),
+            agent("iterm2:w0t0p0:U2", session: "s2"),
+            agent("process:4242", session: "s3"),
+        ])
+        openPopover(model, delivering: ["a"])
+        guard let history = panelButtons(model, selecting: .conversation(sessionID: "a")) else { return }
+        model.buttonClicked(history.primary)
+        XCTAssertEqual(spy.commands.last?.arguments,
+                       ["resume", "--cwd", "/Users/example/demo", "--terminal", "ghostty", "a"])
+        guard let undrivable = panelButtons(model, selecting: .running(target: "process:4242")) else { return }
+        model.buttonClicked(undrivable.branch)
+        XCTAssertEqual(spy.commands.last?.arguments,
+                       ["resume", "--cwd", "/Users/example/demo", "--terminal", "ghostty", "--fork", "s3"])
+
+        setting.select(.appleTerminal)
+        guard let running = panelButtons(model, selecting: .running(target: "iterm2:w0t0p0:U2")) else { return }
+        model.buttonClicked(running.branch)
+        XCTAssertEqual(spy.commands.last?.arguments,
+                       ["resume", "--cwd", "/Users/example/demo", "--terminal", "apple-terminal", "--fork", "s2"])
+    }
+
+    /// While the chosen terminal cannot be used, Resume and Branch are
+    /// disabled with the reason (also over a missing cwd's disabled Resume),
+    /// and neither a click, Enter nor ⌘Enter runs them. Jump stays.
+    func testUnusableTerminalDisablesResumeAndBranchWithTheReason() {
+        let model = makeModel()
+        let installed = InstalledApps()
+        let setting = attachTerminalSetting(model, stored: .iterm2, installed: installed, center: NotificationCenter())
+        let tooltip = "iTerm2 is not installed \u{2014} choose a terminal in Settings"
+        model.agentsUpdated([agent("iterm2:w0t0p0:U1", session: "s1")])
+        model.surfaceDidShow(.popover)
+        spy.indexCompletions.last?(0)
+        spy.searches[0].completion(ok(
+            #"{"conversations":[\#(summaryJSON("a")),\#(summaryJSON("b", cwd: nil))]}"#))
+
+        guard let history = panelButtons(model, selecting: .conversation(sessionID: "a")) else { return }
+        XCTAssertEqual(history.primary, RowButton(kind: .resume, invocation: nil, tooltip: tooltip))
+        XCTAssertEqual(history.branch, RowButton(kind: .branch, invocation: nil, tooltip: tooltip))
+        model.buttonClicked(history.primary)
+        model.buttonClicked(history.branch)
+        _ = key(model, .returnKey)
+        _ = key(model, .returnKey, .command)
+        XCTAssertEqual(spy.commands.count, 0, "nothing runs while the terminal cannot be used")
+
+        guard let noCwd = panelButtons(model, selecting: .conversation(sessionID: "b")) else { return }
+        XCTAssertEqual(noCwd.primary.tooltip, tooltip, "the terminal's reason wins over the missing cwd")
+        XCTAssertEqual(noCwd.branch.tooltip, tooltip)
+
+        guard let running = panelButtons(model, selecting: .running(target: "iterm2:w0t0p0:U1")) else { return }
+        XCTAssertEqual(running.primary.invocation, .jump(target: "iterm2:w0t0p0:U1"), "Jump is not affected")
+        XCTAssertFalse(running.branch.isEnabled)
+
+        // Installed meanwhile: the next show decides again and enables them.
+        installed.apps["com.googlecode.iterm2"] = InstalledTerminalApp(shortVersion: "3.7.6")
+        model.surfaceDidHide(.popover)
+        model.surfaceDidShow(.popover)
+        guard let enabled = panelButtons(model, selecting: .conversation(sessionID: "b")) else { return }
+        XCTAssertEqual(enabled.primary, RowButton(kind: .resume, invocation: nil, tooltip: "Resume"),
+                       "back to the missing cwd's disabled Resume")
+        guard let again = panelButtons(model, selecting: .conversation(sessionID: "a")) else { return }
+        XCTAssertTrue(again.primary.isEnabled)
+        XCTAssertTrue(again.branch.isEnabled)
+        XCTAssertEqual(setting.availability, .available)
+    }
+
+    /// Availability is decided again when a surface shows (after the
+    /// show's own work) and when the app becomes active (§4.5).
+    func testAvailabilityIsDecidedAgainOnSurfaceShowAndAppActivation() {
+        let model = makeModel()
+        let installed = InstalledApps()
+        let center = NotificationCenter()
+        let setting = attachTerminalSetting(model, stored: .ghostty, installed: installed, center: center)
+        XCTAssertEqual(setting.availability, .notInstalled(.ghostty))
+        XCTAssertEqual(model.list.resumeTerminalAvailability, .notInstalled(.ghostty))
+
+        installed.apps["com.mitchellh.ghostty"] = InstalledTerminalApp(shortVersion: "1.3.1")
+        let before = installed.lookups
+        model.surfaceDidShow(.popover)
+        XCTAssertEqual(spy.surfaceShownCount, 1, "the show's existing work still runs")
+        XCTAssertGreaterThan(installed.lookups, before)
+        XCTAssertEqual(setting.availability, .ghosttyTooOld)
+        XCTAssertEqual(model.list.resumeTerminalAvailability, .ghosttyTooOld)
+
+        installed.apps["com.mitchellh.ghostty"] = InstalledTerminalApp(shortVersion: "1.4.0")
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        XCTAssertEqual(setting.availability, .available)
+        XCTAssertEqual(model.list.resumeTerminalAvailability, .available)
     }
 }
 

@@ -75,6 +75,10 @@ public struct ListKeyContext: Equatable, Sendable {
     public var hasSelection: Bool
     /// The selected row's primary button (Jump / Resume) is enabled.
     public var primaryEnabled: Bool
+    /// The selected row's primary button is the disabled Jump of a row the
+    /// app cannot jump to: Enter shows its conversation instead
+    /// (`UnifiedListState.selectedRowShowsConversation`).
+    public var primaryShowsConversation: Bool
     /// The selected row's Branch is enabled.
     public var branchEnabled: Bool
     /// The conversation pane is on screen (one column: detail page; two
@@ -96,6 +100,7 @@ public struct ListKeyContext: Equatable, Sendable {
         hasRows: Bool,
         hasSelection: Bool,
         primaryEnabled: Bool,
+        primaryShowsConversation: Bool = false,
         branchEnabled: Bool,
         conversationPaneVisible: Bool,
         isPopover: Bool,
@@ -109,6 +114,7 @@ public struct ListKeyContext: Equatable, Sendable {
         self.hasRows = hasRows
         self.hasSelection = hasSelection
         self.primaryEnabled = primaryEnabled
+        self.primaryShowsConversation = primaryShowsConversation
         self.branchEnabled = branchEnabled
         self.conversationPaneVisible = conversationPaneVisible
         self.isPopover = isPopover
@@ -134,9 +140,16 @@ public enum ListKeyCommand: Equatable, Sendable {
     /// Enter in the search field: focus moves to the list; with no
     /// selection, the first row is selected.
     case enterFromSearchField
+    /// Enter with list focus and no selection: the first row is selected,
+    /// as Enter in the search field does (§4.5 "key operations", §8.66).
+    case selectFirstRow
     /// Enter with list focus: the selected row's primary button (Jump /
     /// Resume).
     case primary
+    /// Enter with list focus on a row whose primary button is the disabled
+    /// Jump of a row the app cannot jump to: show its conversation (§4.5
+    /// "key operations"), on every page.
+    case showConversation
     /// ⌘Enter with list focus: the selected row's Branch.
     case branch
     /// → with list focus on the one-column list page: open the detail page.
@@ -189,9 +202,12 @@ public enum UnifiedListKeys {
     ///   end, nothing), consumed with no effect elsewhere;
     /// - Enter in the search field: focus to the list (selecting the first
     ///   row when nothing is selected); with no rows, consumed with no
-    ///   effect. Enter with list focus: the primary button when a row is
-    ///   selected and the button is enabled; otherwise consumed with no
-    ///   effect;
+    ///   effect. Enter with list focus: with no selection, select the first
+    ///   row (no rows: consumed with no effect); the primary button when a
+    ///   row is selected and the button is enabled; on a row the app cannot
+    ///   jump to (its primary is the disabled Jump), show its conversation —
+    ///   on every page, the one-column detail page included, where showing
+    ///   it does nothing; otherwise consumed with no effect;
     /// - ⌘Enter: consumed with no effect in the search field; with list
     ///   focus, Branch when a row is selected and Branch is enabled,
     ///   otherwise consumed with no effect;
@@ -238,6 +254,12 @@ public enum UnifiedListKeys {
             if modifiers.isEmpty {
                 if inSearchField {
                     return (context.hasSelection || context.hasRows) ? .perform(.enterFromSearchField) : .ignore
+                }
+                if !context.hasSelection {
+                    return context.hasRows ? .perform(.selectFirstRow) : .ignore
+                }
+                if context.primaryShowsConversation {
+                    return .perform(.showConversation)
                 }
                 return (context.hasSelection && context.primaryEnabled) ? .perform(.primary) : .ignore
             }

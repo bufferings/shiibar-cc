@@ -2,35 +2,39 @@
 
 <img src="docs/assets/app-icon.png" width="120" alt="Shiibar CC app icon" align="left" hspace="16">
 
-A macOS menu bar app that watches your Claude Code agent sessions
-running in iTerm2 or the macOS Terminal.app and lets you jump straight to
-the right one.
+A macOS menu bar app that watches your Claude Code agent sessions and lets
+you jump straight to the right one in iTerm2, the macOS Terminal.app or
+Ghostty.
 
-**Supported terminals only, by design.** Sessions running in a terminal
-Shiibar CC can't drive (VS Code's integrated terminal, SSH) are not tracked
-at all — they never show up as Running sessions (no status, no
-notifications), and there is nothing to jump to. If
-your Claude Code sessions don't live in a supported terminal, this tool does
-nothing for you.
+**Jumping needs a supported terminal.** Sessions running in any other
+terminal on this Mac (VS Code's integrated terminal, another terminal app)
+are tracked too — status, notifications, reading the conversation, Branch —
+but there is no tab Shiibar CC can bring up for them. Sessions that have no
+terminal at all (started by an editor extension or a background service)
+and sessions on a remote host over SSH are not tracked.
 
 <br clear="all">
 
 ## Supported terminals
 
-Shiibar CC tracks and jumps to Claude Code sessions running in these
-terminals:
+Shiibar CC jumps to Claude Code sessions running in iTerm2, the macOS
+Terminal.app and Ghostty (1.4.0 or later), and opens Resume and Branch in
+the one you pick in Settings… → General → **Terminal**. Verified combinations:
 
 | Terminal           | Verified with                   |
 | ------------------ | ------------------------------- |
 | iTerm2             | iTerm2 3.6.11 on macOS 14.5     |
 | macOS Terminal.app | Terminal.app 2.14 on macOS 14.5 |
+| Ghostty            | Ghostty 1.4.0 on macOS 27.2.1   |
 
 "Verified with" is the combination the behavior was checked against, not a
-minimum requirement — lower bounds aren't tested. A session in any other
-terminal (VS Code's integrated terminal, SSH) isn't tracked: it never
-appears under Running, and there is nothing to jump to. Its conversation
-shows in History marked `running`, where you can read or branch it but not
-jump to it.
+minimum requirement; lower bounds aren't tested. The one exception is
+Ghostty, which needs version 1.4.0 or later. A session in any other
+terminal on this Mac (VS Code's integrated terminal, a Ghostty older than
+1.4.0) still appears under Running with its status and notifications; its
+main button is a disabled **Jump**, and you can read or branch its
+conversation. Sessions without a terminal and sessions on a remote host
+over SSH aren't tracked.
 
 ## What it does
 
@@ -43,7 +47,9 @@ a glance:
 - **working** — an agent is actively running a tool or generating a response
 - **idle** — an agent has nothing pending (just started, or finished its work)
 - **unreviewed** — a dot in your accent color that stays lit until you've
-  actually looked at a session that finished or started waiting
+  looked at a session that finished or started waiting: keeping its row
+  selected for a second after you select it, jumping to it, or choosing
+  **Mark all as read** from the ⌄ menu clears the dot
 
 Click the tray icon and a popover opens under it with one list: the
 sessions running right now (**Running**, newest first, each with its status
@@ -59,11 +65,14 @@ the buttons at the bottom act on the selected row, and
 double-clicking a row runs its main button directly (⌘-double-click runs
 Branch instead). On a running
 session the main button is **Jump** (it brings up that session's terminal
-tab; clicking a notification does the same), and on a past conversation it is **Resume** (it reopens the
-conversation in a new terminal window). **Branch**, next to it, starts a
+tab, and clicking a notification does the same). For a session in a terminal
+Shiibar CC can't drive, clicking a notification selects its row instead, and
+double-clicking the row shows its conversation: the conversation page in
+one column, the conversation pane in two. On a past conversation the main button is **Resume** (it reopens the
+conversation in a new window of the terminal chosen in Settings). **Branch**, next to it, starts a
 new conversation from a copy of either kind.
 
-<img src="docs/assets/menubar-dropdown.png" width="500"
+<img src="docs/assets/menubar-dropdown.png" width="450"
      alt="The Shiibar CC popover under the tray icon: a search field, the
           Running section with each session's status symbol, the History
           section of past conversations, and the View →, Branch ⌘↩ and
@@ -73,14 +82,14 @@ Notifications carry the outcome, not just an alert — which session
 finished, and what its agent last said:
 
 <img src="docs/assets/notification-banner.png" width="450"
-     alt="A macOS notification: 'Done — projects/shiibar-cc', with the
-          agent's final message about the finished screenshot update">
+     alt="A macOS notification: 'Done — projects/recipe-app', with the
+          agent's final message about the finished release notes">
 
 The keyboard works too. The search field only edits your query; Return
 there moves you into the list (selecting the first row if none is
 selected), so typing a query and pressing Return twice jumps to or resumes the top
 match. Once the list has focus, ↑ / ↓ select a row, Return jumps or
-resumes, ⌘Return branches, and → opens the conversation and ← goes back
+resumes (or selects the first row if none is selected), ⌘Return branches, and → opens the conversation and ← goes back
 to the list (in the popover or a narrow window). ⌘F (or a click) takes you
 back to the search field, and Esc closes the popover. The hint at the
 bottom left shows the keys that work right now. The buttons at the
@@ -160,10 +169,10 @@ A Claude Code session that ended before you sent a prompt (for example one
 where you only ran a slash command) is not listed as a conversation.
 
 <img src="docs/assets/conversations-window.png" width="700"
-     alt="The Shiibar CC window, wide enough for two columns: the Running
-          and History list with the search field on the left, and the
-          selected conversation rendered as Markdown on the right, with
-          the Branch ⌘↩ and Resume ↩ buttons at the bottom">
+     alt="The Shiibar CC window, wide enough for two columns: a search
+          field across the top, the Running and History list on the left,
+          and the selected conversation rendered as Markdown on the right,
+          with the Branch ⌘↩ and Resume ↩ buttons at the bottom">
 
 The same search is available from scripts, so you don't need the app to
 find a conversation:
@@ -182,9 +191,9 @@ conversation view until Shiibar CC catches up.
 Installing and running Shiibar CC asks for the following. Each one maps to a
 specific feature — nothing is requested speculatively.
 
-- **Automation (Apple Events) for iTerm2 and Terminal.app**: needed to find
+- **Automation (Apple Events) for iTerm2, Terminal.app and Ghostty**: needed to find
   and select the right window/tab/session when you jump to an agent. Shiibar
-  CC drives whichever of the two supported terminals a session runs in, and
+  CC drives whichever of the supported terminals a session runs in, and
   only asks for a terminal's permission when it actually needs to control it.
 - **Notifications**: needed to alert you when a session starts waiting on
   you, or finishes.
@@ -236,9 +245,10 @@ claude plugin install shiibar-cc@shiibar-cc
 ```
 
 Then open Shiibar CC once (from Spotlight or `/Applications`) to grant the
-notification and terminal Automation permissions — this also registers it as
-a Login Item. Verify everything end to end from the popover's ⌄ menu →
-Settings… → the Setup Check tab, or from a terminal:
+notification permission — this also registers it as a Login Item. It asks for
+the Automation permission of iTerm2, Terminal.app or Ghostty only when it
+first needs to control that terminal. Verify everything end to end from the
+popover's ⌄ menu → Settings… → the Setup Check tab, or from a terminal:
 
 ```sh
 shiibar-cc doctor
@@ -311,7 +321,7 @@ flowchart LR
     daemon --> app[menu bar app]
     daemon --> cli[shiibar-cc CLI]
     app -- "focus" --> cli
-    cli -- "AppleScript" --> term[iTerm2 / Terminal.app tab]
+    cli -- "AppleScript" --> term[iTerm2 / Terminal.app / Ghostty tab]
 ```
 
 - Every Claude Code hook event runs `plugin/hooks/report.sh`, which shells
@@ -326,10 +336,11 @@ flowchart LR
   Check (`doctor`), and the Conversations index. The exceptions you may
   want to run yourself are `doctor` (troubleshooting) and
   `conversations search` (scripted search, above).
-- Jumping to a session ("focus") drives the session's terminal (iTerm2 or
-  Terminal.app) with AppleScript. Those two are the only terminals Shiibar CC
-  knows how to control, by design.
-- If a session's state ever drifts (a hook was missed, a pane was closed),
+- Jumping to a session ("focus") drives the session's terminal (iTerm2,
+  Terminal.app or Ghostty) with AppleScript. Those are the only terminals
+  Shiibar CC knows how to control; sessions in other terminals are tracked
+  by the process id of their `claude` process and can't be jumped to.
+- If a session's state ever drifts (a hook was missed, a session was killed),
   the app self-repairs by reconciling against `claude agents` — on launch,
   on daemon reconnect, roughly every minute in the background, and on
   demand via Refresh (the button next to the search field, or ⌘R).

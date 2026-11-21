@@ -1,6 +1,6 @@
 # shiibar-cc
 
-macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting / idle, plus an unreviewed flag) via hooks and jumps to the corresponding iTerm2 / Terminal.app tab.
+macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting / idle, plus an unreviewed flag) via hooks and jumps to the corresponding iTerm2 / Terminal.app / Ghostty tab.
 
 ## Source of truth
 
@@ -29,8 +29,9 @@ macOS menu bar app + CLI that tracks Claude Code agent status (working / waiting
   launches (`NSWorkspace.open`), no `NSPasteboard.general`, no network access, no real state dir
   or home. Make outward actions injectable and verify them with spies. Fixture URLs use a
   reserved, non-resolving domain (e.g. `https://example.invalid/`).
-- Terminal (iTerm2 / Terminal.app) and AppleScript knowledge lives ONLY in the terminal modules of
-  `shiibar-cc-client` (`iterm2` / `apple_terminal` — named after the target prefixes; design principle 2).
+- Terminal (iTerm2 / Terminal.app / Ghostty) and AppleScript knowledge lives ONLY in the terminal modules of
+  `shiibar-cc-client` (`iterm2` / `apple_terminal` / `ghostty` — named after the target prefixes; design principle 2).
+  This covers AppleScript and the ID formats. The exceptions are listed in `docs/DESIGN.md` §2.
 - Do not edit `docs/DESIGN.md` §8 (decision log). Propose spec changes in your summary instead.
 
 ## Rules for documentation work

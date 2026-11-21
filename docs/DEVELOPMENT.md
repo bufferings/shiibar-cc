@@ -132,7 +132,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 ## macOS 権限まわり
 
-- **M2(focus 初回実行時)**: 「オートメーション(iTerm2 の制御)」の許可ダイアログが出るので許可する。
+- **M2(focus 初回実行時)**: 「オートメーション(対応ターミナルの制御)」の許可ダイアログが出るので許可する(iTerm2 / Terminal.app / Ghostty のそれぞれで、最初に操作するときに 1 回)。
   誤って拒否した場合: システム設定 → プライバシーとセキュリティ → オートメーション から付け直す。
   ターミナルから実行する CLI と、メニューバーアプリからの実行では**許可が別々に**必要
 - **M4(アプリ初回起動時)**: 通知の許可ダイアログ。ad-hoc 署名は再ビルドで権限がリセットされることがある
@@ -141,7 +141,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 ## M2 実機スモーク(osascript 権限が要るため人間が行う)
 
-`scripts/dev-install.sh` でバイナリ配置後、素の iTerm2 タブで試すこと
+`scripts/dev-install.sh` でバイナリ配置後、対応ターミナル(iTerm2 / Terminal.app / Ghostty 1.4.0 以上)の素のタブで試すこと
 (tmux は非スコープ。§8.1):
 
 > **フォルダを移動したら `cargo clean` を1回**。`env!("CARGO_MANIFEST_DIR")` がビルド時に
@@ -158,12 +158,12 @@ shiibar-cc focused                           # 前面タブの target が出る�
 shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 ```
 
-- **既知の注意**: osascript 呼び出しにタイムアウトがない。初回 TCC ダイアログ待ちや iTerm2 の応答遅延で
+- **既知の注意**: osascript 呼び出しにタイムアウトがない。初回 TCC ダイアログ待ちやターミナルの応答遅延で
   focus/focused が一時的にハングし得る(検証中に約 2 分の事例が 1 回、再現性なし)。ハングしたら Ctrl-C でよい
 - **AppleScript の制約(2026-07-04 実機で確認)**: iTerm2 の `id of session`(UUID)・`index of window` は
   取れるが `index of tab` は取れない(`-1728`)。focused は UUID のみ返す実装にしてある。
   この種の「実 iTerm2 と AppleScript の相性」は fake runner の単体テストでは捕まらないので、
-  iterm モジュールを変えたら必ず実機で focus / focused を叩くこと
+  ターミナルモジュール(iterm2 / apple_terminal / ghostty)を変えたら、そのターミナルの実機で、必ず focus / focused を叩くこと
 
 ## ドッグフーディング運用
 
@@ -172,11 +172,12 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
   停止はアプリが管理する。DESIGN.md §4.5 / §8.8。launchd には入れない、§8.8)
 - コード変更の反映は `scripts/dev-reload.sh`(下記「リリース・インストール」参照)
 - daemon 単体をログを見ながら動かしたいとき(daemon とアプリの連携をいじるときなど)は
-  手動運用に切り替える: アプリを Quit してから iTerm2 の 1 タブで
+  手動運用に切り替える: アプリを Quit してからターミナルの 1 タブで
   `SHIIBAR_CC_LOG=debug shiibar-ccd --foreground` を動かし、アプリは
   `swift run --package-path app ShiibarCcApp` で起動する。アプリは起動時に既存 daemon に
-  アタッチするので、手動 daemon と併用しても壊れない。ただしアプリを Quit すると
-  daemon も止まる(§8.8)
+  アタッチするので、手動 daemon と併用しても壊れない(バンドルにしないで実行したアプリは、daemon のバージョンを比較せずに
+  アタッチする。インストール済みの `.app` は、バージョンが異なる daemon を、同梱の daemon に入れ替える — DESIGN.md §4.5「daemon のライフサイクル管理」)。
+  ただしアプリを Quit すると daemon も止まる(§8.8)
 - 状態ファイルは `~/.local/state/shiibar-cc/`。壊れたら丸ごと消してよい
 - Conversations の会話索引(DESIGN.md §4.6)は状態ディレクトリ内の `conversations-index.db`。
   派生データなので、表示がおかしいときは消してよい — 次の `shiibar-cc conversations index`
@@ -191,12 +192,37 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 
   category は `webpane`(会話ペインの配信異常)/ `conversations`(CLI 呼び出しの異常)ほか
   ソース内の `Logger(subsystem:category:)` を参照
-- **README のスクリーンショット**(`docs/assets/`)の撮り直しは `scripts/dev-demo.sh` で:
-  `stage` が偽 hook 再生(上記「hooks の検証」と同じ技法)で waiting / working / idle の
-  3 状態を実 daemon に並べる(**定期 reconcile が約 60 秒で偽セッションを掃除する**ので、
-  流したらすぐ撮る。何度でも流し直せる)。`banner` は完了通知バナーを 1 つ出す。
-  `cleanup` で偽セッションを削除(放置でも reconcile が消す)。
-  見た目を変えたリリースの後は撮り直しを忘れない(2026-07-09 の M22–M24 で実例)
+- **README のスクリーンショット**(`docs/assets/`)は、`scripts/dev-demo.sh` が用意する撮影用の環境で撮影する。
+  撮影用の環境は、サンプルの会話だけを表示し、実際の会話、セッション、アプリの設定を使用しない(`python3` が必要)
+  - `start`: 一時フォルダ(`/tmp/shiibar-cc-demo.XXXXXX`。場所は `~/Library/Caches/cc.shiibar.menubar.demo.current` に記録する)に、
+    サンプルの会話 10 件を持つ撮影用の HOME(`.claude/projects`)、空の状態ディレクトリ、失敗を返すだけの `claude` を作成する。
+    `scripts/dev-install.sh` で配置したアプリ(`~/Applications/Shiibar CC.app`)を `~/Library/Caches/cc.shiibar.menubar.demo/Shiibar CC Demo.app` にコピーし、コピーの bundle identifier を
+    `cc.shiibar.menubar.demo` に変更して、署名し直す(表示名は `Shiibar CC` のままである)。`cc.shiibar.menubar.demo` の設定に、ログイン項目の自動登録を実行済みとする値と、
+    サンプルの会話 2 件のスターを書き込む。インストール済みのアプリと daemon を停止し、コピーを LaunchServices に登録して、
+    `open -n --env` で、`HOME`、`SHIIBAR_CC_STATE_DIR`、`PATH`(失敗を返す `claude` が先頭)を一時フォルダに設定して起動する
+  - **コピーを使用する理由**: アプリの設定(スター、Archive、表示の設定)は、bundle identifier ごとの保存先にある。アプリは、
+    一覧に無い会話のスターを削除して保存するので、インストール済みのアプリをサンプルの会話で起動すると、実際のスターの一覧が失われる。
+    スクリプトは、撮影用の HOME では、identifier が撮影用の値でないアプリを起動しない
+  - **コピーを `~/Library/Caches` に配置する理由**: 通知の仕組みは、バンドルが `/tmp` にあるアプリを受け付けない
+    (通知の許可の確認も、通知も表示されない。2026-11-22 に、macOS 27.2 で確認)。初回の起動で、通知の許可の確認が表示される
+  - `start` が途中で失敗した場合は、`cleanup` を実行する(インストール済みのアプリを停止した後の失敗でも、`cleanup` がアプリを起動し直す)
+  - `stage`: Running に、working、idle(確認済み)、waiting(未確認。約 3 秒後に通知が表示される)の 3 行を登録する。
+    セッションごとに、端末を持つ別のプロセスから report する(同じ pid からの、`session_id` が異なる report は、
+    入れ子のセッションとして無視されるため — DESIGN.md §3.6)。行の `session_id` は、サンプルの会話と一致する。何度でも実行できる
+  - **行は `cleanup` まで残る**: `claude` が失敗を返すので、reconcile はどの回も不完全になり、エントリを削除しない
+    (アプリは、この場合に警告を表示しない。daemon は、`stage` から 24 時間が経過した行を削除する)。経過時間は増え続けるので、戻す場合は `stage` を実行し直す
+  - `banner`: 完了するセッションを 1 つ加えて、完了の通知を表示する(本文は 1 文である)
+  - `cleanup`: 撮影用のアプリ、daemon、report に使用したプロセスを停止し、アプリのコピー(LaunchServices の登録を含む)、
+    一時フォルダ、`cc.shiibar.menubar.demo` の設定とオートメーションの許可(`tccutil reset AppleEvents`)を削除して、インストール済みのアプリを起動する。撮影用の環境が無い状態で実行しても、問題は無い
+    (一時フォルダが無い場合も、残っているコピーと設定を削除する)
+  - `cleanup` の後に残るもの: 撮影用のアプリが通知の許可を求めた場合の、System Settings の通知の項目(`Shiibar CC` と表示される)
+  - 撮影用のアプリのログの subsystem は `cc.shiibar.menubar.demo` である
+  - `SHIIBAR_CC_DEMO_NO_APP=1` を指定すると、アプリのコピーの作成と、アプリの停止と起動を除く処理だけを実行する(データだけを確認する場合に使用する)。
+    daemon は `SHIIBAR_CC_STATE_DIR=<一時フォルダ>/state shiibar-ccd --foreground` で手動で起動し、reconcile を実行する場合は
+    `<一時フォルダ>/bin` を `PATH` の先頭に配置する(`start` が表示する)。report に使用する `shiibar-cc` は、`SHIIBAR_CC_DEMO_CLI` で指定できる
+  - **撮影の注意**: 選択中の行は、画面が key でない間は灰色で表示される(DESIGN.md §4.5「行の選択」)。撮影のツールの操作で
+    key が移動する場合は、タイマー付きの撮影を使用し、カウントダウンの間に画面をクリックする。working の状態記号は形が変化する
+  - 見た目を変更したリリースの後は、撮影し直す
 
 ## アイコンまわりの開発メモ
 
@@ -359,5 +385,5 @@ Release は作らず zip を workflow artifact に置く。
 - リリース検証・brew への移行: `./scripts/dev-uninstall.sh` → `brew install --cask bufferings/tap/shiibar-cc`
 - 開発に戻る: `brew uninstall --cask shiibar-cc` → `./scripts/dev-install.sh`
 
-署名方式が切り替わる(ローカル自己署名 ↔ Developer ID)ため、切り替えるたびに通知許可と iTerm2
+署名方式が切り替わる(ローカル自己署名 ↔ Developer ID)ため、切り替えるたびに通知許可と、対応ターミナルの
 Automation 許可の再確認ダイアログが 1 回ずつ出るのは想定内(切り替えはリリース検証時だけなので頻度は低い)。

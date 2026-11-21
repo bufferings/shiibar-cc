@@ -34,51 +34,59 @@ impl std::fmt::Display for ExtractError {
 
 impl std::error::Error for ExtractError {}
 
+/// The hook's terminal environment, as read by `shiibar-cc report` (§4.1).
+/// These are the only inputs the target classification looks at besides the
+/// ancestor walk's result; passing them in keeps `build_report` a pure fn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HookEnv<'a> {
+    /// `$TERM_PROGRAM`.
+    pub term_program: Option<&'a str>,
+    /// `$TERM_PROGRAM_VERSION` (only consulted for Ghostty, §4.1).
+    pub term_program_version: Option<&'a str>,
+    /// `$ITERM_SESSION_ID` (shape `wNtNpN:UUID`, §7-1).
+    pub iterm_session_id: Option<&'a str>,
+}
+
+/// The first ancestor of the hook process that has a controlling terminal
+/// (§4.1): in practice the `claude` process running the session. Its pid is
+/// carried on every report as `pid` (§4.2) and keys `process:` targets; its
+/// tty keys `apple-terminal:` and `ghostty:` targets (§2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllingProcess {
+    pub pid: u32,
+    /// Absolute tty path (`/dev/ttysNNN`).
+    pub tty: String,
+}
+
 /// Build the `report` wire payload for `event` from the raw hook JSON `raw`.
 ///
-/// Target generation has two branches (§4.1), both yielding a prefixed,
-/// opaque target (§2):
+/// `controlling` is the result of the ancestor walk (§4.1), which runs for
+/// every report regardless of the terminal. `None` means no ancestor with a
+/// controlling terminal was found within the walk limit: the session has no
+/// terminal (an editor extension, a background job, ...) and is not tracked
+/// (§8.66), so this returns `Ok(None)` — "drop this report, don't send it" —
+/// for every event except `SessionEnd`. Closing a terminal window detaches
+/// the `claude` process from its terminal before its SessionEnd hook runs,
+/// so that SessionEnd is still sent, without a target and without a pid,
+/// whatever the environment claims; the daemon matches it by `session_id`
+/// (§4.2).
 ///
-/// - **iTerm2** (`iterm2:<UUID>`): a session is only ever an iTerm2 session
-///   when **both** `$TERM_PROGRAM == "iTerm.app"` **and** `$ITERM_SESSION_ID`
-///   (shape `wNtNpN:UUID`) are present — the target is the **`:` -onward
-///   UUID** half only (not the whole `$ITERM_SESSION_ID` string), so
-///   `iterm2_targets` (reconcile, derived independently via AppleScript)
-///   lands on the same target for the same session — AppleScript can't
-///   reproduce the `wNtNpN` position prefix (§7-1). `$ITERM_SESSION_ID`
-///   alone is not enough: iTerm2 launches other apps (e.g. VS Code's
-///   integrated terminal) that inherit the whole environment,
-///   `$ITERM_SESSION_ID` included, while overwriting `$TERM_PROGRAM` with
-///   their own value (`vscode`, ...); checking `$ITERM_SESSION_ID` alone
-///   would misclassify that inherited session as the launching iTerm2 tab
-///   (observed live 2026-07-05, §7-1).
-/// - **Terminal.app** (`apple-terminal:<tty path>`): when `$TERM_PROGRAM ==
-///   "Apple_Terminal"`. The tty can't be read from the hook process itself
-///   (it's detached from the terminal — `??` in `ps`, §7-7); the caller
-///   resolves it by walking the process ancestry (see
-///   `tty_from_ancestor_walk`) and passes it in as `apple_terminal_tty`
-///   (already the absolute `/dev/ttysNNN` path, §2). `$TERM_SESSION_ID` is
-///   used neither for detection nor as the target — it has no AppleScript
-///   counterpart (§7-7). If no tty could be resolved, `apple_terminal_tty`
-///   is `None` and this branch drops the report.
-///
-/// A session that matches neither branch (or matches Apple_Terminal but has
-/// no resolvable tty) can never be focused, so it isn't tracked at all
-/// (§8.11/§8.47): this returns `Ok(None)` to mean "drop this report, don't
-/// send it" — there is no fallback target.
+/// Otherwise the report always has a target (see `derive_target` for the
+/// rule) and always carries the controlling process's pid.
 ///
 /// `now` is the report timestamp (epoch seconds) — display-only on the wire
 /// (§3.6), supplied by the caller so this function stays a pure fn.
 pub fn build_report(
     event: HookEvent,
     raw: &Value,
-    term_program: Option<&str>,
-    iterm_session_id: Option<&str>,
-    apple_terminal_tty: Option<&str>,
+    env: &HookEnv<'_>,
+    controlling: Option<&ControllingProcess>,
     now: i64,
 ) -> Result<Option<ReportPayload>, ExtractError> {
-    let Some(target) = derive_target(term_program, iterm_session_id, apple_terminal_tty) else {
-        return Ok(None);
+    let (target, pid) = match controlling {
+        Some(controlling) => (Some(derive_target(env, controlling)), Some(controlling.pid)),
+        None if event == HookEvent::SessionEnd => (None, None),
+        None => return Ok(None),
     };
 
     let session_id = str_field(raw, "session_id")
@@ -119,6 +127,7 @@ pub fn build_report(
         prompt,
         background_tasks,
         last_assistant_message,
+        pid,
     }))
 }
 
@@ -130,34 +139,106 @@ const ITERM_TERM_PROGRAM: &str = "iTerm.app";
 /// Terminal.app" (§4.1/§7-7).
 const APPLE_TERMINAL_TERM_PROGRAM: &str = "Apple_Terminal";
 
-/// Maximum number of ancestry hops the Apple_Terminal tty walk takes before
-/// giving up and dropping the report (§9: 10 steps; §4.1).
+/// The value of `$TERM_PROGRAM` that means "running directly inside
+/// Ghostty" (§4.1/§7-8).
+const GHOSTTY_TERM_PROGRAM: &str = "ghostty";
+
+/// Minimum Ghostty version whose AppleScript `terminal` exposes `tty`
+/// (§9/§7-8). Older Ghostty sessions get a `process:` target.
+pub const GHOSTTY_MIN_VERSION: (u64, u64, u64) = (1, 4, 0);
+
+/// Maximum number of ancestry hops the controlling-terminal walk takes
+/// before giving up and dropping the report (§9: 10 steps; §4.1).
 pub const MAX_ANCESTOR_WALK_STEPS: usize = 10;
 
 /// Classify the session and derive its prefixed target — the sole place the
-/// target-generation rule (§4.1/§2) is expressed. Returns `None` ("drop the
-/// report", decided by the caller) for anything that matches neither
-/// terminal, per §8.11/§8.47. See `build_report` for the full branch rules.
-fn derive_target(
-    term_program: Option<&str>,
-    iterm_session_id: Option<&str>,
-    apple_terminal_tty: Option<&str>,
-) -> Option<String> {
-    if term_program == Some(ITERM_TERM_PROGRAM) {
-        let id = iterm_session_id.filter(|s| !s.is_empty())?;
-        let (_prefix, uuid) = id.split_once(':')?;
-        return (!uuid.is_empty()).then(|| format!("iterm2:{uuid}"));
+/// target-generation rule (§4.1/§2) is expressed. One of the three supported
+/// terminals' targets when it can be derived, `process:<pid>` otherwise:
+///
+/// - **iTerm2** (`iterm2:<UUID>`): only when **both** `$TERM_PROGRAM ==
+///   "iTerm.app"` **and** `$ITERM_SESSION_ID` (shape `wNtNpN:UUID`) has a
+///   UUID after its `:`. The target is the `:`-onward UUID half only, so
+///   `iterm2_targets` (reconcile, via AppleScript) lands on the same target
+///   — AppleScript can't reproduce the `wNtNpN` prefix (§7-1).
+///   `$ITERM_SESSION_ID` alone is not enough: apps launched from iTerm2
+///   (e.g. VS Code's integrated terminal) inherit it while overwriting
+///   `$TERM_PROGRAM`, so it would point at the launching tab (§7-1).
+/// - **Terminal.app** (`apple-terminal:<tty path>`): `$TERM_PROGRAM ==
+///   "Apple_Terminal"`; the tty is the ancestor walk's. `$TERM_SESSION_ID`
+///   is not used (no AppleScript counterpart, §7-7).
+/// - **Ghostty** (`ghostty:<tty path>`): `$TERM_PROGRAM == "ghostty"` **and**
+///   `$TERM_PROGRAM_VERSION` at least `GHOSTTY_MIN_VERSION` (compared with
+///   `parse_version_triple`); the tty is the ancestor walk's.
+///   `$GHOSTTY_SURFACE_ID` is not used (it doesn't match AppleScript's `id`,
+///   §7-8).
+/// - Anything else (another or no `$TERM_PROGRAM`, iTerm.app without a usable
+///   `$ITERM_SESSION_ID`, Ghostty with a missing, unparsable or too-old
+///   version): `process:<pid>` with the walk's pid — tracked, but not
+///   jumpable (§2/§8.66).
+fn derive_target(env: &HookEnv<'_>, controlling: &ControllingProcess) -> String {
+    match env.term_program {
+        Some(ITERM_TERM_PROGRAM) => match iterm_uuid(env.iterm_session_id) {
+            Some(uuid) => format!("iterm2:{uuid}"),
+            None => process_target(controlling),
+        },
+        Some(APPLE_TERMINAL_TERM_PROGRAM) => format!("apple-terminal:{}", controlling.tty),
+        Some(GHOSTTY_TERM_PROGRAM) if is_supported_ghostty(env.term_program_version) => {
+            format!("ghostty:{}", controlling.tty)
+        }
+        _ => process_target(controlling),
     }
-    if term_program == Some(APPLE_TERMINAL_TERM_PROGRAM) {
-        let tty = apple_terminal_tty.filter(|s| !s.is_empty())?;
-        return Some(format!("apple-terminal:{tty}"));
-    }
-    None
+}
+
+/// The non-empty UUID half (after the first `:`) of `$ITERM_SESSION_ID`.
+fn iterm_uuid(iterm_session_id: Option<&str>) -> Option<&str> {
+    iterm_session_id
+        .and_then(|id| id.split_once(':'))
+        .map(|(_position, uuid)| uuid)
+        .filter(|uuid| !uuid.is_empty())
+}
+
+/// Whether `$TERM_PROGRAM_VERSION` names a Ghostty at or above
+/// `GHOSTTY_MIN_VERSION`; a missing or unparsable version does not.
+fn is_supported_ghostty(term_program_version: Option<&str>) -> bool {
+    term_program_version
+        .and_then(parse_version_triple)
+        .is_some_and(|v| v >= GHOSTTY_MIN_VERSION)
+}
+
+fn process_target(controlling: &ControllingProcess) -> String {
+    process_target_for_pid(controlling.pid)
+}
+
+/// The `process:<pid>` target (§2) for a session no supported terminal's
+/// target could be derived for. Shared by the hook side (`build_report`,
+/// keyed by the ancestor walk's pid — §4.1) and the reconcile gather (keyed
+/// by the `claude agents` pid — §3.5), so both derive the same string for
+/// the same `claude` process.
+pub fn process_target_for_pid(pid: u32) -> String {
+    format!("process:{pid}")
+}
+
+/// Parse a terminal version string as a `major.minor.patch` triple (§4.1):
+/// only the part before the first `-` or `+` counts, so a non-release build
+/// such as `1.4.0-main+abc1234` reads as `(1, 4, 0)`. Anything that isn't
+/// exactly three dot-separated decimal numbers there yields `None`.
+pub fn parse_version_triple(version: &str) -> Option<(u64, u64, u64)> {
+    let core = version.split(['-', '+']).next().unwrap_or("");
+    let mut parts = core.split('.');
+    let mut number = || -> Option<u64> {
+        let part = parts.next()?;
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    let triple = (number()?, number()?, number()?);
+    parts.next().is_none().then_some(triple)
 }
 
 /// One process's parent pid and controlling tty, as seen by the ancestor
-/// walk. Injected so `tty_from_ancestor_walk` stays a pure function (the
-/// real lookup — libproc / sysctl — lives in `shiibar-cc report`, §4.1).
+/// walk. Injected so `controlling_process_from_ancestor_walk` stays a pure
+/// function (the real lookup — libproc — lives in `shiibar-cc report`, §4.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcInfo {
     /// Parent process id.
@@ -168,25 +249,28 @@ pub struct ProcInfo {
     pub tty: Option<String>,
 }
 
-/// Resolve the controlling tty of the terminal a hook is running under by
-/// walking from `start_pid` toward the process tree root, following each
-/// process's parent pid, and returning the controlling tty of the **first
-/// ancestor that has one** (§4.1/§7-7). The hook process is detached from
-/// its terminal, so its own tty (and `report.sh`'s) is `None`; the tty is
-/// found a couple of hops up, at the `claude` process (§7-7). Bounded to
+/// Find the process a hook is running under by walking from `start_pid`
+/// toward the process tree root, following each process's parent pid, and
+/// returning the pid and controlling tty of the **first process that has a
+/// controlling terminal** (§4.1). The hook process and its shell are
+/// detached from the terminal, so the walk normally stops a couple of hops
+/// up, at the `claude` process (§7-7/§7-8/§7-9). Bounded to
 /// `MAX_ANCESTOR_WALK_STEPS` hops (§9); returns `None` — meaning "drop the
-/// report" — if no controlling tty is found within the limit, or if the
-/// chain dead-ends (a process the lookup can't resolve, or reaching the
+/// report" — if no controlling terminal is found within the limit, or if
+/// the chain dead-ends (a process the lookup can't resolve, or reaching the
 /// tree root).
-pub fn tty_from_ancestor_walk(
+pub fn controlling_process_from_ancestor_walk(
     start_pid: i32,
     lookup: impl Fn(i32) -> Option<ProcInfo>,
-) -> Option<String> {
+) -> Option<ControllingProcess> {
     let mut pid = start_pid;
     for _ in 0..MAX_ANCESTOR_WALK_STEPS {
         let info = lookup(pid)?;
-        if let Some(tty) = info.tty {
-            return Some(tty);
+        if let Some(tty) = info.tty.filter(|t| !t.is_empty()) {
+            return Some(ControllingProcess {
+                pid: u32::try_from(pid).ok()?,
+                tty,
+            });
         }
         // A non-positive or self-referential parent means we've hit the
         // tree root (pid 1 / 0) or a cycle — stop rather than loop.
@@ -328,108 +412,286 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn uses_the_prefixed_uuid_half_of_iterm_session_id_as_target() {
+    /// The controlling process the ancestor walk is assumed to have found
+    /// (the `claude` process): pid 48213 on `/dev/ttys005`.
+    fn claude() -> ControllingProcess {
+        ControllingProcess { pid: 48213, tty: "/dev/ttys005".into() }
+    }
+
+    const ITERM_ENV: HookEnv<'static> = HookEnv {
+        term_program: Some("iTerm.app"),
+        term_program_version: None,
+        iterm_session_id: Some("w0t0p0:UUID"),
+    };
+
+    fn env<'a>(
+        term_program: Option<&'a str>,
+        term_program_version: Option<&'a str>,
+        iterm_session_id: Option<&'a str>,
+    ) -> HookEnv<'a> {
+        HookEnv { term_program, term_program_version, iterm_session_id }
+    }
+
+    /// The target `build_report` derives for `env` when the walk found `claude()`.
+    fn target_for(env: HookEnv<'_>) -> String {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 100)
+        build_report(HookEvent::SessionStart, &raw, &env, Some(&claude()), 100)
             .unwrap()
-            .expect("should not be dropped");
-        assert_eq!(r.target, "iterm2:UUID");
+            .expect("a report with a controlling process must not be dropped")
+            .target
+            .expect("a report with a controlling process has a target")
+    }
+
+    // Target generation (§4.1/§2).
+
+    #[test]
+    fn iterm2_with_a_session_id_uses_the_uuid_half_as_target() {
+        assert_eq!(target_for(ITERM_ENV), "iterm2:UUID");
     }
 
     #[test]
-    fn drops_the_report_when_no_iterm_session_id() {
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), None, None, 100).unwrap();
-        assert_eq!(r, None, "outside iTerm2: no fallback target, drop it (§8.11)");
+    fn iterm2_target_ignores_the_walked_tty() {
+        // The iTerm2 key is the session UUID, never the tty (§2).
+        assert_eq!(
+            target_for(env(Some("iTerm.app"), Some("3.7.6"), Some("w0t0p0:UUID"))),
+            "iterm2:UUID"
+        );
     }
 
     #[test]
-    fn drops_the_report_when_iterm_session_id_is_empty() {
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(""), None, 100).unwrap();
-        assert_eq!(r, None);
+    fn iterm2_without_a_session_id_falls_back_to_the_process_target() {
+        // §4.1: iTerm.app with no usable $ITERM_SESSION_ID is tracked by pid
+        // instead of being dropped.
+        assert_eq!(target_for(env(Some("iTerm.app"), None, None)), "process:48213");
     }
 
     #[test]
-    fn drops_the_report_when_iterm_session_id_has_no_colon() {
-        // Not the documented wNtNpN:UUID shape (§7-1): can't extract a UUID
-        // half, so this is treated the same as "absent" rather than guessed at.
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some("no-colon-here"), None, 100)
-            .unwrap();
-        assert_eq!(r, None);
+    fn iterm2_with_an_empty_session_id_falls_back_to_the_process_target() {
+        assert_eq!(target_for(env(Some("iTerm.app"), None, Some(""))), "process:48213");
     }
 
     #[test]
-    fn drops_the_report_when_term_program_is_vscode_even_with_a_valid_iterm_session_id() {
+    fn iterm2_with_a_session_id_without_a_colon_falls_back_to_the_process_target() {
+        // Not the documented wNtNpN:UUID shape (§7-1): no UUID half to use.
+        assert_eq!(
+            target_for(env(Some("iTerm.app"), None, Some("no-colon-here"))),
+            "process:48213"
+        );
+    }
+
+    #[test]
+    fn iterm2_with_an_empty_uuid_half_falls_back_to_the_process_target() {
+        assert_eq!(target_for(env(Some("iTerm.app"), None, Some("w0t0p0:"))), "process:48213");
+    }
+
+    #[test]
+    fn inherited_iterm_session_id_under_vscode_is_not_an_iterm2_target() {
         // §4.1/§7-1: VS Code's integrated terminal, launched from an iTerm2
-        // tab, inherits that tab's $ITERM_SESSION_ID verbatim but overwrites
-        // $TERM_PROGRAM with its own value — checking $ITERM_SESSION_ID alone
-        // would misclassify this inherited session as the iTerm2 tab.
+        // tab, inherits that tab's $ITERM_SESSION_ID but overwrites
+        // $TERM_PROGRAM — it must not be classified as the iTerm2 tab.
+        assert_eq!(
+            target_for(env(Some("vscode"), Some("1.100.0"), Some("w0t0p0:UUID"))),
+            "process:48213"
+        );
+    }
+
+    #[test]
+    fn inherited_iterm_session_id_without_term_program_is_not_an_iterm2_target() {
+        assert_eq!(target_for(env(None, None, Some("w0t0p0:UUID"))), "process:48213");
+    }
+
+    #[test]
+    fn apple_terminal_uses_the_walked_tty_as_target() {
+        assert_eq!(
+            target_for(env(Some("Apple_Terminal"), Some("455"), None)),
+            "apple-terminal:/dev/ttys005"
+        );
+    }
+
+    #[test]
+    fn ghostty_at_or_above_the_minimum_version_uses_the_walked_tty_as_target() {
+        for version in ["1.4.0", "1.4.1", "1.10.0", "2.0.0"] {
+            assert_eq!(
+                target_for(env(Some("ghostty"), Some(version), None)),
+                "ghostty:/dev/ttys005",
+                "version {version}"
+            );
+        }
+    }
+
+    #[test]
+    fn ghostty_non_release_builds_compare_only_the_part_before_dash_or_plus() {
+        // §4.1/§7-8: non-release builds report `X.Y.Z-<branch>+<short hash>`.
+        for (version, expected) in [
+            ("1.4.0-main+abc1234", "ghostty:/dev/ttys005"),
+            ("1.4.0-dev+0000000", "ghostty:/dev/ttys005"),
+            ("1.4.0+abc1234", "ghostty:/dev/ttys005"),
+            ("1.3.1-main+abc1234", "process:48213"),
+        ] {
+            assert_eq!(target_for(env(Some("ghostty"), Some(version), None)), expected, "version {version}");
+        }
+    }
+
+    #[test]
+    fn ghostty_below_the_minimum_version_falls_back_to_the_process_target() {
+        // §7-8: Ghostty 1.3.x has no `tty` on its AppleScript `terminal`.
+        for version in ["1.3.0", "1.3.1", "0.9.9"] {
+            assert_eq!(
+                target_for(env(Some("ghostty"), Some(version), None)),
+                "process:48213",
+                "version {version}"
+            );
+        }
+    }
+
+    #[test]
+    fn ghostty_without_a_version_falls_back_to_the_process_target() {
+        assert_eq!(target_for(env(Some("ghostty"), None, None)), "process:48213");
+    }
+
+    #[test]
+    fn ghostty_with_an_unparsable_version_falls_back_to_the_process_target() {
+        for version in ["", "tip", "1.4", "1.4.0.1", "v1.4.0", "1.x.0", "1..0", " 1.4.0"] {
+            assert_eq!(
+                target_for(env(Some("ghostty"), Some(version), None)),
+                "process:48213",
+                "version {version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_or_missing_term_program_falls_back_to_the_process_target() {
+        for term_program in [Some("vscode"), Some("WezTerm"), Some("some-future-terminal"), Some(""), None] {
+            assert_eq!(
+                target_for(env(term_program, None, None)),
+                "process:48213",
+                "TERM_PROGRAM {term_program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_report_carries_the_walked_pid_whatever_the_target() {
+        // §4.1/§4.2: the pid is sent regardless of the target kind.
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("vscode"), Some("w0t0p0:UUID"), None, 100)
+        for env in [
+            ITERM_ENV,
+            env(Some("Apple_Terminal"), None, None),
+            env(Some("ghostty"), Some("1.4.0"), None),
+            env(Some("ghostty"), Some("1.3.1"), None),
+            env(Some("vscode"), None, None),
+            env(None, None, None),
+        ] {
+            let r = build_report(HookEvent::Stop, &raw, &env, Some(&claude()), 1)
+                .unwrap()
+                .expect("not dropped");
+            assert_eq!(r.pid, Some(48213), "env {env:?}");
+        }
+    }
+
+    /// Every environment the target classification distinguishes, for the
+    /// cases where the ancestor walk found no controlling terminal.
+    fn every_term_program_env() -> [HookEnv<'static>; 7] {
+        [
+            ITERM_ENV,
+            env(Some("iTerm.app"), None, None),
+            env(Some("Apple_Terminal"), Some("455"), None),
+            env(Some("ghostty"), Some("1.4.0"), None),
+            env(Some("ghostty"), Some("1.3.1"), None),
+            env(Some("vscode"), None, None),
+            env(None, None, None),
+        ]
+    }
+
+    const EVENTS_OTHER_THAN_SESSION_END: [HookEvent; 6] = [
+        HookEvent::SessionStart,
+        HookEvent::UserPromptSubmit,
+        HookEvent::PostToolUse,
+        HookEvent::PostToolUseFailure,
+        HookEvent::Notification,
+        HookEvent::Stop,
+    ];
+
+    #[test]
+    fn no_controlling_process_drops_every_event_but_session_end_for_every_term_program() {
+        // §4.1/§8.66: a session with no terminal anywhere up the walk is not
+        // tracked, whichever terminal the environment claims.
+        let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": "p", "background_tasks": []});
+        for env in every_term_program_env() {
+            for event in EVENTS_OTHER_THAN_SESSION_END {
+                let r = build_report(event, &raw, &env, None, 1).unwrap();
+                assert_eq!(r, None, "event {event:?}, env {env:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_controlling_process_still_sends_session_end_without_target_or_pid_for_every_term_program() {
+        // A closed terminal window detaches the claude process from its
+        // terminal before its SessionEnd hook runs, so the walk finds
+        // nothing; the SessionEnd is still sent so the daemon can remove the
+        // entry by session_id (§4.2). The environment (iTerm2 variables
+        // included) is not used to invent a target.
+        let raw = json!({
+            "session_id": "s1",
+            "cwd": "/c",
+            "transcript_path": "/c/t.jsonl",
+            "reason": "other"
+        });
+        for env in every_term_program_env() {
+            let r = build_report(HookEvent::SessionEnd, &raw, &env, None, 7)
+                .unwrap()
+                .unwrap_or_else(|| panic!("SessionEnd must not be dropped, env {env:?}"));
+            assert_eq!(
+                r,
+                ReportPayload {
+                    event: HookEvent::SessionEnd,
+                    target: None,
+                    session_id: "s1".into(),
+                    cwd: "/c".into(),
+                    transcript_path: Some("/c/t.jsonl".into()),
+                    ts: 7,
+                    source: None,
+                    notification_type: None,
+                    message: None,
+                    prompt: None,
+                    background_tasks: None,
+                    last_assistant_message: None,
+                    pid: None,
+                },
+                "env {env:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn targetless_session_end_still_requires_a_session_id() {
+        // Without a session_id the daemon could not match the entry.
+        let raw = json!({"cwd": "/c"});
+        assert!(build_report(HookEvent::SessionEnd, &raw, &ITERM_ENV, None, 1).is_err());
+    }
+
+    #[test]
+    fn session_end_with_a_controlling_process_keeps_its_target_and_pid() {
+        let raw = json!({"session_id": "s1", "cwd": "/c"});
+        let r = build_report(HookEvent::SessionEnd, &raw, &ITERM_ENV, Some(&claude()), 1)
+            .unwrap()
             .unwrap();
-        assert_eq!(r, None);
+        assert_eq!(r.target.as_deref(), Some("iterm2:UUID"));
+        assert_eq!(r.pid, Some(48213));
     }
 
     #[test]
-    fn drops_the_report_when_term_program_is_missing_even_with_a_valid_iterm_session_id() {
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, None, Some("w0t0p0:UUID"), None, 100).unwrap();
-        assert_eq!(r, None);
-    }
-
-    #[test]
-    fn apple_terminal_uses_the_prefixed_tty_path_as_target() {
-        // §4.1/§2: TERM_PROGRAM == Apple_Terminal + a resolved tty path ->
-        // `apple-terminal:<tty path>`. ITERM_SESSION_ID plays no part.
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(
-            HookEvent::SessionStart,
-            &raw,
-            Some("Apple_Terminal"),
-            None,
-            Some("/dev/ttys006"),
-            100,
-        )
-        .unwrap()
-        .expect("should not be dropped");
-        assert_eq!(r.target, "apple-terminal:/dev/ttys006");
-    }
-
-    #[test]
-    fn apple_terminal_without_a_resolved_tty_is_dropped() {
-        // §4.1/§7-7: the ancestor walk found no controlling tty within the
-        // limit, so there's no target to build — drop, no fallback (§8.11).
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("Apple_Terminal"), None, None, 100).unwrap();
-        assert_eq!(r, None);
-    }
-
-    #[test]
-    fn apple_terminal_with_an_empty_tty_is_dropped() {
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::SessionStart, &raw, Some("Apple_Terminal"), None, Some(""), 100).unwrap();
-        assert_eq!(r, None);
-    }
-
-    #[test]
-    fn iterm2_branch_ignores_a_resolved_apple_terminal_tty() {
-        // Belt-and-suspenders: even if a tty were resolved, an iTerm2
-        // TERM_PROGRAM must take the iterm2 branch, never apple-terminal.
-        let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(
-            HookEvent::SessionStart,
-            &raw,
-            Some("iTerm.app"),
-            Some("w0t0p0:UUID"),
-            Some("/dev/ttys006"),
-            100,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(r.target, "iterm2:UUID");
+    fn parse_version_triple_reads_release_and_non_release_versions() {
+        assert_eq!(parse_version_triple("1.4.0"), Some((1, 4, 0)));
+        assert_eq!(parse_version_triple("1.4.0-main+abc1234"), Some((1, 4, 0)));
+        assert_eq!(parse_version_triple("1.3.1"), Some((1, 3, 1)));
+        assert_eq!(parse_version_triple("10.20.30+meta"), Some((10, 20, 30)));
+        assert_eq!(parse_version_triple("1.4"), None);
+        assert_eq!(parse_version_triple("1.4.0.0"), None);
+        assert_eq!(parse_version_triple("-1.4.0"), None);
+        assert_eq!(parse_version_triple(""), None);
     }
 
     #[test]
@@ -437,7 +699,7 @@ mod tests {
         // multi-byte chars: naive byte-slicing at 80 could split a codepoint.
         let long_prompt: String = "€".repeat(100);
         let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": long_prompt});
-        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.prompt.unwrap().chars().count(), 80);
@@ -453,7 +715,7 @@ mod tests {
             "cwd": "/c",
             "prompt": "<task-notification>Background agent finished: build the docs"
         });
-        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.prompt, None, "task-notification prompt must be omitted");
@@ -463,7 +725,7 @@ mod tests {
     #[test]
     fn ordinary_prompt_is_still_carried() {
         let raw = json!({"session_id": "s1", "cwd": "/c", "prompt": "implement the thing"});
-        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.prompt.as_deref(), Some("implement the thing"));
@@ -475,7 +737,7 @@ mod tests {
         // request and must keep its prompt.
         let raw = json!({"session_id": "s1", "cwd": "/c",
             "prompt": "explain what <task-notification> means"});
-        let r = build_report(HookEvent::UserPromptSubmit, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::UserPromptSubmit, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert!(r.prompt.is_some());
@@ -484,13 +746,13 @@ mod tests {
     #[test]
     fn missing_session_id_is_an_error() {
         let raw = json!({"cwd": "/c"});
-        assert!(build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1).is_err());
+        assert!(build_report(HookEvent::SessionStart, &raw, &ITERM_ENV, Some(&claude()), 1).is_err());
     }
 
     #[test]
     fn unknown_notification_type_becomes_unknown_variant() {
         let raw = json!({"session_id": "s1", "cwd": "/c", "notification_type": "totally_new"});
-        let r = build_report(HookEvent::Notification, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Notification, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.notification_type, Some(NotificationType::Unknown));
@@ -499,7 +761,7 @@ mod tests {
     #[test]
     fn background_tasks_array_is_passed_through_opaquely() {
         let raw = json!({"session_id": "s1", "cwd": "/c", "background_tasks": [{"id":"1","status":"running"}]});
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.background_tasks.unwrap().len(), 1);
@@ -508,7 +770,7 @@ mod tests {
     #[test]
     fn missing_background_tasks_is_none() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.background_tasks, None);
@@ -520,7 +782,7 @@ mod tests {
         // (same care as the 80-char prompt truncation above).
         let long_message: String = "€".repeat(300);
         let raw = json!({"session_id": "s1", "cwd": "/c", "last_assistant_message": long_message});
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.last_assistant_message.unwrap().chars().count(), 200);
@@ -529,7 +791,7 @@ mod tests {
     #[test]
     fn missing_last_assistant_message_is_none() {
         let raw = json!({"session_id": "s1", "cwd": "/c"});
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.last_assistant_message, None);
@@ -545,7 +807,7 @@ mod tests {
         let contents = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
         let raw: Value = serde_json::from_str(&contents).unwrap();
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -614,23 +876,28 @@ mod tests {
         // `**` prefix behind and only 198 of the 200 inner characters.
         let raw_message = format!("**{}**", "a".repeat(200));
         let raw = json!({"session_id": "s1", "cwd": "/c", "last_assistant_message": raw_message});
-        let r = build_report(HookEvent::Stop, &raw, Some("iTerm.app"), Some("w0t0p0:UUID"), None, 1)
+        let r = build_report(HookEvent::Stop, &raw, &ITERM_ENV, Some(&claude()), 1)
             .unwrap()
             .unwrap();
         assert_eq!(r.last_assistant_message.as_deref(), Some("a".repeat(200).as_str()));
     }
 
-    // tty_from_ancestor_walk (§4.1/§7-7) — pure-function unit tests. The
-    // process table is injected as a map, so no real process is inspected.
+    // controlling_process_from_ancestor_walk (§4.1) — pure-function unit
+    // tests. The process table is injected as a map, so no real process is
+    // inspected.
 
     use std::collections::HashMap;
 
-    fn walk(table: &HashMap<i32, ProcInfo>, start: i32) -> Option<String> {
-        tty_from_ancestor_walk(start, |pid| table.get(&pid).cloned())
+    fn walk(table: &HashMap<i32, ProcInfo>, start: i32) -> Option<ControllingProcess> {
+        controlling_process_from_ancestor_walk(start, |pid| table.get(&pid).cloned())
+    }
+
+    fn found(pid: u32, tty: &str) -> Option<ControllingProcess> {
+        Some(ControllingProcess { pid, tty: tty.into() })
     }
 
     #[test]
-    fn ancestor_walk_returns_the_first_ancestor_with_a_controlling_tty() {
+    fn ancestor_walk_returns_the_pid_and_tty_of_the_first_ancestor_with_a_controlling_tty() {
         // §7-7 chain: hook sh (no tty) -> claude (ttys006) -> zsh -> ...
         let table = HashMap::from([
             (100, ProcInfo { ppid: 90, tty: None }), // the hook process itself
@@ -638,13 +905,29 @@ mod tests {
             (80, ProcInfo { ppid: 70, tty: Some("/dev/ttys006".into()) }), // claude
             (70, ProcInfo { ppid: 1, tty: Some("/dev/ttys006".into()) }),  // zsh
         ]);
-        assert_eq!(walk(&table, 100), Some("/dev/ttys006".into()));
+        assert_eq!(walk(&table, 100), found(80, "/dev/ttys006"));
+    }
+
+    #[test]
+    fn ancestor_walk_from_a_nested_claude_reaches_the_parent_claude() {
+        // §4.1/§7-9: a `claude -p` started by a running session's Bash tool
+        // has no controlling terminal either, so the walk passes through it
+        // and takes the parent `claude`'s pid and tty.
+        let table = HashMap::from([
+            (500, ProcInfo { ppid: 490, tty: None }), // the child's hook process
+            (490, ProcInfo { ppid: 480, tty: None }), // the child's hook shell
+            (480, ProcInfo { ppid: 470, tty: None }), // child claude -p
+            (470, ProcInfo { ppid: 460, tty: None }), // Bash tool shell
+            (460, ProcInfo { ppid: 450, tty: Some("/dev/ttys005".into()) }), // parent claude
+            (450, ProcInfo { ppid: 1, tty: Some("/dev/ttys005".into()) }),   // login shell
+        ]);
+        assert_eq!(walk(&table, 500), found(460, "/dev/ttys005"));
     }
 
     #[test]
     fn ancestor_walk_uses_the_start_process_tty_when_it_already_has_one() {
         let table = HashMap::from([(80, ProcInfo { ppid: 70, tty: Some("/dev/ttys006".into()) })]);
-        assert_eq!(walk(&table, 80), Some("/dev/ttys006".into()));
+        assert_eq!(walk(&table, 80), found(80, "/dev/ttys006"));
     }
 
     #[test]
@@ -694,7 +977,7 @@ mod tests {
             let tty = is_last.then(|| "/dev/ttys006".to_string());
             table.insert(pid, ProcInfo { ppid: pid + 1, tty });
         }
-        assert_eq!(walk(&table, 1), Some("/dev/ttys006".into()));
+        assert_eq!(walk(&table, 1), found(MAX_ANCESTOR_WALK_STEPS as u32, "/dev/ttys006"));
     }
 
     #[test]

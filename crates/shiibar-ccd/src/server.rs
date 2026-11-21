@@ -125,8 +125,15 @@ async fn handle_connection(stream: UnixStream, core: Arc<Mutex<Core>>, shutdown:
 
     match request {
         Request::Report(payload) => {
+            // A report missing its target on an event other than SessionEnd
+            // is invalid: answer like any other invalid request and change
+            // nothing. A valid report gets no response (§4.2:
+            // fire-and-forget).
+            if let Err(e) = payload.validate() {
+                respond(&mut write_half, &ErrorResponse::new(format!("invalid request: {e}"))).await;
+                return;
+            }
             core.lock().expect("core mutex poisoned").handle_report(payload);
-            // No response (§4.2: fire-and-forget).
         }
         Request::List => {
             let resp = core.lock().expect("core mutex poisoned").handle_list();
@@ -195,8 +202,8 @@ async fn handle_subscribe(
                             return;
                         }
                     }
-                    Ok(BroadcastEvent::AgentRemoved { target, reason }) => {
-                        if !write_event(&mut write_half, &SubscribeEvent::AgentRemoved { target, reason }).await {
+                    Ok(BroadcastEvent::AgentRemoved { target, reason, to }) => {
+                        if !write_event(&mut write_half, &SubscribeEvent::AgentRemoved { target, reason, to }).await {
                             return;
                         }
                     }

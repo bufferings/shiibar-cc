@@ -87,9 +87,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // have no working suppression (probe-measured: hides and removals
         // are reverted by SwiftUI's open-time menu rebuild; three candidate
         // AutoFill defaults keys had no effect) and remain visible.
+        //
+        // `NSAutoFillHeuristicControllerEnabled`: on macOS 26 and later the
+        // system decides by heuristics whether a focused text field wants
+        // AutoFill and shows its menu next to the insertion point. For the
+        // search field that menu is an empty panel over the list (§4.5).
+        // The app has no field to fill, so the heuristics are turned off
+        // for this process only.
         UserDefaults.standard.register(defaults: [
             "NSDisabledDictationMenuItem": true,
             "NSDisabledCharacterPaletteMenuItem": true,
+            "NSAutoFillHeuristicControllerEnabled": false,
         ])
     }
 

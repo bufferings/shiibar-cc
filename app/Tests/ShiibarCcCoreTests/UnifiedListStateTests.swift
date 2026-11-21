@@ -470,6 +470,150 @@ final class UnifiedListStateTests: XCTestCase {
         XCTAssertEqual(state.selection?.key, key)
     }
 
+    // MARK: - Rows the app cannot jump to (§4.5 "row double-click", "key operations")
+
+    /// Running t1 (s1), t2 (s2) and `process:48213` (sp, a session in a
+    /// terminal the app can't drive); History h1 and the live conversation
+    /// `live` (no daemon entry for its session_id).
+    private func withRowsThatCannotJump(columns: ColumnMode) -> UnifiedListState {
+        var state = UnifiedListState(home: UL.home, now: UL.now)
+        state.handle(.columnsChanged(columns))
+        state.handle(.agentsUpdated([
+            UL.agent("process:48213", session: "sp", createdAt: 30),
+            UL.agent("t1", session: "s1", createdAt: 20),
+            UL.agent("t2", session: "s2", createdAt: 10),
+        ]))
+        state.handle(.historyDelivered(
+            [UL.summary("s1", live: true), UL.summary("h1"), UL.summary("live", live: true)],
+            isFiltered: false))
+        return state
+    }
+
+    /// Enter with list focus, the way the app runs it: decide from the
+    /// state's key context, then perform.
+    @discardableResult
+    private func pressEnter(_ state: inout UnifiedListState, command: Bool = false) -> [UnifiedListEffect]? {
+        let context = state.keyContext(isPopover: false, hasMarkedText: false)
+        guard case .perform(let keyCommand) = UnifiedListKeys.decide(
+            key: .returnKey, modifiers: command ? [.command] : [], context: context) else { return nil }
+        return state.perform(keyCommand)
+    }
+
+    /// §4.5 "row double-click" / "key operations": on a row whose primary is
+    /// the disabled Jump (the Running row of a session the app cannot jump
+    /// to, and a live conversation left in History), Enter and a
+    /// double-click show the conversation instead — the one-column list page
+    /// opens the detail page, two columns move focus to the conversation
+    /// pane — and never run Jump.
+    func testEnterAndDoubleClickShowTheConversationOfARowThatCannotJump() {
+        let rows: [(UnifiedRowKey, String, RowInvocation)] = [
+            (.running(target: "process:48213"), "sp",
+             .branch(sessionID: "sp", cwd: "/Users/example/demo/api")),
+            (.conversation(sessionID: "live"), "live",
+             .branch(sessionID: "live", cwd: "/Users/example/demo/web")),
+        ]
+        for columns in [ColumnMode.one, .two] {
+            for (key, sessionID, branch) in rows {
+                let name = "\(columns), \(key)"
+                let shown: [UnifiedListEffect] = columns == .one
+                    ? [.loadConversation(sessionID: sessionID), .focusConversationPane]
+                    : [.focusConversationPane]
+
+                // Enter.
+                var enter = withRowsThatCannotJump(columns: columns)
+                click(&enter, key)
+                XCTAssertEqual(enter.selectedRow?.primaryButton, .undrivableJump, name)
+                XCTAssertTrue(enter.selectedRowShowsConversation, name)
+                XCTAssertEqual(pressEnter(&enter), shown, name)
+                XCTAssertEqual(enter.page, columns == .one ? .detail : .list, name)
+                XCTAssertEqual(enter.selection?.key, key, name)
+
+                // Double-click.
+                var double = withRowsThatCannotJump(columns: columns)
+                click(&double, key, count: 1, pressedAt: 50)
+                double.handle(.surfaceKeyChanged(true))
+                double.handle(.searchFieldFocusChanged(false))
+                XCTAssertEqual(click(&double, key, count: 2, pressedAt: 50.2), [.focusList] + shown, name)
+                XCTAssertEqual(double.page, columns == .one ? .detail : .list, name)
+                XCTAssertEqual(double.selection?.key, key, "\(name): a double-click never deselects")
+                XCTAssertNil(double.pendingDeselect, name)
+
+                // A double-click on an unselected row selects it first.
+                var fresh = withRowsThatCannotJump(columns: columns)
+                click(&fresh, .conversation(sessionID: "h1"))
+                click(&fresh, key, count: 1, pressedAt: 60)
+                let second = click(&fresh, key, count: 2, pressedAt: 60.2)
+                XCTAssertTrue(second.contains(.focusConversationPane), name)
+                XCTAssertEqual(fresh.selection?.key, key, name)
+
+                // ⌘Enter and ⌘ + double-click still run Branch.
+                var commandEnter = withRowsThatCannotJump(columns: columns)
+                click(&commandEnter, key)
+                XCTAssertEqual(pressEnter(&commandEnter, command: true), [.invoke(branch)], name)
+                XCTAssertEqual(commandEnter.page, .list, name)
+                var commandDouble = withRowsThatCannotJump(columns: columns)
+                click(&commandDouble, key, count: 1)
+                XCTAssertEqual(click(&commandDouble, key, count: 2, command: true), [.focusList, .invoke(branch)], name)
+                XCTAssertEqual(commandDouble.page, .list, name)
+            }
+        }
+    }
+
+    /// §4.5 "key operations": on the one-column detail page, Enter on a row
+    /// the app cannot jump to does nothing (the conversation is already on
+    /// screen); the key is still taken as the row's Enter.
+    func testEnterOnTheDetailPageOfARowThatCannotJumpDoesNothing() {
+        for key in [UnifiedRowKey.running(target: "process:48213"), .conversation(sessionID: "live")] {
+            var state = withRowsThatCannotJump(columns: .one)
+            click(&state, key)
+            state.handle(.openDetail)
+            XCTAssertEqual(state.page, .detail, "\(key)")
+            XCTAssertEqual(state.keyContext(isPopover: false, hasMarkedText: false).primaryShowsConversation, true)
+            XCTAssertEqual(pressEnter(&state), [], "\(key)")
+            XCTAssertEqual(state.page, .detail, "\(key)")
+            XCTAssertEqual(state.selection?.key, key, "\(key)")
+        }
+    }
+
+    /// Rows with another primary button keep their Enter and double-click:
+    /// an enabled Jump (iTerm2) jumps, and a disabled Resume (no cwd) only
+    /// selects and focuses the list.
+    func testOtherRowsKeepTheirEnterAndDoubleClick() {
+        for columns in [ColumnMode.one, .two] {
+            var jump = withRowsThatCannotJump(columns: columns)
+            click(&jump, .running(target: "t2"))
+            XCTAssertFalse(jump.selectedRowShowsConversation)
+            XCTAssertEqual(pressEnter(&jump), [.invoke(.jump(target: "t2"))], "\(columns)")
+            XCTAssertEqual(jump.page, .list, "\(columns)")
+
+            var resume = withRowsThatCannotJump(columns: columns)
+            resume.handle(.historyDelivered([UL.summary("x", cwd: nil)], isFiltered: false))
+            let key = UnifiedRowKey.conversation(sessionID: "x")
+            click(&resume, key)
+            XCTAssertFalse(resume.selectedRowShowsConversation)
+            XCTAssertNil(pressEnter(&resume), "\(columns): Enter on a disabled Resume is ignored")
+            XCTAssertEqual(click(&resume, key, count: 2), [.focusList], "\(columns)")
+            XCTAssertEqual(resume.page, .list, "\(columns)")
+        }
+    }
+
+    /// Assumption (§4.5 "row selection"): while the selected Running row
+    /// that ended awaits the History refetch, every button is disabled and
+    /// Enter does not show the conversation either.
+    func testARowAwaitingTheRefetchDoesNotShowTheConversation() {
+        var state = withRowsThatCannotJump(columns: .one)
+        click(&state, .running(target: "process:48213"))
+        state.handle(.agentsUpdated([
+            UL.agent("t1", session: "s1", createdAt: 20),
+            UL.agent("t2", session: "s2", createdAt: 10),
+        ]))
+        XCTAssertTrue(state.isAwaitingRefetch)
+        XCTAssertFalse(state.selectedRowShowsConversation)
+        XCTAssertNil(pressEnter(&state))
+        XCTAssertEqual(state.handle(.showConversation), [])
+        XCTAssertEqual(state.page, .list)
+    }
+
     /// §4.5 "row double-click": ⌘ held at the second press runs Branch
     /// instead of Jump / Resume (like ⌘Enter with list focus); ⌘ is judged at
     /// the second press only. With Branch disabled the double-click only
@@ -642,6 +786,46 @@ final class UnifiedListStateTests: XCTestCase {
             state.handle(.deferredDeselectDue(id: 1))
             XCTAssertNil(state.selection, name)
         }
+    }
+
+    /// An operation on the selected row that keeps it selected, within the
+    /// double-click interval after the accent click, cancels the pending
+    /// deselect: the row stays selected when the interval passes.
+    func testPendingDeselectIsCancelledByAnOperationThatKeepsTheRowSelected() {
+        struct Case {
+            let name: String
+            let key: UnifiedRowKey
+            let operate: (inout UnifiedListState) -> [UnifiedListEffect]
+        }
+        let h2 = UnifiedRowKey.conversation(sessionID: "h2")
+        let t2 = UnifiedRowKey.running(target: "t2")
+        let cases: [Case] = [
+            Case(name: "Enter runs the primary button (Resume)", key: h2, operate: { $0.perform(.primary) }),
+            Case(name: "⌘Enter runs Branch", key: h2, operate: { $0.perform(.branch) }),
+            Case(name: "Enter runs Jump", key: t2, operate: { $0.perform(.primary) }),
+            Case(name: "the row's more button", key: h2, operate: { $0.handle(.moreButtonClicked(h2)) }),
+            Case(name: "the row's star", key: h2, operate: { $0.handle(.starToggled(sessionID: "h2")) }),
+        ]
+        for testCase in cases {
+            var state = populated()
+            click(&state, testCase.key)
+            click(&state, testCase.key, count: 1)
+            XCTAssertEqual(state.pendingDeselect, PendingDeselect(id: 1, key: testCase.key), testCase.name)
+            let effects = testCase.operate(&state)
+            XCTAssertFalse(effects.isEmpty, "\(testCase.name): the operation ran")
+            XCTAssertNil(state.pendingDeselect, testCase.name)
+            state.handle(.deferredDeselectDue(id: 1))
+            XCTAssertEqual(state.selection?.key, testCase.key, "\(testCase.name): stays selected")
+        }
+
+        // A disabled button runs nothing and leaves the pending deselect.
+        var disabled = populated()
+        disabled.handle(.agentsUpdated([UL.agent("t0", status: .waiting, session: "", message: "Permission")]))
+        let t0 = UnifiedRowKey.running(target: "t0")
+        click(&disabled, t0)
+        click(&disabled, t0, count: 1)
+        XCTAssertEqual(disabled.perform(.branch), [])
+        XCTAssertNotNil(disabled.pendingDeselect)
     }
 
     /// A newer deferred deselect replaces an older one: only the newest
@@ -823,10 +1007,10 @@ final class UnifiedListStateTests: XCTestCase {
         }
     }
 
-    /// §4.5 "global hotkey": opened (or raised) by the hotkey, the list takes
-    /// focus by Enter's rule — no selection: the first row; no rows: the
-    /// search field. The one-column detail page stays and the conversation
-    /// pane takes focus.
+    /// §4.5 "global hotkey" / §8.66: opened (or raised) by the hotkey, the
+    /// list takes focus and the selection does not change (no selection
+    /// stays none); no rows: the search field. The one-column detail page
+    /// stays and the conversation pane takes focus.
     func testOpenedByHotKeyFocusRule() {
         struct Case {
             let name: String
@@ -844,8 +1028,7 @@ final class UnifiedListStateTests: XCTestCase {
                  expectedSelection: .conversation(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "one column, no selection", columns: .one, preselected: nil,
                  detailPage: false, empty: false,
-                 expectedSelection: .running(target: "t1"), expectedPage: .list,
-                 expectedEffects: [.focusList, .scrollSelectionIntoView]),
+                 expectedSelection: nil, expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "one column, no rows", columns: .one, preselected: nil,
                  detailPage: false, empty: true,
                  expectedSelection: nil, expectedPage: .list, expectedEffects: [.focusSearchField]),
@@ -858,8 +1041,7 @@ final class UnifiedListStateTests: XCTestCase {
                  expectedSelection: .conversation(sessionID: "h2"), expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "two columns, no selection", columns: .two, preselected: nil,
                  detailPage: false, empty: false,
-                 expectedSelection: .running(target: "t1"), expectedPage: .list,
-                 expectedEffects: [.focusList, .loadConversation(sessionID: "s1"), .scrollSelectionIntoView]),
+                 expectedSelection: nil, expectedPage: .list, expectedEffects: [.focusList]),
             Case(name: "two columns, no rows", columns: .two, preselected: nil,
                  detailPage: false, empty: true,
                  expectedSelection: nil, expectedPage: .list, expectedEffects: [.focusSearchField]),

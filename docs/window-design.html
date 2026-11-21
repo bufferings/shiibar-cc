@@ -314,6 +314,9 @@
   .actions { display:flex; align-items:center; gap:10px; padding:9px 12px 10px; border-top:1px solid var(--line); flex:none; }
   .actions .hints { padding:0; flex:1; min-width:0; }
   .actions .sp { flex:1; }
+  /* disabled のボタンの理由: ボタンの行のすぐ上の行(右寄せ)。理由がある間だけ表示する */
+  .reasonline { padding:9px 12px 0; border-top:1px solid var(--line); text-align:right; color:var(--menu-text2); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .actions.noline { border-top:0; padding-top:4px; }
   /* 行を選択していない間: ボタンの場所を空けたまま表示しない(パネルの高さとボタンの位置を保つ) */
   .actions .ph { visibility:hidden; }
   /* Resume / Jump は同幅(長い方 = Resume に揃えて固定。DESIGN.md §4.6 / §8.48) */
@@ -522,17 +525,18 @@
       行の中にボタンは無い(スターと三点リーダーを除く)(DESIGN.md §4.5「一覧は 3 つの区画」)</li>
     <li><strong>Running の行</strong>: 列の上 = 状態記号。1 行目 = ラベル、
       2 行目 = タイトル(waiting の間は許可内容)、3 行目 = 最後に自分が送った発話
-      (内容の規則は DESIGN.md §4.5「Running の行」)。選択中は、下部パネルの主ボタンが Jump になる</li>
+      (内容の規則は DESIGN.md §4.5「Running の行」)。選択中は、下部パネルの主ボタンが Jump になる(ジャンプできないセッションでは、disabled の Jump)</li>
     <li><strong>Starred と Recent の行</strong>: 列の上 = 左からスター、三点リーダー(下記「Archive」)。1 行目 = フォルダラベル、
       2 行目 = タイトル、3 行目 = 最後に自分が送った発話。
       選択中は、下部パネルの主ボタンが Resume になる。Starred の並びは利用者が決めた順序、Recent の並びは新しい順である
       (DESIGN.md §4.6「Starred の区画」「Recent の区画」)</li>
     <li><strong>Starred または Recent に残る実行中の会話</strong>: 1 行目(ラベル)の末尾に <code>· running</code>。
-      選択中は、下部パネルの主ボタンが <strong>disabled の Jump</strong>(ツールチップ
-      <code>Running in a terminal Shiibar CC can't drive</code>)になり、Branch は通常の表示</li>
+      選択中は、下部パネルの主ボタンが <strong>disabled の Jump</strong>(ボタンの行の上に、理由
+      <code>Running in a terminal Shiibar CC can't drive</code> を表示する)になり、Branch は通常の表示</li>
     <li><strong>未確認(unreviewed)= 状態記号の右肩の、アクセントカラーの点</strong>(明色ハロー付き。
       トレイアイコンの「窓の右肩の点」と同じ文法 — menubar-design.html)。タイトルの太さでは未確認を示さない。
-      行の右端には未確認の印を配置しない</li>
+      行の右端には未確認の印を配置しない。未確認の点は、利用者が選択した行の選択が 1 秒続いた時点、Jump の成功、<code>Mark all as read</code> で消える
+      (選択中の行が未確認になった場合は、点を表示する。その行を選択し直す操作の 1 秒後に消える。会話ペインの中の操作では消えない。DESIGN.md §4.5「未確認を下ろす操作」)</li>
     <li><strong>クリック</strong>: スターと三点リーダー以外の部分をクリックすると、その行を選択する。
       青で表示している選択中の行をクリックすると、選択を解除する(選択なしになる)。
       灰色で表示している選択中の行をクリックしたときは、選択を解除せず、一覧にフォーカスを移す
@@ -597,7 +601,7 @@
       <figcaption>ポップオーバー · 一覧のページ。Running の先頭の行(waiting + 未確認)を選択していて、
         一覧にフォーカスがある。下部パネルの主ボタンは Jump になり、その左に View と Branch を表示する。
         History の見出しの下に、Starred(スター付きの会話)と Recent を表示する。区画ごとに、行を 1 つの枠の中に並べる。
-        Recent の 1 行目は追跡外で実行中の会話、2 行目はホバー中(淡い灰色の地・列の上に輪郭の星)。下部パネルの上は警告行の例</figcaption>
+        Recent の 1 行目は、daemon にエントリが無い実行中の会話(<code>· running</code> の印)、2 行目はホバー中(淡い灰色の地・列の上に輪郭の星)。下部パネルの上は警告行の例</figcaption>
     </figure>
     <figure>
       <div class="app pop"><div class="clip">
@@ -1209,7 +1213,7 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       1 列の一覧のページでは、Branch の左に <strong>View</strong>(副ボタン・Branch と同じ見た目)を表示する。
       View は、選択中の行の詳細ページを開く(一覧にフォーカスがある間の → と同じ)。disabled の状態は無い。
       1 列の詳細ページと 2 列の右の列には、View を表示しない(会話を表示しているため)。
-      パネルの高さは変化しない。Resume と Jump は同幅
+      パネルの高さは変化しない(disabled のボタンの理由を表示している間を除く)。Resume と Jump は同幅
       (行を移動してボタンが替わっても、端の位置が移動しない)</li>
     <li><strong>ボタンの中のショートカット</strong>: ラベルに続けて、そのボタンを実行するキーを表示する —
       主ボタンは <code>Resume ↩</code> / <code>Jump ↩</code>、Branch は <code>Branch ⌘↩</code>、View は <code>View →</code>。
@@ -1224,8 +1228,14 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     <li>1 列の一覧のページで行を選択していない間は、ボタンを表示せず、キーの案内だけを表示する
       (パネルの高さは変わらない)。検索欄にフォーカスがある間は、1 列ではキーの案内(<code>↩ List</code>)だけを表示し、
       2 列の右の列では何も表示しない</li>
-    <li>disabled の主ボタンは標準の灰色の形にする(DESIGN.md §4.6 / §8.42)。理由はツールチップ
-      <code>Running in a terminal Shiibar CC can't drive</code> で示す</li>
+    <li>disabled の主ボタンは標準の灰色の形にする(DESIGN.md §4.6 / §8.42)。disabled の Jump の理由
+      <code>Running in a terminal Shiibar CC can't drive</code> は、ボタンの行のすぐ上の行に、キーの案内と同じ大きさの淡色の文字で、右寄せで表示する
+      (同じ文言をツールチップにも設定する。表示している間は、パネルが 1 行分高くなる。ボタンの行の配置は変わらない。DESIGN.md §4.6「下部パネル」)。disabled の Jump を表示するのは、ジャンプできないセッション
+      (対応ターミナル以外で実行しているセッション)の Running の行と、Starred または Recent に残る実行中の会話である。
+      これらの行の Enter とダブルクリックは、Jump の代わりに、その会話を表示する(1 列の一覧のページでは詳細ページを開き、2 列では会話ペインにフォーカスを移す。
+      DESIGN.md §4.5「行のダブルクリック」)</li>
+    <li>Settings の <code>Terminal</code> で選択したターミナルを使用できないときは、Resume と Branch を disabled にして、
+      同じ位置に理由を表示する(理由が 2 つある場合は 2 行。DESIGN.md §4.6「Resume と Branch」)</li>
   </ul>
   <div class="mock">
     <figure>
@@ -1233,21 +1243,23 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
         <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec ph">View<span class="kc">→</span></span><span class="btn sec ph">Branch<span class="kc">⌘↩</span></span><span class="btn ph">Resume<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
-        <div class="actions"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
+        <div class="reasonline">Running in a terminal Shiibar CC can't drive</div>
+        <div class="actions noline"><div class="hints"><span><span class="k">↑↓</span>Move</span></div><span class="btn sec">View<span class="kc">→</span></span><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
       </div>
       <figcaption>1 列の一覧のページ(上から: 行を選択していない / History の行の会話 / Running の行にある会話 /
-        Starred または Recent に残る実行中の会話(追跡外)。どれも一覧にフォーカスがある状態。
+        ジャンプできないセッションの Running の行、または Starred / Recent に残る実行中の会話。どれも一覧にフォーカスがある状態。
         行を選択している間は、View・Branch・主ボタンを表示する。
-        主ボタンが disabled の間も、ボタンの中の <code>↩</code> は表示する)</figcaption>
+        主ボタンが disabled の間も、ボタンの中の <code>↩</code> は表示する。disabled の Jump の段は、ボタンの行の上に理由を表示するので、ほかの段より 1 行分高い)</figcaption>
     </figure>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:0">
         <div class="actions" style="border-top:0"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Resume<span class="kc">↩</span></span></div>
         <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn">Jump<span class="kc">↩</span></span></div>
-        <div class="actions"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
+        <div class="reasonline">Running in a terminal Shiibar CC can't drive</div>
+        <div class="actions noline"><div class="hints"><span><span class="k">⌥↑↓</span>Prev / Next</span><span><span class="k">←</span>Back</span></div><span class="btn sec">Branch<span class="kc">⌘↩</span></span><span class="btn dis">Jump<span class="kc">↩</span></span></div>
       </div>
       <figcaption>1 列の詳細ページ(上 = History の行の会話 / 中 = Running の行にある会話 /
-        下 = Starred または Recent に残る実行中の会話(追跡外))。View は表示しない</figcaption>
+        下 = ジャンプできないセッションの Running の行、または Starred / Recent に残る実行中の会話。ボタンの行の上に理由を表示する)。View は表示しない</figcaption>
     </figure>
     <figure>
       <div class="app strip" style="width:420px; padding:0; gap:0">
@@ -1383,7 +1395,7 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
     <tr><th>キー</th><th>検索欄にフォーカスがある間</th><th>一覧にフォーカスがある間</th></tr>
     <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>何もしない</td><td>前後の行に選択を移動する(閉じている区画の行は対象にしない)。選択なしの間は、先頭の行を選択する。1 列の詳細ページでは、会話をスクロールする(Space と Page Up / Page Down も同じ)</td></tr>
     <tr><td><kbd>⌥↑</kbd> <kbd>⌥↓</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の詳細ページで、表示する会話を前後の行の会話に切り替える(選択も移動する。スライドはしない。端では何もしない)。それ以外では何もしない</td></tr>
-    <tr><td><kbd>↩</kbd></td><td>一覧にフォーカスを移す。選択なしの間は、先頭の行を選択する。行が 1 つも無いときは何もしない</td><td>Jump または Resume(下部パネルの主ボタンと同じ)</td></tr>
+    <tr><td><kbd>↩</kbd></td><td>一覧にフォーカスを移す。選択なしの間は、先頭の行を選択する。行が 1 つも無いときは何もしない</td><td>Jump または Resume(下部パネルの主ボタンと同じ)。選択なしの間は、先頭の行を選択する(行が 1 つも無いときは何もしない)。主ボタンが disabled の Jump である行では、会話を表示する(1 列の一覧のページでは詳細ページを開き、2 列では会話ペインにフォーカスを移す)</td></tr>
     <tr><td><kbd>⌘↩</kbd></td><td>何もしない</td><td>Branch(下部パネルの Branch と同じ)</td></tr>
     <tr><td><kbd>→</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の一覧のページで、選択中の行の詳細ページを開く(下部パネルの View と同じ。選択なしの間は何もしない)</td></tr>
     <tr><td><kbd>←</kbd></td><td>検索欄のカーソルを移動する</td><td>1 列の詳細ページで、一覧のページに戻る</td></tr>
@@ -1415,6 +1427,7 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
           <div class="it"><div class="lb"><b>Appearance</b><span>System follows the appearance setting of your Mac</span></div><div class="ct"><span class="seg"><span class="on">System</span><span>Light</span><span>Dark</span></span></div></div>
           <div class="it"><div class="lb"><b>Text size</b><span>Text in the popover and the window</span></div><div class="ct" style="gap:4px"><span class="popup" style="min-width:56px;text-align:right;box-sizing:border-box">13</span><span class="popup" style="padding:0 3px">▲▼</span></div></div>
           <div class="it"><div class="lb"><b>Global shortcut</b><span>Shows the list from any app</span><span class="er">Add ⌃, ⌥, or ⌘ to the shortcut</span></div><div class="ct"><span class="popup" style="min-width:120px;text-align:center;box-sizing:border-box">Type shortcut</span></div></div>
+          <div class="it"><div class="lb"><b>Terminal</b><span>Resume and Branch open in this terminal</span></div><div class="ct"><span class="seg"><span class="on">iTerm2</span><span>Terminal</span><span>Ghostty</span></span></div></div>
         </div>
         <div class="sh">Sounds</div>
         <div class="box">
@@ -1457,6 +1470,9 @@ todo list --<span class="hl">tag</span>s urgent,work</pre>
       挙動は DESIGN.md §4.5「Setup Check のタブ」</li>
     <li><strong>General のタブ</strong>: 見出し付きの枠 2 つ(General と Sounds)を表示する。1 行は、左にラベル(セミボールド)と 1 行の説明(11px・二次色)、
       右に、幅 240px の列に右端をそろえたコントロール 1 つである。エラーと案内の文字は、説明の下に表示する</li>
+    <li><strong>Terminal の行</strong>: 3 つの選択肢(<code>iTerm2</code> / <code>Terminal</code> / <code>Ghostty</code>)のセグメントである。
+      選択したターミナルを使用できないときは、説明の下に、エラーと案内の文字の色で、理由を 1 行表示する
+      (<code>Ghostty is not installed</code> など。文言と条件は DESIGN.md §4.5「Settings ウィンドウ」の Terminal)</li>
     <li>本図の寸法(余白、枠の角の半径、行の余白、右の列の幅)は、DESIGN.md §9 の値である。コントロールは macOS 標準の部品で、
       本図の形は例示である。項目と動作は DESIGN.md §4.5「Settings ウィンドウ」</li>
   </ul>

@@ -109,6 +109,19 @@ impl TestDaemon {
         let mut resp = String::new();
         reader.read_line(&mut resp).expect("read remove ack");
     }
+
+    /// Send a `reconcile` request (§3.5/§4.2) and wait for its ack, so the
+    /// daemon has applied it (and broadcast any resulting events) by the
+    /// time this returns.
+    pub fn reconcile(&self, complete: bool, sessions: Vec<shiibar_cc_proto::ReconcileSession>) {
+        let mut stream = UnixStream::connect(&self.sock_path).expect("connect for reconcile");
+        let req = Request::Reconcile { complete, sessions };
+        let line = codec::encode_line(&req).expect("encode reconcile");
+        stream.write_all(line.as_bytes()).expect("write reconcile");
+        let mut reader = BufReader::new(stream);
+        let mut resp = String::new();
+        reader.read_line(&mut resp).expect("read reconcile ack");
+    }
 }
 
 impl Drop for TestDaemon {
@@ -126,7 +139,7 @@ pub fn report_payload(
 ) -> shiibar_cc_proto::ReportPayload {
     shiibar_cc_proto::ReportPayload {
         event,
-        target: target.to_string(),
+        target: Some(target.to_string()),
         session_id: "sess-1".to_string(),
         cwd: cwd.to_string(),
         transcript_path: None,
@@ -137,6 +150,7 @@ pub fn report_payload(
         prompt: None,
         background_tasks: None,
         last_assistant_message: None,
+        pid: None,
     }
 }
 

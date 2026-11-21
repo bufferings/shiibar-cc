@@ -15,7 +15,6 @@ import ShiibarCcCore
 final class AppState: ObservableObject {
     @Published private(set) var agents: [Agent] = [] {
         didSet {
-            rememberObservedTerminal()
             surface.agentsUpdated(agents)
         }
     }
@@ -46,6 +45,9 @@ final class AppState: ObservableObject {
     /// The global hotkey (§4.5 "global hotkey"): registered in `start()`;
     /// the Settings window records its combination.
     let hotKey: GlobalHotKeyModel
+    /// Settings > General > Terminal (§4.5/§4.6): where Resume and Branch
+    /// open, and whether that terminal can be used.
+    let resumeTerminal: ResumeTerminalSetting
     private let lifecycle: DaemonLifecycleManager
     /// Not `private`: the Setup Check tab (§4.5) also needs it to run
     /// `shiibar-cc doctor --json` via `CLIRunner`, same as `focus` /
@@ -69,7 +71,8 @@ final class AppState: ObservableObject {
             setupCheck: SetupCheckViewModel(
                 helpersDirectory: helpersDirectory,
                 notificationManager: notificationManager,
-                loginItemEnabledProvider: { [weak self] in self?.loginItemEnabled ?? false }))
+                loginItemEnabledProvider: { [weak self] in self?.loginItemEnabled ?? false }),
+            resumeTerminal: resumeTerminal)
     }()
     /// Drives periodic reconcile (§4.5/§8.22/§9): started once in `start()`,
     /// invalidated in `deinit`. The interval/tolerance values live in
@@ -94,6 +97,10 @@ final class AppState: ObservableObject {
     /// Set by `MainSurfaceController`: shows the About panel and gives it
     /// the level the window pin calls for (`AuxiliaryWindowLevel`).
     var showAboutPanel: () -> Void = { NSApp.orderFrontStandardAboutPanel(nil) }
+    /// Set by `MainSurfaceController`: a notification click on a session
+    /// the app cannot jump to opens the surface of the current form, then
+    /// selects the session's Running row (§4.5 "notification click").
+    var showRowForNotification: (String) -> Void = { _ in }
 
     init(helpersDirectory: URL?) {
         self.helpersDirectory = helpersDirectory
@@ -105,6 +112,11 @@ final class AppState: ObservableObject {
         let textSize = TextSizeStore()
         self.textSize = textSize
         self.hotKey = GlobalHotKeyModel(registrar: CarbonHotKeyRegistrar(), defaults: .standard)
+        // §4.5 "Settings window" > Terminal: the first value is decided and
+        // the old key removed here, at app launch.
+        let resumeTerminal = ResumeTerminalSetting(
+            defaults: .standard, lookup: InstalledTerminalApps.live, center: .default)
+        self.resumeTerminal = resumeTerminal
         let home = ProcessInfo.processInfo.environment["HOME"]
         self.surface = MainSurfaceModel(
             home: home,
@@ -127,7 +139,8 @@ final class AppState: ObservableObject {
         self.lifecycle = DaemonLifecycleManager(
             socketPath: StateDirectory.socketPath(root: root),
             daemonLogPath: StateDirectory.daemonLogPath(root: root),
-            helpersDirectory: helpersDirectory
+            helpersDirectory: helpersDirectory,
+            bundleVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         )
 
         notificationManager.currentAgentsProvider = { [weak self] in self?.agents ?? [] }
@@ -135,8 +148,10 @@ final class AppState: ObservableObject {
         notificationManager.onFocusRequested = { [weak self] target in
             self?.focus(target: target)
         }
+        notificationManager.onSelectRowRequested = { [weak self] target in
+            self?.showRowForNotification(target)
+        }
         surface.helpersDirectory = helpersDirectory
-        surface.resumeTerminal = { [weak self] in self?.resumeTerminal ?? ResumeTerminal.iterm2 }
         surface.onPermissionDenied = { [weak self] in self?.tccWarning = true }
         surface.onSurfaceShown = { [weak self] in
             // §4.5: re-evaluate the notification-permission warning row every
@@ -144,6 +159,10 @@ final class AppState: ObservableObject {
             // System Settings mid-session shows without a restart).
             self?.notificationManager.refreshPermissionStatus()
         }
+        // §4.5 "Settings window" > Terminal / §4.6 "Resume and Branch":
+        // `--terminal`, the buttons' enabled state, and the re-check on
+        // every surface show.
+        resumeTerminal.attach(to: surface)
         notificationManager.$permissionDenied
             .removeDuplicates()
             .sink { [weak self] _ in
@@ -368,35 +387,43 @@ final class AppState: ObservableObject {
             if !agent.unreviewed {
                 notificationManager.sweepDelivered(target: agent.target)
             }
-        case .agentRemoved(let target, let reason):
-            agents.removeAll { $0.target == target }
-            notificationManager.forget(target: target)
-            notificationManager.sweepDelivered(target: target, reason: reason)
+        case .agentRemoved(let target, let reason, let to):
+            switch AgentRemovalHandling.decide(reason: reason, to: to) {
+            case .rekey(let to):
+                // §4.5 "desktop notifications": a target change, not a
+                // removal. The fired record, a pending delayed notification,
+                // the row's selection and the conversation pane move to
+                // `to`; delivered notifications stay. The list hears of it
+                // before the table changes, so the row is never treated as
+                // gone.
+                Self.applyRekey(
+                    from: target, to: to, agents: agents,
+                    notifications: { [notificationManager] in notificationManager.rekey(from: $0, to: $1) },
+                    list: { [surface] in surface.targetRekeyed(from: $0, to: $1) },
+                    setAgents: { [weak self] in self?.agents = $0 })
+            case .remove(let sweepReason):
+                agents.removeAll { $0.target == target }
+                notificationManager.forget(target: target)
+                notificationManager.sweepDelivered(target: target, reason: sweepReason)
+            }
         case .unknown:
             break
         }
     }
 
-    // MARK: - Resume terminal (§4.6/T6)
-
-    /// Remember the newest observed terminal kind so Resume can fall back to
-    /// it once the agent list empties (§4.6: "updated every time entries are
-    /// observed"). Only stores when the current entries name a supported
-    /// terminal — an empty/unrecognized list leaves the previous memory
-    /// intact.
-    private func rememberObservedTerminal() {
-        if let kind = ResumeTerminal.newestObservedKind(agents: agents) {
-            UserDefaults.standard.set(kind, forKey: ResumeTerminal.userDefaultsKey)
-        }
-    }
-
-    /// The `--terminal` value Resume should pass (§4.6/T6): newest observed
-    /// entry's kind → remembered kind → `iterm2`.
-    var resumeTerminal: String {
-        ResumeTerminal.decide(
-            agents: agents,
-            remembered: UserDefaults.standard.string(forKey: ResumeTerminal.userDefaultsKey)
-        )
+    /// The order of a `rekey` (§4.5 "desktop notifications"): the
+    /// notifications first, then the list, then the agent table (whose
+    /// change the list hears through `agentsUpdated`), so the list never
+    /// sees the entry missing from the table before it knows of the move.
+    static func applyRekey(
+        from: String, to: String, agents: [Agent],
+        notifications: (String, String) -> Void,
+        list: (String, String) -> Void,
+        setAgents: ([Agent]) -> Void
+    ) {
+        notifications(from, to)
+        list(from, to)
+        setAgents(AgentRemovalHandling.agentsAfterRekey(agents, from: from, to: to))
     }
 
     // MARK: - Derived display state
@@ -408,11 +435,7 @@ final class AppState: ObservableObject {
     }
 
     var trayIcon: TrayIconState {
-        Rollup.icon(
-            statuses: agents.map(\.status),
-            hasUnreviewed: agents.contains { $0.unreviewed },
-            daemonConnected: connected
-        )
+        Rollup.icon(agents: agents, daemonConnected: connected)
     }
 
     /// Settings "Appearance" pick (§4.5, M27 T5): applied the moment it's
@@ -470,12 +493,10 @@ final class AppState: ObservableObject {
     /// Notification Center notifications are left alone (§8.24 — the user
     /// clears those themselves).
     func markAllAsRead() {
-        let targets = MarkAllAsRead.targets(agents: agents)
-        guard !targets.isEmpty else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [helpersDirectory] in
-            for target in targets {
-                CLIRunner.seen(target: target, helpersDirectory: helpersDirectory)
-            }
+        // The same `seen` path as the lasting selection (§4.5), so a `rekey`
+        // while one runs resends it to the new target.
+        for target in MarkAllAsRead.targets(agents: agents) {
+            surface.markRead(target: target)
         }
     }
 

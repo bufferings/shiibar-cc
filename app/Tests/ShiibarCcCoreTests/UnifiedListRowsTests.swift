@@ -326,8 +326,8 @@ final class UnifiedListRowsTests: XCTestCase {
         }
         let cwd = "/Users/example/demo/api"
         let untracked = RowButton.untrackedRunningTooltip
-        func running(_ session: String, cwd: String) -> UnifiedListRow {
-            UnifiedListBuilder.runningRow(agent: UL.agent("iterm2:w1t1p1", session: session, cwd: cwd),
+        func running(_ session: String, cwd: String, target: String = "iterm2:w1t1p1") -> UnifiedListRow {
+            UnifiedListBuilder.runningRow(agent: UL.agent(target, session: session, cwd: cwd),
                                           title: nil, now: UL.now, home: UL.home)!
         }
         func history(_ summary: ConversationSummary) -> UnifiedListRow {
@@ -346,6 +346,28 @@ final class UnifiedListRowsTests: XCTestCase {
                  row: running("s", cwd: ""),
                  primary: RowButton(kind: .jump, invocation: .jump(target: "iterm2:w1t1p1"), tooltip: "Jump"),
                  branch: RowButton(kind: .branch, invocation: nil, tooltip: "Branch")),
+            // §4.5 "action buttons": a session the app cannot jump to gets
+            // the disabled Jump; Branch is unaffected.
+            Case(name: "running in a terminal the app can't drive: disabled Jump, Branch enabled",
+                 row: running("s", cwd: cwd, target: "process:48213"),
+                 primary: RowButton(kind: .jump, invocation: nil, tooltip: untracked),
+                 branch: RowButton(kind: .branch, invocation: .branch(sessionID: "s", cwd: cwd), tooltip: "Branch")),
+            Case(name: "running with an unknown prefix: disabled Jump, Branch enabled",
+                 row: running("s", cwd: cwd, target: "tmux:whatever"),
+                 primary: RowButton(kind: .jump, invocation: nil, tooltip: untracked),
+                 branch: RowButton(kind: .branch, invocation: .branch(sessionID: "s", cwd: cwd), tooltip: "Branch")),
+            Case(name: "running, can't jump, empty session_id: Branch still disabled",
+                 row: running("", cwd: cwd, target: "process:48213"),
+                 primary: RowButton(kind: .jump, invocation: nil, tooltip: untracked),
+                 branch: RowButton(kind: .branch, invocation: nil, tooltip: "Branch")),
+            Case(name: "running, can't jump, empty cwd: Branch still disabled",
+                 row: running("s", cwd: "", target: "process:48213"),
+                 primary: RowButton(kind: .jump, invocation: nil, tooltip: untracked),
+                 branch: RowButton(kind: .branch, invocation: nil, tooltip: "Branch")),
+            Case(name: "running in Ghostty: Jump",
+                 row: running("s", cwd: cwd, target: "ghostty:/dev/ttys005"),
+                 primary: RowButton(kind: .jump, invocation: .jump(target: "ghostty:/dev/ttys005"), tooltip: "Jump"),
+                 branch: RowButton(kind: .branch, invocation: .branch(sessionID: "s", cwd: cwd), tooltip: "Branch")),
             Case(name: "history: Resume + Branch",
                  row: history(UL.summary("s", cwd: cwd)),
                  primary: RowButton(kind: .resume, invocation: .resume(sessionID: "s", cwd: cwd), tooltip: "Resume"),
@@ -371,12 +393,30 @@ final class UnifiedListRowsTests: XCTestCase {
             XCTAssertEqual(c.row.primaryButton, c.primary, c.name)
             XCTAssertEqual(c.row.branchButton, c.branch, c.name)
             XCTAssertEqual(c.row.primaryButton.isEnabled, c.primary.invocation != nil, c.name)
+            XCTAssertEqual(c.row.primaryButton.isUndrivableJump, c.primary.tooltip == untracked, c.name)
         }
     }
 
     func testConversationActionRunningDerive() {
         let agent = UL.agent("apple-terminal:abc", session: "s")
         XCTAssertEqual(ConversationAction.derive(forRunningAgent: agent), .jump(target: "apple-terminal:abc"))
+        XCTAssertEqual(ConversationAction.derive(forRunningAgent: UL.agent("ghostty:/dev/ttys005", session: "s")),
+                       .jump(target: "ghostty:/dev/ttys005"))
+        XCTAssertEqual(ConversationAction.derive(forRunningAgent: UL.agent("BARE-UUID", session: "s")),
+                       .jump(target: "BARE-UUID"))
+        XCTAssertEqual(ConversationAction.derive(forRunningAgent: UL.agent("process:48213", session: "s")), .jumpDisabled)
+        XCTAssertEqual(ConversationAction.derive(forRunningAgent: UL.agent("tmux:whatever", session: "s")), .jumpDisabled)
+    }
+
+    /// A Jump disabled for another reason (the snapshot kept while awaiting
+    /// the History refetch keeps the `Jump` tooltip) is not the disabled
+    /// Jump of a row the app cannot jump to.
+    func testOnlyTheUndrivableJumpShowsTheConversation() {
+        XCTAssertTrue(RowButton.undrivableJump.isUndrivableJump)
+        XCTAssertTrue(RowButton.undrivableJump.disabled().isUndrivableJump)
+        XCTAssertFalse(RowButton(kind: .jump, invocation: .jump(target: "t"), tooltip: "Jump").disabled().isUndrivableJump)
+        XCTAssertFalse(RowButton(kind: .resume, invocation: nil, tooltip: "Resume").isUndrivableJump)
+        XCTAssertFalse(RowButton(kind: .branch, invocation: nil, tooltip: "Branch").isUndrivableJump)
     }
 
     // MARK: - last_prompt decoding (§4.4)

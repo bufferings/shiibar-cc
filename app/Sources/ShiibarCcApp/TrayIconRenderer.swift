@@ -33,7 +33,7 @@
 // must not be resolved inside it (DESIGN.md §4.5 "visual source of
 // truth").
 //
-// The emblem slot holds one glyph (top-left, x 6.4): idle/none show the static `✻` (plain U+273B, forced to text
+// The emblem slot holds one glyph (top-left, x 8.8): idle/none show the static `✻` (plain U+273B, forced to text
 // presentation with trailing U+FE0E so it never renders as a colored emoji
 // glyph — it must not be reshaped toward the Anthropic sunburst logo
 // either); working keeps the same static ✻ and adds three small filled
@@ -54,11 +54,21 @@ import ShiibarCcCore
 /// Every tunable constant for the tray drawing, in points, on a y-up canvas.
 /// Values are M24 T1's "window + one glyph" geometry.
 enum TrayIconMetrics {
-    static let canvasWidth: CGFloat = 20
+    // Horizontal layout: the frame sits between two equal insets, so it is
+    // centered in the image (frame x 3.2-19.2 on a 22.4pt canvas). The
+    // right inset is the room the corner dot needs where it overhangs the
+    // frame's top-right corner; the left inset matches it so the frame stays
+    // centered whether or not the dot is drawn, and the canvas reserves that
+    // room in every state, so the status item's width never changes when
+    // the dot appears or disappears. Every x position below is relative to
+    // the frame's left edge.
+    static let horizontalInset: CGFloat = 3.2
+    static let frameWidth: CGFloat = 16
+    static let canvasWidth: CGFloat = frameWidth + horizontalInset * 2
     static let canvasHeight: CGFloat = 18
 
     // Full-height rounded window frame.
-    static let frameRect = NSRect(x: 0.8, y: 0.8, width: 16, height: 16.2)
+    static let frameRect = NSRect(x: horizontalInset, y: 0.8, width: frameWidth, height: 16.2)
     static let frameCornerRadius: CGFloat = 3.5
     static let frameLineWidth: CGFloat = 1.4
 
@@ -67,7 +77,7 @@ enum TrayIconMetrics {
     // presentation), waiting swaps in a bold "!" at `waitingBangScale`
     // times this size.
     static let emblemText = "\u{273B}\u{FE0E}"
-    static let emblemCenter = NSPoint(x: 6.4, y: 11.2)
+    static let emblemCenter = NSPoint(x: horizontalInset + 5.6, y: 11.2)
     // M24 brief starting point: 9.5 ("legibility outranks the number" — the
     // brief permits bumping back up to 10.5 on-device if the ✻ petals
     // collapse on a real Retina menu bar). Supersedes the pre-M24 12pt,
@@ -84,9 +94,9 @@ enum TrayIconMetrics {
     // other tray state, because each status-item image change has a fixed
     // AppKit cost.
     static let workingDotCenters = [
-        NSPoint(x: 5.0, y: 4.0),
-        NSPoint(x: 8.8, y: 4.0),
-        NSPoint(x: 12.6, y: 4.0),
+        NSPoint(x: horizontalInset + 4.2, y: 4.0),
+        NSPoint(x: horizontalInset + 8.0, y: 4.0),
+        NSPoint(x: horizontalInset + 11.8, y: 4.0),
     ]
     static let workingDotRadius: CGFloat = 0.9
 
@@ -94,8 +104,9 @@ enum TrayIconMetrics {
     // light halo ring always drawn (invisible on light bars by design). The
     // position and size are the same for both colors. Radius 3.6: r 2.2 is
     // too small to register next to real menu bar neighbors. The center is
-    // pulled slightly inward so dot + halo still fit the 18pt canvas.
-    static let dotCenter = NSPoint(x: 15.6, y: 13.9)
+    // pulled slightly inward so dot + halo still fit the 18pt canvas height
+    // and, on the right, the inset reserved by `horizontalInset`.
+    static let dotCenter = NSPoint(x: horizontalInset + 14.8, y: 13.9)
     static let dotRadius: CGFloat = 3.6
     static let haloLineWidth: CGFloat = 0.9
     static let haloColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85)

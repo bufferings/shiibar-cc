@@ -1,22 +1,24 @@
 # shiibar-cc 設計書
 
-> menu bar agent status & jump for Claude Code + iTerm2 / Terminal.app
+> menu bar agent status & jump for Claude Code + iTerm2 / Terminal.app / Ghostty
 
 ## 1. 目的
 
 Claude Code のエージェント状態(working / waiting / idle と、未確認フラグ。§3)を macOS メニューバーで
 常時可視化し、通知や、ポップオーバーとウィンドウの一覧(§4.5)から該当する
-対応ターミナル(iTerm2 / Terminal.app)のタブへジャンプできるようにする。同じ一覧で過去の会話を
-検索して読み、再開・分岐できる(§4.6)。
+対応ターミナル(iTerm2 / Terminal.app / Ghostty)のタブへジャンプできるようにする。
+対応ターミナル以外のターミナルで実行しているセッションも、状態の表示と通知の対象にする(ジャンプだけができない。§8.66)。
+ターミナルを持たないセッション(制御端末を持つ祖先のプロセスが無いセッション。エディタの拡張機能、常駐プロセスが起動する実行など)は追跡しない(§4.1)。
+同じ一覧で過去の会話を検索して読み、再開・分岐できる(§4.6)。
 CLI(`shiibar-cc`)は hooks とアプリをつなぐ**裏方**(report / focus / reconcile / resume / conversations / doctor)であり、
 利用者向けの表面はメニューバーと通知に集約する(`wait` / `watch` などのスクリプト利用も可能だが主役ではない)。
 
 ### 設計原則
 
-1. **特化する**: Claude Code 専用・対応ターミナル(iTerm2 / Terminal.app。§8.47)専用。
-   speculative generality は書かない
+1. **特化する**: Claude Code 専用。タブへのジャンプと、Resume / Branch のウィンドウを開く操作は、
+   対応ターミナル(iTerm2 / Terminal.app / Ghostty。§8.47・§8.66)だけで実行する。speculative generality は書かない
 2. **意味の局所化**: 外部依存(ターミナルの ID 形式、AppleScript)を知るコードは `shiibar-cc-client` の
-   ターミナルモジュール(iterm2 / apple_terminal)に閉じ込める。抽象化レイヤーは作らないが、汚染も広げない
+   ターミナルモジュール(iterm2 / apple_terminal / ghostty)に閉じ込める。抽象化レイヤーは作らないが、汚染も広げない
 3. **メニューバーは読み取り + focus のみ**: 破壊的・対話的な操作はすべて CLI に置く
 4. **表示クライアントは全部 subscriber**: daemon に対して対等。増減してもコアに手が入らない
 
@@ -26,7 +28,7 @@ CLI(`shiibar-cc`)は hooks とアプリをつなぐ**裏方**(report / focus / r
 - Claude Code 以外のエージェント対応
 - サイドバー TUI / iTerm2 Toolbelt
 - worktree の作成・削除統合(作成はユーザーのシェル関数で足りる)
-- リモート / SSH 対応
+- リモート / SSH 対応(接続先のホストで実行しているセッション。接続先の hook は、このマシンの daemon の socket に報告を送れない)
 - 設定ファイル(§8.9。定数は §9 の表、変更手段は環境変数 2 つのみ)
 
 バックログ(シグナルが来たら検討): `cleanup`(worktree 畳み)、他エージェント、
@@ -46,17 +48,31 @@ Claude Code hooks ──(Unix socket, NDJSON)──► shiibar-ccd
                   (SwiftUI, menu bar)   list/wait/watch/focus/…
 ```
 
-- **target は prefix つきの不透明文字列**(`<ターミナル名>:<セッション識別子>`)。2 種類:
+- **target は prefix つきの不透明文字列**(`<prefix>:<セッション識別子>`)。対応ターミナルの 3 種類と、
+  それ以外のセッションの 1 種類である:
   - `iterm2:<UUID>` — UUID は `$ITERM_SESSION_ID` の `:` 以降。位置プレフィックス `wNtNpN` は**含めない** —
     hooks(report)と reconcile(iterm2_targets)が同一セッションに**同じ target を導出できる**ことが
     突き合わせ(§3.5)の前提で、AppleScript からは wNtNpN を再現できない(§7-1)ため
   - `apple-terminal:<tty パス>` — 例 `apple-terminal:/dev/ttys006`。Terminal.app では tty が
     「中(hook の環境)と外(AppleScript)の両方から同一セッションに導出できる」唯一の鍵(§7-7。
     `TERM_SESSION_ID` は AppleScript 側に対応物が無く使えない)
-  - prefix は**ターミナル名フルネームの小文字ハイフン**(略語にしない — 人間が手打ちする場面が無く、
+  - `ghostty:<tty パス>` — 例 `ghostty:/dev/ttys005`。Ghostty でも、中と外の両方から導出できる鍵は tty である
+    (§7-8。`GHOSTTY_SURFACE_ID` は、AppleScript の `id` と一致しないので使えない)。対象は Ghostty 1.4.0 以上(§9)
+  - `process:<pid>` — 例 `process:48213`。対応ターミナルの target を導出できないセッション(VS Code のターミナル、
+    そのほかのターミナル、1.4.0 未満の Ghostty など)。鍵は、そのセッションを実行している `claude` のプロセスの pid である
+    (hook では、制御端末を持つ最初の祖先のプロセス — §4.1。reconcile では、`claude agents` の一覧の pid — §3.5)。
+    **この target のセッションは、タブへジャンプできない**(状態の表示、未確認、通知は、ほかの target と同じである。§8.66)。
+    `process` はターミナルの名前ではなく、鍵の種類を表す
+  - 対応ターミナルの prefix は**ターミナル名フルネームの小文字ハイフン**(略語にしない — 人間が手打ちする場面が無く、
     自己記述性だけが価値。§8.47)。ターミナルが増えたら同じ規則で 1 種類ずつ増える
+  - **ジャンプできるかどうかは、prefix で決まる**: `iterm2:` / `apple-terminal:` / `ghostty:` はジャンプできる。
+    `process:` と、クライアントが知らない prefix は、ジャンプできない(§4.2「プロトコル契約」)
   - shiibar-ccd は解釈せず保持・転送するだけ。意味を知るのは shiibar-cc-client の
-    ターミナルモジュール(iterm2 / apple_terminal)と、target を生成する `shiibar-cc report` のみ
+    ターミナルモジュール(iterm2 / apple_terminal / ghostty)と、target を生成する `shiibar-cc report` と reconcile の gather のみ。
+    例外は、次のとおりである: アプリは、prefix でジャンプできるかどうかを判定する(§4.2「プロトコル契約」)。
+    `shiibar-cc report` は、環境変数で target の種類を判定する(§4.1)。アプリは、Resume と Branch を開くターミナルが使用できるかどうかを、
+    バンドル ID とバージョンで判定する(§4.5「Settings ウィンドウ」)。daemon は、`process:` を含めて、どの prefix も見分けない
+    (§3.6「pid による統合」は、target の文字列の一致と `pid` だけで判定する)
   - **旧形式からの移行**: prefix 導入前の state.json は無印 UUID(iTerm2)を持ち得る。daemon は
     state 読み込み時に `:` を含まない target へ `iterm2:` を前置する(保存形式の 1 回きりの移行。
     target の意味の解釈ではない)
@@ -83,13 +99,13 @@ Claude Code hooks ──(Unix socket, NDJSON)──► shiibar-ccd
 
 ### 3.2 unreviewed フラグ
 
-「そのセッションが**あなたの番の状態(`waiting`、または完了直後の `idle`)に入ってから、まだ focus していない**」
-ことを表す。**`waiting` と `idle` にのみ乗る**(`working` はあなたの番ではないので持たない)。
+「そのセッションが**あなたの番の状態(`waiting`、または完了直後の `idle`)に入ってから、まだ確認していない**」
+ことを表す(確認にあたる操作は、§4.5「未確認を下ろす操作」)。**`waiting` と `idle` にのみ乗る**(`working` はあなたの番ではないので持たない)。
 
 | status + flag           | 意味                                                 |
 | ----------------------- | ---------------------------------------------------- |
 | `waiting` + unreviewed  | 新しい許可待ち、未確認 ← **最重要アラート**            |
-| `waiting`(確認済)       | 許可待ちだが、既にそのペインに行った(対応中)         |
+| `waiting`(確認済)       | 許可待ちだが、既に確認した(対応中)                   |
 | `idle` + unreviewed     | 完了して結果を未確認                                  |
 | `idle`(確認済)          | 見た/そもそも何もしていない(静か)                   |
 
@@ -99,7 +115,7 @@ reconcile は status の遷移で決まる(§3.5):
 - **立てる**: Notification(waiting 系。既に `waiting` でも、新しい要求が届いた事実を優先して立て直す)
   / 完了の Stop(background_tasks 空。既に `idle` でも立て直す)
   / reconcile: `waiting` へ遷移したとき、未追跡セッションを `idle`・`waiting` で新発見したとき(§3.5)
-- **下ろす**: focus した(= seen)/ `working` にする hook(UserPromptSubmit、PostToolUse の waiting 解除、
+- **下ろす**: 確認した(= seen。focus の成功、アプリの一覧で利用者が選択した行の、選択の継続、`Mark all as read` — §4.5)/ `working` にする hook(UserPromptSubmit、PostToolUse の waiting 解除、
   Stop・background_tasks 残)/ SessionStart(新規開始)/ reconcile: `working` へ遷移したとき
 - **触らない**: reconcile が status 不変を再確認したとき(既に立っている `waiting` を再確認しても保持)。
   reconcile で `waiting` → `idle` へ遷移したときも**保持**する(まだ見ていない事実は変わらない。
@@ -123,8 +139,16 @@ hooks が主でリアルタイム。reconcile はイベントを取りこぼし�
 
 「—」は status 変更なし(hook 由来の行は last_seen だけは更新する — §3.6。**seen 行は
 last_seen も更新しない** — §4.2)。「登録」列は未登録 target の新規作成。
-**対応ターミナルのセッション(§4.1 の 2 分岐で target を導出できたもの)だけを追跡する** —
-target を導出できない report は drop し、フォールバック target は作らない(§8.11)。
+**ターミナルで実行しているセッションを、すべて追跡する**: 対応ターミナルの target を導出できたセッション(§4.1 の 3 分岐)は、その target で、
+導出できないセッションは `process:<pid>` で登録する(§2・§8.66)。**この表は、target の種類に関係なく、
+同じ遷移を適用する**。制御端末を持つ祖先が無い report(ターミナルを持たないセッション)は drop する(§4.1)。
+**SessionEnd だけは、制御端末を持つ祖先が無い場合も、`target` を持たない report として送る**(ターミナルのウィンドウを閉じて終了したセッションは、
+SessionEnd の時点で制御端末を持たない — §7-12)。daemon は、`session_id` が一致するエントリを削除する(§3.6「`target` を持たない SessionEnd」。
+表の SessionEnd の行と同じ結果である。未登録の列の「無視」も同じで、一致するエントリが無い場合は、何もしない)。
+1 つのセッションを 2 つの target で登録しない規則は §3.6「pid による統合」。**表の「未登録」の列と状態の列は、
+§3.6「pid による統合」の「hook の report」で、適用するエントリを決めた後の状態で読む**(target が未登録でも、pid が同じエントリがあれば、
+そのエントリの状態の列を適用する)。**入れ子のセッションの report は、この表を適用する前に無視する**
+(実行中のセッションが起動した別の `claude` のプロセスの report。§3.6「入れ子のセッション」)。
 
 | イベント(条件)                                                                            | 未登録        | working | waiting | idle    | flag         |
 | ------------------------------------------------------------------------------------------- | ------------- | ------- | ------- | ------- | ------------ |
@@ -138,7 +162,7 @@ target を導出できない report は drop し、フォールバック target 
 | Stop(background_tasks 残あり)                                                                | 登録:working  | working | working | working | 下ろす       |
 | Stop(background_tasks 空)                                                                    | 登録:idle     | idle    | idle    | idle    | **立てる**   |
 | SessionEnd                                                                                   | 無視          | 削除    | 削除    | 削除    | —            |
-| seen(focus 成功時に client が送る。§4.4)                                                     | 無視          | —       | —       | —       | 下ろす       |
+| seen(focus 成功時に client が送る。アプリが送る時点は §4.5「未確認を下ろす操作」。§4.4)   | 無視          | —       | —       | —       | 下ろす       |
 
 この表がそのままテーブル駆動テストの仕様である(status 列と flag 列は独立: seen は status を変えず flag だけ下ろす)。補足:
 
@@ -161,19 +185,36 @@ gather は client 側(ターミナルモジュール。§4.3)、適用は daemon
 
 1. **target を導出**: `pid → tty(`ps`)` を取り、**起動中の対応ターミナル**の走査結果と突き合わせる —
    iTerm2 のセッション tty に一致すれば `iterm2:<UUID>`(§7-1)、Terminal.app のタブ tty に一致すれば
-   `apple-terminal:<tty パス>`(§7-7。`ps` の tty は `/dev/` 無しなので前置して正規化する)。
-   どちらにも一致しなければ **skip**(対応ターミナル外は追跡しない。§8.11・§8.47)。
+   `apple-terminal:<tty パス>`(§7-7。`ps` の tty は `/dev/` 無しなので前置して正規化する)、
+   Ghostty の terminal の tty に一致すれば `ghostty:<tty パス>`(§7-8。正規化は同じ)。
+   **tty を持ち、どの走査にも一致しないセッションは、`process:<pid>` で送る**(対応ターミナル以外で実行しているセッション。§8.66)。
+   ターミナルのウィンドウを閉じた直後の、終了の途中のセッションも、この条件に該当する(ウィンドウを閉じてから SessionEnd の hook までの約 3.5〜5.5 秒の間、
+   `claude` のプロセスは tty を持ったまま動作し、ターミナルの走査には無い — §7-12)。この間に走査が完全な回があると、エントリは `process:<pid>` に付け替わり
+   (§3.6「pid による統合」)、その後の SessionEnd が、`session_id` の一致で削除する(§3.6「`target` を持たない SessionEnd」)。
+   `ps` の出力に無い pid(`claude agents` の実行の後に終了したプロセス)と、tty を持たない pid(ターミナルを持たないセッション。
+   実行中のセッションの Bash ツールが起動した `claude -p` のプロセスも、tty を持たない — §7-9)は、送らない。
+   どのセッションにも、`claude agents` の一覧の pid を付けて送る(§4.2 の `pid`)。
+   ただし、**試みた走査のいずれかが失敗/不完全なときは、どの走査にも一致しないセッションを、更新専用(§4.2 の `update_only`)として送る**
+   (target は、完全な回と同じ `process:<pid>` である)
+   (走査が取りこぼした対応ターミナルのセッションを、`process:` の target で二重に登録しないため。daemon は、更新専用のセッションでは、
+   登録済みのエントリの更新だけを行い、エントリの作成と target の付け替えを行わない — §3.6「pid による統合」)。
+   **1 つのターミナルの走査の失敗(オートメーションの権限の拒否を含む)は、ほかのターミナルの走査と、その結果の送信を止めない**
+   (失敗したターミナルは、その回の走査を不完全にするだけである。権限の拒否があった回は、送信の後に exit 3 で終了する — §4.4)。
    未起動のターミナルには AppleScript を投げない(is-running 照会は起動を誘発しない。§7-7)—
    未起動 = そのターミナルのセッションは存在しないので、空の走査結果と同じ扱いでよい。
    **試みた走査のいずれかが失敗/不完全なとき(-1719 等。§7-1)は、その回は prune を行わない**(生存確認できないものを消さない。
-   client は `complete:false` を付けて送り、daemon は prune だけを省いて add / update は行う。§4.2)
+   client は `complete:false` を付けて送り、daemon は prune だけを省いて add / update は行う。§4.2)。
+   **`ps` の実行が失敗した回(実行のエラー、または 0 以外の終了コード)も、走査が不完全な回として扱う**: ターミナルの走査の結果に関係なく、
+   `complete:false` で送る(起動中のターミナルが無く、どのターミナルの走査も完全である回を含む)。この回は、`process:<pid>` のセッションを送らない
+   (どの pid が tty を持つかを確認できないため)。ターミナルの走査で一致したセッションは、送る。
+   tty を確認できなかったセッションを、prune で削除しないためである
 2. **status をマップ**(client 側): `busy` / `shell` → working、`waiting` → waiting、`idle` → idle。
    **未知の status 値は working とみなす**(セッションを live 一覧から落とすと prune で生きたエントリを
    消しかねない。追跡を維持し、flag は立てない)
 
 daemon は受け取った live 一覧(target / status / cwd / session_id / waitingFor)を **claude agents を正として**適用する:
 
-3. **突き合わせ(キー = target)**:
+3. **突き合わせ(キー = target。適用する順序と、pid が同じエントリの target の付け替えは §3.6「pid による統合」の「reconcile」)**:
    - 未追跡 → **追加**。`idle` / `waiting` なら unreviewed を立てる(新発見 = あなたが未確認)
    - 既知 → status を反映(claude agents が常に勝つ。時刻での調停はしない。§3.3)。
      status が **`waiting` へ遷移したら unreviewed を立て、`working` へ遷移したら下ろす**(§3.2)。
@@ -182,6 +223,8 @@ daemon は受け取った live 一覧(target / status / cwd / session_id / waiti
      status が不変なら flag は触らず、`last_seen` を更新する(生きたエントリを stale sweep で消さないため)。
      `waiting` の場合は `message` を `waitingFor`(ワイヤ上は `waiting_for`。§4.2)で更新する
    - **prune**: 走査が成功し、かつ claude agents の live 集合に無い target を削除し `agent_removed` を配信
+     (その回のセッションをすべて適用し、target の付け替えを終えた後のエントリで判定する)。
+     `process:` のエントリも、同じ規則で削除する(`claude agents` の一覧から無くなった時点で、終了とみなす)
 
 reconcile は Claude 自身の権威ある登録簿を正とするので、「居ない = 本当に死んでいる」が信頼でき、
 生きた `waiting` を誤って消すことはない(必ず一覧に載る)。`waiting` へ遷移すれば unreviewed を立てるので、
@@ -191,6 +234,10 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
 ### 3.6 エントリの属性と削除
 
 - 属性: `target`(プライマリキー)/ `status` / `unreviewed` / `session_id` / `cwd`
+  / `pid`(そのセッションを実行している `claude` のプロセスの pid。report と reconcile が運ぶ値で、適用するたびに上書きする。
+  受け取った内容に `pid` が無い場合は、エントリの `pid` を変更しない。
+  **`state.json` には保存しない**: daemon の起動の直後は、どのエントリも「不明」で、次の report または reconcile が設定する。
+  daemon が停止している間に、プロセスが終了して pid が再利用される場合(マシンの再起動を含む)があるので、保存した pid を根拠にしない)
   / `since`(現在の status に入った時刻)/ `last_seen` / `task`(最後の UserPromptSubmit の prompt 先頭 80 文字。
   自動 wake-up の例外は下記)
   / `message`(waiting の理由 = Notification の `message`、または claude agents の `waitingFor`)
@@ -207,8 +254,95 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
   `waiting` 以外に移ったら消す。
   `last_assistant_message` は Stop(background_tasks 空 = idle 遷移)のときだけ保存し、`working` へ遷移したら消す
   (`message` と同じ「今の状態の説明でなくなったら持たない」規則。§3.4 の status・flag 遷移には一切影響しない)
+- **`process:` のエントリ**: 鍵は `claude` のプロセスの pid である。上書き規則は、対応ターミナルの target と同じである
+  (同一 target で `session_id` が変わると、`session_id` と `cwd` を上書きする — §7-4)。ただし、`process:<pid>` の target の report は、
+  常に、その pid を持つので、`session_id` が変わる report は、下記「入れ子のセッション」の判定の対象になる:
+  上書きするのは、`source` が `clear` または `resume` の SessionStart と、エントリの `pid` が不明の間(daemon の起動の後)の report、reconcile による上書きだけである。`/clear` は、対応ターミナルの target と同じ経過になる:
+  SessionEnd がエントリを削除し、続く SessionStart が、同じ target で再登録する(§7-3。pid が同じなので、target は変化しない。`created_at` は新しくなる)。
+  セッションの中での resume も、同じ target のままである。同じ `session_id` を、2 つのプロセスが resume している場合は、2 つのエントリになる。
+  実行中のセッションが起動した別の `claude` のプロセスの report は、親と同じ pid を持つので、下記「入れ子のセッション」の規則で無視する
+- **pid による統合**(1 つのセッションを、2 つの target で登録しない。§8.66): hook と reconcile は、別の方法で target を導出するので、
+  同じプロセスのセッションに、異なる target を導出する場合がある(hook は環境変数で、reconcile はターミナルの走査で判定する)。
+  原則は 1 つである: **エントリの target を決めるのは、走査が完全な回の reconcile である。hook の report は、エントリの target を変更しない**。
+  「pid が同じエントリ」は、`pid` が不明でなく、受け取った内容の `pid` と同じ値のエントリである(受け取った内容に `pid` が無い場合は、該当なしとする)。
+  pid が同じエントリが複数ある場合は、`last_seen` が最も新しいエントリを対象にする(`last_seen` が同じ場合は、`created_at` が新しいエントリ)
+  - **hook の report**(target T、pid P): 適用するエントリを、次の順で決める。(a) target が T のエントリがあれば、そのエントリ。
+    (b) 無ければ、pid が P と同じエントリ(target は T と異なる。エントリの target は変更しない)。(c) どちらも無ければ、未登録として、
+    §3.4 の「未登録」の列を適用する(登録する場合の target は T)。(a) または (b) でエントリを決めた場合は、下記「入れ子のセッション」の判定を行い、
+    無視しない report だけを適用する。決めたエントリに §3.4 の遷移を適用し、`pid` を P にする。
+    **SessionEnd も、同じ順で決めたエントリだけを削除する**(reason は `session_end`)。`target` を持たない SessionEnd は、
+    この順ではなく、`session_id` で決める(下記「`target` を持たない SessionEnd」)
+  - **reconcile(走査が完全な回)**: 次の順で適用する(結果が、セッションの並びの順に依存しないようにするため)。
+    1. target が登録済みのエントリに一致するセッションを、すべて適用する(§3.5 の 3 の「既知」。`pid` を上書きする)。
+    2. 残りのセッション(target T が未登録。pid P)を、1 件ずつ適用する。pid が P と同じで、**target がこの回の live 集合に無い**エントリ
+       (複数ある場合は、その中で `last_seen` が最も新しいもの。同じ場合は `created_at` が新しいもの)があるときは、そのエントリの target を T に付け替える(下記「付け替え」)。
+       その後、「既知」として適用する。
+       該当するエントリが無いときは、「未追跡」として追加する(§3.5 の 3)。
+    3. prune を実行する(§3.5 の 3)。
+
+    2 は、どちらの向きにも同じ規則である: `process:<pid>` で登録したセッションの tty を、ターミナルの走査が見つければ、対応ターミナルの target に付け替える。
+    対応ターミナルの target で登録したセッションの tty を、完全な走査が見つけなければ(環境変数の相続などで、hook が誤って導出した target — §7-1・§7-8)、
+    `process:<pid>` に付け替える(その行は、ジャンプできない行になる)
+  - **reconcile(走査が不完全な回)の更新専用のセッション**(§3.5): 適用するエントリを、hook の report の (a)、(b) と同じ順で決め、
+    §3.5 の 3 の「既知」の規則をそのまま適用する(status、unreviewed、`message`、`since`、`last_seen`。`session_id` と `cwd` も上書きする)。
+    該当するエントリが無ければ、何も実行しない。エントリの作成、target の付け替え、prune は実行しない。
+    daemon は、更新専用のセッションを、`complete` の値に関係なく、この規則で適用する(client は、更新専用のセッションを、走査が不完全な回にだけ送る)
+  - **reconcile(走査が不完全な回)の、更新専用でないセッション**(成功した走査に一致したセッション。target T、pid P): target が T のエントリがあれば、
+    「既知」として適用する。無くて、pid が P と同じエントリがあれば、そのエントリに「既知」を適用する(target は付け替えない。エントリは作成しない)。
+    どちらも無ければ、「未追跡」として追加する(§3.5 の 3)。prune は実行しない。
+    **適用する順序は、走査が完全な回と同じである**: target が登録済みのエントリに一致するセッションを、すべて先に適用し、その後に、残りのセッション
+    (更新専用のセッションを含む)を 1 件ずつ適用する
+  - **付け替え**: エントリの `target` だけを変更する。ほかの属性(`status` / `unreviewed` / `since` / `created_at` / `task` / `message` /
+    `last_assistant_message` / `last_report_at` / `session_id` / `cwd` / `pid`)は、そのまま引き継ぐ。配信は、`agent_removed`
+    (古い target。reason は `rekey`、`to` は新しい target — §4.2)と、その**直後**の、新しい target の `status_changed` である
+    (引き継いだ内容に変化が無い場合も配信する — 購読しているクライアントが、そのセッションを失わないようにするため。
+    この `status_changed` は、付け替えの後の「既知」の適用を反映した内容で、そのセッションについて、その回に配信する唯一の `status_changed` である。
+    1 回の reconcile の配信をまとめて送る場合も、この 2 つを隣り合わせて、この順で送る)
+  - **統合で、エントリを削除することは無い**: エントリが無くなるのは、下記の削除経路だけである。pid が同じエントリが、2 つの対応ターミナルの target で
+    登録されている場合も、統合しない。走査に無い側は、完全な回の prune が削除する
+  - `pid` が不明のエントリ(daemon の起動の後、最初の report または reconcile を受け取る前)は、target だけで突き合わせる
+- **入れ子のセッション**(実行中のセッションが起動した、別の `claude` のプロセスの report を、親のエントリに適用しない。§8.66):
+  実行中のセッションの Bash ツールから `claude -p` を実行すると、子のプロセスは制御端末を持たないので、子の hook の祖先 walk は、親の `claude` のプロセスに到達する。
+  子の report(SessionStart / UserPromptSubmit / Stop / SessionEnd など)は、親と同じ pid、同じ tty、同じ環境変数(`ITERM_SESSION_ID` を含む)から導出した、
+  親と同じ target を持ち、`session_id` だけが親と異なる(§7-9 の実測)。そのまま適用すると、子の Stop が親のエントリを idle と未確認にし、子の SessionEnd が親のエントリを削除する。
+  hook の report は、上記「pid による統合」の「hook の report」の (a) または (b) で決めたエントリについて、次の順で判定する。target の種類に関係なく、同じ規則である
+  1. report の `session_id` が、エントリの `session_id` と同じ場合は、適用する。
+  2. 異なる場合で、report に `pid` が無い、エントリの `pid` が不明、または 2 つの `pid` が異なるときは、適用する
+     (同じタブで `claude` を起動し直した場合と、pid で判定できない場合。`session_id` を上書きする — 上記「上書き規則」)。
+  3. `session_id` が異なり、`pid` が同じ場合は、同じプロセスの別のセッションの report である。**SessionStart で、`source` が `clear` または `resume` のものだけを適用する**
+     (そのプロセスの中でのセッションの切り替え。`session_id` を上書きして、§3.4 の SessionStart の行を適用する)。
+     **それ以外の report は無視する**(エントリを変更しない。`last_seen` と `last_report_at` も更新しない。SessionEnd でも削除しない)。
+     daemon の `info` の `last_report_at`(daemon が最後に report を受信した時刻 — §4.2)は、無視した report でも更新する(hook が届いていることの診断に使用する値である)。
+
+  規則が前提にしている順序は、次のとおりである(§7-3)。`/clear` は、SessionEnd(`reason` が `clear`。切り替えの前の `session_id`)、SessionStart(`source` が `clear`。新しい `session_id`)の順に
+  report を送信する。SessionEnd は 1 で適用してエントリを削除し、SessionStart は未登録として登録する。daemon が 2 つの report を逆の順で受信した場合は、SessionStart を 3 で適用し、
+  その後に受信する SessionEnd(エントリの `session_id` と異なる)を 3 で無視するので、エントリは残る。`/compact` の SessionStart は、`session_id` が変化しないので、1 で適用する。
+  この規則で扱えない場合は、次のとおりである(どれも、次の reconcile が、`claude agents` の一覧の `session_id` と status でエントリを上書きして回復する — §3.5 の 3 の「既知」)
+  - エントリの `pid` が不明の間(daemon の起動の後)に受信した子の report は、2 で適用する(親のエントリを上書きする)
+  - 親のエントリが無い間に受信した子の report は、未登録として登録する(親の report と区別できない)。その後の親の report は、3 で無視する
+  - 子が `claude -p --resume` などで起動され、SessionStart の `source` が `resume` の場合は、3 で適用する(親のエントリの `session_id` を上書きする)
+  - `source` が `fork` の SessionStart(セッションの中での分岐など)と、上記以外の `source` は、3 で無視する。セッションの中での切り替えで、
+    Claude Code が送信する report の `source` と `reason` は、`/clear` 以外は実測していない(§7-9)
+- **`target` を持たない SessionEnd**(制御端末が無くなった後の SessionEnd で、エントリを削除する。§8.66): ターミナルのウィンドウを閉じて終了したセッションでは、
+  SessionEnd の hook が実行される時点で、`claude` のプロセスも、その祖先も、制御端末を持たない(§7-12)。hook は、祖先 walk で pid と tty を取れないので、
+  `target` と `pid` を持たない SessionEnd の report を送る(§4.1)。daemon は、次の規則で適用する
+  - **`session_id` が、report の `session_id` と同じエントリを、すべて削除する**(通常は 1 つである。配信は、エントリごとの `agent_removed` で、
+    reason は、`target` を持つ SessionEnd と同じ `session_end` である)
+  - 一致するエントリが無い場合は、何もしない(エントリを登録せず、配信せず、`state.json` を書き込まない)
+  - この report に、応答は返さない(`target` を持つ report と同じ — §4.2)。daemon の `info` の `last_report_at` は、一致するエントリの有無に関係なく更新する
+  - **上記「入れ子のセッション」の判定は行わない**: 対象を `session_id` の一致だけで決めるので、子の SessionEnd(`session_id` が親と異なる)が、
+    親のエントリを削除することは無い
+  - エントリの `session_id` は、target の付け替えで引き継ぎ(上記「付け替え」)、`state.json` にも保存するので、ウィンドウを閉じた直後の reconcile で
+    `process:<pid>` に付け替わったエントリ(§3.5)と、daemon の起動の後の、`pid` が不明のエントリも、同じ規則で削除する
+  - `target` を持たない、SessionEnd 以外の report は、不正な要求である(hook は送らない — §4.1)。daemon は、エラーの応答を返し(§4.2)、
+    状態を変更しない(`info` の `last_report_at` も更新しない)
+  - `target` を持つ SessionEnd は、上記「pid による統合」の「hook の report」のとおりである
+
+  この規則で対応できない場合は、次のとおりである。hook が実行されない終了(プロセスの強制終了、クラッシュなど)では、report が無いので、
+  エントリは reconcile の prune で削除する(下記「削除経路」)。ウィンドウを閉じてから SessionEnd の hook までの時間(約 3.5〜5.5 秒 — §7-12)は、行が残る。
+  その間に走査が完全な reconcile があると、行は、SessionEnd までの間、`process:<pid>` の行(ジャンプできない行)になる
 - **時刻はすべて daemon の時計**(epoch 秒)。report の `ts` は表示用。daemon 内の時計は注入可能にする(stale テストのため)
-- **削除経路**: (1) SessionEnd(hook・即時) (2) reconcile の prune(claude agents に居ない) (3) stale
+- **削除経路**: (1) SessionEnd(hook・即時。`target` を持つものと、持たないもの — 上記) (2) reconcile の prune(claude agents に居ない) (3) stale
   (last_seen から一律 24h。60 秒周期 + 起動時にスイープ)。いずれも `agent_removed` を配信。
   reconcile は生きた既知エントリの `last_seen` を更新するので、稼働中のセッションが stale 削除されることはない
 - **手動削除**: `shiibar-cc remove <selector>`(reconcile が自動で消すので通常は不要だが残す)
@@ -229,17 +363,34 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
   バッククォート(内容は残す)/ `**`・`__` のペア(内容は残す)/ 行頭の `#` 見出しマーカー /
   `[text](url)` → `text`。**単独の `*` と `_` は触らない**(snake_case やパスへの誤爆を避ける。
   取り切れない記法が残るのは許容 — 誤って壊すより残す方を選ぶ)
-- **target の生成規則**(§2 の 2 種のどちらかを導出し、どちらも作れなければ **report を drop する** —
-  飛べないので追跡しない。§8.11・§8.47。フォールバック target は作らない):
+- **target の生成規則**(§2 の対応ターミナルの 3 種のどれかを導出し、どれも導出できなければ **`process:<pid>` にする** —
+  ジャンプはできないが、状態と通知の対象にする。§8.66):
+  - **すべての report で、最初に祖先 walk を実行する**: hook のプロセスは端末から切り離されて起動される(`ps` で `??`。§7-7)ので、
+    **親方向に、最初に制御端末を持つプロセスまで辿り、そのプロセスの pid と tty を取る**(Terminal.app、iTerm2、Ghostty の実測では、hook の `sh` の親の `claude` 本体が持つ —
+    §7-7・§7-8・§7-9。上限は §9)。**上限まで見つからなければ、report を drop する**(ターミナルを持たないセッション —
+    エディタの拡張機能、常駐プロセスが起動する実行など — は追跡しない。§8.66)。
+    **ただし、イベントが SessionEnd のときは、drop せずに、`target` と `pid` を持たない report を送る**(ターミナルのウィンドウを閉じて終了したセッションは、
+    SessionEnd の時点で、`claude` のプロセスも祖先も制御端末を持たない — §7-12。daemon は、`session_id` が一致するエントリを削除し、
+    一致するエントリが無ければ何もしないので、ターミナルを持たないセッションの SessionEnd を送っても、エントリは登録されない — §3.6「`target` を持たない SessionEnd」)。
+    この report では、下記の target の分岐を実行しない(環境変数の `ITERM_SESSION_ID` などが残っていても、target にしない)。
+    取った pid は、target の種類に関係なく、report の `pid` として送る(§4.2)。
+    walk は、`shiibar-cc report` のプロセス自身から開始する。**この規則は、hook のプロセスと、その親のシェルが、制御端末を持たないことに依存する**
+    (持つ場合は、`claude` ではなく、hook のプロセスの pid を取る。ターミナルの種類ごとの確認は §7-9)。
+    実行中のセッションの Bash ツールが起動した `claude -p` の hook は、子の `claude` も制御端末を持たないので、親の `claude` の pid と tty を取る
+    (daemon が、`session_id` の違いで無視する — §3.6「入れ子のセッション」)
   - `TERM_PROGRAM` が `iTerm.app` で、**かつ** `$ITERM_SESSION_ID`(形式 `wNtNpN:UUID`。§7-1)があれば
     `iterm2:<UUID>`(`:` 以降の UUID。reconcile が AppleScript から導出する target と一致させるため。
     `wNtNpN` は含めない。§2)。`ITERM_SESSION_ID` の有無だけでは判定しない —
     iTerm2 から起動した VS Code 等に相続されて残り、起動元タブの UUID を誤って指すため(§7-1)
-  - `TERM_PROGRAM` が `Apple_Terminal` なら `apple-terminal:<tty パス>`。tty は**自プロセスの制御端末では
-    取れない**(hook プロセスは端末から切り離されて起動される — `ps` で `??`。§7-7)ため、
-    **親方向に最初に制御端末を持つプロセスまで辿って取る**(実測では 2 段目の claude 本体が持つ。
-    上限は §9 — 上限まで見つからなければ drop)。`TERM_SESSION_ID` は判定にも target にも使わない
-    (AppleScript 側に対応物が無い。§7-7)
+  - `TERM_PROGRAM` が `Apple_Terminal` なら `apple-terminal:<tty パス>`(tty は祖先 walk で取った値)。
+    `TERM_SESSION_ID` は判定にも target にも使わない(AppleScript 側に対応物が無い。§7-7)
+  - `TERM_PROGRAM` が `ghostty` で、**かつ** `TERM_PROGRAM_VERSION` が 1.4.0 以上(§9)なら `ghostty:<tty パス>`(tty は祖先 walk で取った値)。
+    バージョンは、最初の `-` または `+` より前の部分を、`major.minor.patch` の 3 つの数値として解釈する(リリースではないビルドの値は、
+    `1.4.0-main+abc1234` のように、3 つの数値の後ろに `-` と `+` で始まる部分を持つ — §7-8)。`TERM_PROGRAM_VERSION` が無い、
+    解釈できない、1.4.0 未満のいずれかのときは `process:<pid>` にする(1.4.0 未満の Ghostty の扱いは §7-8)。
+    `GHOSTTY_SURFACE_ID` は判定にも target にも使わない(AppleScript の `id` と一致しない。§7-8)
+  - 上のどれにも該当しない(`TERM_PROGRAM` が別の値、または無い。`iTerm.app` で、`ITERM_SESSION_ID` が無い、空、`:` を含まない、
+    `:` の後が空、のいずれかの場合を含む)ときは `process:<pid>`(pid は祖先 walk で取った値)
 - shiibar-ccd 不在時は **黙って成功終了**する(hooks が Claude Code の動作を阻害しないこと。タイムアウト 1 秒)。
   切り分けは `shiibar-cc doctor` で行う(§4.4)
 - **配布は Claude Code のプラグイン機構**で行う(§8.19)。リポジトリ自体がマーケットプレイスを兼ねる:
@@ -267,13 +418,21 @@ Rust 製 daemon。tokio + Unix socket。
 
 ```jsonc
 // hooks からの報告。クライアントは 1 行書いて close する。daemon はレスポンスを返さない
-// (fire-and-forget。EOF を接続終了として扱う)
+// (fire-and-forget。EOF を接続終了として扱う)。
+// どの report も "pid":48213 の形で、そのセッションを実行している claude のプロセスの pid を運ぶ(§4.1。任意の項目。
+// 無い report は、pid が不明として扱う — §3.6「pid による統合」)
 {"cmd":"report","event":"Notification","notification_type":"permission_prompt","message":"Bash: cargo test",
- "target":"D2DA6A1F-…","session_id":"…","cwd":"/path","transcript_path":"…","ts":1751600000}
+ "target":"iterm2:D2DA6A1F-…","session_id":"…","cwd":"/path","transcript_path":"…","pid":48213,"ts":1751600000}
 {"cmd":"report","event":"UserPromptSubmit","prompt":"focus の AppleScript を実装して",
  "target":"…","session_id":"…","cwd":"…","transcript_path":"…","ts":1751600060}
 {"cmd":"report","event":"Stop","target":"…","session_id":"…","cwd":"…","transcript_path":"…",
  "background_tasks":[],"last_assistant_message":"Done. All 54 tests pass.","ts":1751600123}
+// 制御端末を持つ祖先が無い状態で実行された SessionEnd(ターミナルのウィンドウを閉じて終了したセッション。§4.1)。
+// target と pid の項目を持たない(項目を出力しない。daemon は、"target":null も、項目が無い場合と同じに読む)。
+// daemon は、session_id が一致するエントリを削除する(§3.6「target を持たない SessionEnd」)。応答は返さない
+{"cmd":"report","event":"SessionEnd","session_id":"…","cwd":"…","transcript_path":"…","ts":1751600200}
+// target を持たない report は、SessionEnd だけである。ほかのイベントの、target を持たない report には、次のエラーを返し、状態を変更しない
+// → {"ok":false,"error":"invalid request: report without target is only valid for SessionEnd"}
 
 // 現在の全エージェント状態
 {"cmd":"list"}
@@ -289,18 +448,26 @@ Rust 製 daemon。tokio + Unix socket。
 //                                                (created_at は不変。last_report_at は hook report ごとに変わるため
 //                                                 配信頻度は上がるが、並びのキーには使っていないので行は動かない。§4.5/§8.31)
 //    {"event":"agent_removed","target":"…","reason":"session_end"}   … 削除経路を reason で示す:
-//      "session_end"(hook)/ "stale" / "remove"(手動)/ "prune"(reconcile)。
+//      "session_end"(hook)/ "stale" / "remove"(手動)/ "prune"(reconcile)/
+//      "rekey"(エントリの target を付け替えた。§3.6「pid による統合」。このときだけ "to":"<新しい target>" を持ち、
+//      直後に、新しい target の status_changed が続く)。
 //      アプリは通知の掃除で session_end を除外するのに使う(§4.5)。未知の reason は "remove" と同扱いでよい
 //    (last_seen だけの更新では配信しない)
 
 // reconcile(claude agents の live 一覧を client が gather して送る。§3.5)
 // daemon が claude agents を正として add / update / prune / flag を適用する。
 // complete = 試みたターミナル走査がすべて完全だったか。false(または欠落)なら prune を行わない(§3.5)
+// pid = claude agents の一覧の pid(任意の項目)。update_only = true のセッションは、登録済みのエントリ(target が同じ、
+// 無ければ pid が同じ)の更新だけに使用し、エントリの作成と target の付け替えを行わない
+// (走査が不完全な回の、どの走査にも一致しないセッション。§3.5・§3.6「pid による統合」。欠落は false)
 {"cmd":"reconcile","complete":true,"sessions":[
-  {"target":"…","session_id":"…","cwd":"…","status":"waiting","waiting_for":"permission prompt"}
+  {"target":"…","session_id":"…","cwd":"…","status":"waiting","waiting_for":"permission prompt","pid":48213}
+]}  // → {"ok":true}
+{"cmd":"reconcile","complete":false,"sessions":[
+  {"target":"process:48301","session_id":"…","cwd":"…","status":"idle","pid":48301,"update_only":true}
 ]}  // → {"ok":true}
 
-// エントリの手動削除・既読化(shiibar-cc remove / focus 成功時の seen)
+// エントリの手動削除・既読化(shiibar-cc remove / seen。seen は、focus の成功時、アプリで利用者が選択した行の選択が続いた時点、Mark all as read で送られる)
 {"cmd":"remove","target":"…"}   // → {"ok":true}(未登録でも ok)
 {"cmd":"seen","target":"…"}     // → {"ok":true}(未登録でも ok)。unreviewed フラグを下ろす(status は変えない。§3.2)。
                                 //    last_seen も更新しない(last_seen は report / reconcile 由来。§3.6)
@@ -319,6 +486,21 @@ Rust 製 daemon。tokio + Unix socket。
 - **処理順序**: daemon は接続の accept 順・受信順に直列で処理する。観測可能な順序は subscribe ストリームが定義する
   (テストは watch の出力列を assert すればよい。sleep 同期は不要)
 - **前方互換**: クライアントは未知の `event` / `status` / フィールドを無視すること(バージョン番号は設けない)
+- **target の種類**: daemon は target を解釈しない(§2。§3.6「pid による統合」は、target の文字列の一致と `pid` だけで判定する)。
+  クライアントは、target の prefix で、そのセッションのタブへジャンプできるかどうかを判定する —
+  `iterm2:` / `apple-terminal:` / `ghostty:` はジャンプできる。`:` を含まない、空でない target と、`wNtNpN:UUID` の形式の target
+  (`:` の後が空でないもの)も、ジャンプできる(iTerm2 に振り分ける互換の形式 — §4.3「振り分けの規則」)。
+  `process:`、クライアントが知らない prefix、空の target、`wNtNpN:` の後が空の target は、ジャンプできない。
+  ジャンプできるかどうかを示す項目は、ワイヤに設けない(`target` は、SessionEnd の `report` を除いて、どの要求と応答でも必須の文字列である。§8.66。
+  `target` を持たない SessionEnd の `report` は、§3.6「`target` を持たない SessionEnd」。この `report` は、`target` の項目を出力しない。
+  daemon は、値が `null` の `target` も、項目が無い場合と同じに読む)
+- **`pid` は、一覧と購読の応答には含めない**(エントリの `pid` は、daemon が統合に使用する値で、クライアントは使用しない)
+- **付け替えの後の target**: reason が `rekey` の `agent_removed` の後は、古い target を指定した `seen` と `remove` は、未登録の target への要求と同じ結果になる
+  (`ok` を返して、何も変更しない)。古い target を対象にした `wait` は、エントリが削除されたものとして終了する
+- **アプリ、daemon、CLI は、同じバージョンを一緒に配布する**(アプリのバンドルに同梱する)。アプリは、バージョンが異なる daemon に
+  アタッチしない(起動中の daemon を終了させて、同梱の daemon を起動する — §4.5「daemon のライフサイクル管理」)ので、
+  アプリを起動している間は、`rekey`、`to`、`pid`、`update_only` を知らない daemon との組み合わせにならない
+  (バージョンが異なる daemon にアタッチする場合の例外は、§4.5「daemon のライフサイクル管理」)
 - 送信が詰まった subscriber は切断され得る(実装は bounded channel。容量は実装定数でありプロトコル契約ではない。
   クライアントは再接続すれば snapshot で回復する)
 
@@ -344,20 +526,32 @@ Rust 製 daemon。tokio + Unix socket。
 - `shiibar-cc-proto`: メッセージ型(serde)と NDJSON codec。daemon / ctl で共有
   (メニューバーアプリは Swift なので共有しない。プロトコル = NDJSON 自体を安定境界とする)
 - `shiibar-cc-client`: socket 接続、list / subscribe / wait のクライアント実装と、
-  **ターミナルモジュール(iterm2 / apple_terminal)**
+  **ターミナルモジュール(iterm2 / apple_terminal / ghostty)**
     (モジュール名は target の prefix と同名 — ハイフンは Rust の識別子制約でアンダースコアになる)
   - `wait` は subscribe 1 本で実装する(最初に snapshot が来るので、別途 list を叩く必要はない)
   - **ターミナルモジュールの共通規則**: 各ターミナルの知識(ID 形式・AppleScript)はそのモジュールに
     のみ存在させる。target の prefix(§2)で同名のモジュールに振り分ける入口を 1 箇所だけ持ち、
-    trait 等の抽象層は作らない(§8.2 — 実物 2 例の共通部分は「対になる 4 関数」
-    (focus / focused / <ターミナル>_targets / open_resume_window)までで、それ以上を固定しない)。
-    **振り分けの規則**: `iterm2:` → iterm2、`apple-terminal:` → apple_terminal。`:` を含まない target は
+    trait 等の抽象層は作らない(§8.2・§8.66 — 実物 3 例の共通部分は「対になる 5 関数」
+    (focus / focused / probe / <ターミナル>_targets / open_resume_window)までで、それ以上を固定しない。
+    ターミナルの知識を含まない純関数(tty の正規化など)は、モジュールの間で共有してよい)。
+    **振り分けの規則**: `iterm2:` → iterm2、`apple-terminal:` → apple_terminal、`ghostty:` → ghostty。
+    `process:` は、どのモジュールにも渡さず「該当なし」にする(ジャンプできない target — §2)。`:` を含まない target は
     `iterm2:` とみなす(§2 の移行前の値・手打ち UUID の互換。アップグレード前に配信済みの
     通知が持つ旧 target もこれで飛べる)。prefix 部が `wNtNpN` 形式なら `:` 以降を UUID として
     iterm2 に渡す(`$ITERM_SESSION_ID` を手で貼る利用の互換)。それ以外の未知 prefix は「該当なし」
     (exit 2 系統 — 黙って iterm2 に流さない)。
+    `focused` は、iterm2、apple_terminal、ghostty の順に照会し、最初に target を返したモジュールの結果を返す(最前面のアプリは 1 つなので、順序は結果に影響しない)。
     **テスト分離**: AppleScript ソースの生成と osascript 出力のパースは純関数として切り出し、
-    osascript プロセス実行部だけを差し替え可能にする(両モジュール共通)
+    osascript プロセス実行部だけを差し替え可能にする(全モジュール共通)。
+    **ターミナルの固有の用語を使用するスクリプトは、そのターミナルが起動中であることを、別のスクリプトで確認した後に送る**
+    (iterm2 と ghostty。`open_resume_window` を除く): アプリの固有の用語を `tell` の中で使用するスクリプトは、そのアプリがインストールされていない Mac では、
+    実行の前にエラーになり、同じスクリプトの中の is-running の確認は実行されない(§7-10)。この場合に、focus と focused が「該当なし」ではなくエラーになり、
+    reconcile の走査が毎回不完全になって prune が止まる(§3.5)。そのため、固有の用語を使用しない照会だけのスクリプトを先に送り、
+    起動中の場合だけ、固有の用語を使用するスクリプトを送る。アプリは名前で指定する(`application "iTerm2"` / `application "Ghostty"`。
+    バンドル ID で指定したスクリプトは、インストールされていないアプリでは、実行の前にエラーになる — §7-10)。
+    固有の用語を使用するスクリプトの中の is-running の確認は、残す(2 つのスクリプトの間でアプリが終了した場合に、起動させないため)。
+    apple_terminal は、対象の Terminal.app が macOS に含まれるので、1 つのスクリプトのままである。
+    `open_resume_window` は、選択したターミナルを起動する操作なので、事前の照会を送らない(ghostty は、起動中の場合のバージョンの確認だけを送る)
   - **iterm2 モジュール**(iTerm2 の知識はここにのみ存在させる)
     - `focus(target)`: target(振り分け入口で `iterm2:` を外した裸の UUID。§2)を使い、
       AppleScript で iTerm2 の windows→tabs→sessions を走査し、一致を見つけたら
@@ -366,11 +560,17 @@ Rust 製 daemon。tokio + Unix socket。
       別 Space へ遷移しない — §7-1)。一致なしは「該当なし」(activate は一致分岐の中のみ —
       該当なしでは何も動かさない)。
       **iTerm2 が起動していなければ起動せずに「該当なし」を返す**(走査は `application "iTerm2" is running` ガード内)。
+      **focus / focused / probe / `iterm2_targets` は、最初に、`application "iTerm2" is running` だけを照会するスクリプトを送る**
+      (`tell` と iTerm2 の用語を含まない — 上記「共通規則」)。起動していない場合は、2 つ目のスクリプトを送らずに、それぞれ「該当なし」/「なし」/「未起動」/
+      空の結果(完全な走査。`ps` も実行しない)を返す。この照会の失敗は、TCC のエラーはそのまま返し、それ以外のエラーは、
+      focus / focused / probe ではエラー、`iterm2_targets` では不完全な走査として扱う
       走査は明示 index + `try`(分割ペインで `index of tab` / plural 反復が `-1719/-1728` になる実機バグ回避。§7-1)
     - `focused()`: iTerm2 が最前面アプリのとき、前面 session の target(`iterm2:<UUID>`。§2)を返す。前面でなければ「なし」
+    - `probe()`: doctor 用。起動中の iTerm2 に、状態を変更しない照会(`count of windows`)を 1 回送り、オートメーションの権限の有無を返す。
+      iTerm2 が起動していなければ、照会を送らずに「未起動」を返す
     - `iterm2_targets(pids)`: **reconcile 用**。渡された pid(`claude agents --json` 由来)を `ps` で tty に引き、
       iTerm2 の各セッションの tty と突き合わせて `{pid → target(`iterm2:<UUID>`)}` を返す(§3.5 / §7-1)。
-      iTerm2 に無い pid は返さない(iTerm2 外 = このモジュールの追跡外)
+      iTerm2 に無い pid は返さない(iTerm2 外 = このモジュールの対象外)
     - `open_resume_window(cwd, session_id, fork)`: **Resume と Branch 用**(§4.6)。新しい iTerm2 ウィンドウを
       開き、cwd で `claude --resume <session_id>` を実行する(`fork` が真のときは、コマンドの末尾に
       `--fork-session` を追加する — §4.4)。focus と違い **iTerm2 が起動していなければ
@@ -387,12 +587,25 @@ Rust 製 daemon。tokio + Unix socket。
       一致なしは「該当なし」(activate は一致分岐の中のみ)。
       **Terminal.app が起動していなければ起動せずに「該当なし」を返す**(is-running ガード。iterm2 と同じ)。
       全走査が必須なのは、Cmd+T のタブが AppleScript には**別 window(各 1 タブ)**として見える一方、
-      Merge 等で 1 window 複数 tab の形も存在するため — 両形態を同じループがカバーする(§7-7 実測)
+      Merge 等で 1 window 複数 tab の形も存在するため — 両形態を同じループがカバーする(§7-7 実測)。
+      **タブを読み取れないウィンドウは、読み飛ばす**(各ウィンドウの `tabs of w` の読み取りと、各タブの `tty` の読み取りを、それぞれ `try` の中に置く)。
+      Terminal.app は、ターミナルのウィンドウをすべて閉じた後も、`id` もタブも読み取れないウィンドウのオブジェクトを保持する場合があり(§7-7)、
+      その読み取りのエラーで、ほかのウィンドウのタブへの focus が失敗しないようにするためである。
+      `activate` と選択の操作(`set selected`、`set frontmost`)は、どの `try` の中にも置かない(これらのエラーは、「該当なし」ではなく、エラーとして返す)
     - `focused()`: Terminal.app が最前面アプリのとき、前面 window の selected tab の target
-      (`apple-terminal:<tty パス>`)を返す。前面でなければ「なし」
+      (`apple-terminal:<tty パス>`)を返す。前面でなければ「なし」。
+      前面のウィンドウの selected tab を読み取れず、そのウィンドウの `id` も読み取れない場合(ターミナルのウィンドウが無い状態 — §7-7)も、「なし」を返す。
+      `id` を読み取れるウィンドウで読み取りが失敗した場合は、エラーとして返す。最初に `count of windows` を `try` の外で照会するので、TCC のエラーは「なし」にならない
+    - `probe()`: doctor 用。起動中の Terminal.app に、状態を変更しない照会(`count of windows`)を 1 回送り、オートメーションの権限の有無を返す。
+      Terminal.app が起動していなければ、照会を送らずに「未起動」を返す(is-running ガード)。
+      `count of windows` は、`id` もタブも読み取れないウィンドウだけがある状態でも成功する(§7-7)
     - `apple_terminal_targets(pids)`: **reconcile 用**。渡された pid を `ps` で tty に引き、Terminal.app の
       各タブの tty と突き合わせて `{pid → target(`apple-terminal:<tty パス>`)}` を返す(§3.5)。
-      `ps` の tty は `/dev/` 無し・AppleScript は `/dev/` 付き(§7-7)なので前置して比較する
+      `ps` の tty は `/dev/` 無し・AppleScript は `/dev/` 付き(§7-7)なので前置して比較する。
+      **タブを読み取れないウィンドウの扱い**: `tabs of w` を読み取れず、`id of w` も読み取れないウィンドウは、ターミナルのウィンドウではないものとして、
+      失敗に数えずに読み飛ばす(§7-7)。`tabs of w` を読み取れず、`id of w` を読み取れるウィンドウは、失敗 1 件に数える(その回の走査は不完全 — §3.5)。
+      タブの `tty` を読み取れない場合も、失敗 1 件に数える。読み飛ばす規則が無いと、Terminal.app がターミナルのウィンドウを持たずに起動している間、
+      走査のスクリプトがエラーになり、reconcile が毎回不完全になって、ほかのターミナルの終了したセッションも prune されない
     - `open_resume_window(cwd, session_id, fork)`: 新しい Terminal.app ウィンドウで cwd の `claude --resume` を
       実行する(`fork` の扱いは iterm2 と同じ)。起動方式は **`do script`**(新しいウィンドウの対話シェルにコマンドを打ち込む —
       iterm2 の `write text` と同じく rc を通った PATH で `claude` を解決するため)。
@@ -400,7 +613,46 @@ Rust 製 daemon。tokio + Unix socket。
       エスケープ規則も iterm2 と同じ
     - split pane(Cmd+D)は同一セッションの表示分割で独立した tty を持たない(§7-7 実測)ため、
       pane の概念はこのモジュールに存在しない
-  - osascript の TCC(オートメーション)権限エラーは「該当なし」と区別して呼び出し元に返す(両モジュール共通)
+  - **ghostty モジュール**(Ghostty の知識はここにのみ存在させる。実測の根拠と未検証の点は §7-8。対象は Ghostty 1.4.0 以上 — §9)
+    - 鍵は tty である(apple_terminal と同じ)。Ghostty の AppleScript の `terminal`(ウィンドウ・タブ・分割の中の 1 つの端末)が
+      `tty` を持つ。分割した端末は、それぞれ別の `terminal` と `tty` を持つので、別の target として扱う(§7-8)
+    - **1.4.0 未満の Ghostty**: どの関数も、最初に、起動中の Ghostty のバージョン(AppleScript の `application` の `version`)を確認する。
+      比較の規則は §4.1 と同じである(最初の `-` または `+` より前の部分を、3 つの数値として解釈する)。1.4.0 未満のときは、
+      `tty` を参照せず(`v1.3.1` の `terminal` には `tty` が無い — §7-8)、focus と focused は「該当なし」、`ghostty_targets` は空の結果を完全な走査として返す
+      (その Ghostty のセッションは、hook でも reconcile でも `process:` になる — §4.1・§3.5)。`open_resume_window` は、専用のエラー
+      (`Ghostty 1.4.0 or later is required. Quit and reopen Ghostty after updating it.`)を返す(CLI は exit 1 — §4.4。
+      インストールされている Ghostty が 1.4.0 以上でも、起動中の Ghostty が古い場合に発生する)
+      このバージョンの照会が、上記「共通規則」の、起動中であることを確認するスクリプトを兼ねる: アプリを名前(`application "Ghostty"`)で指定し、
+      is-running の確認の中で `version` だけを取得する(Ghostty の固有の用語を含まない)。Ghostty がインストールされていない Mac でも、
+      「未起動」を返す。`tty` などの固有の用語を使用するスクリプトは、この照会が 1.4.0 以上の起動中の Ghostty を返した場合だけ送る
+    - **端末の列挙は、1 回の照会で一括して取得する**(`tty of every terminal` の形)。`terminal` を 1 つずつ取り出す列挙は、
+      列挙の途中で端末が閉じられると、エラー(-1719)になる(§7-8)。**照会がエラーになった場合(`version` の照会を含む。-1719 を含む。TCC のエラーを除く)は、
+      不完全な走査として扱う**(reconcile は、その回の prune を行わない — §3.5)。AppleScript を無効にした Ghostty(設定 `macos-applescript` が false)での
+      照会の結果と、その場合の扱いは、未検証である(§7-8)
+    - `focus(target)`: target(`ghostty:` を外した tty パス)で、`every terminal whose tty is "<tty パス>"` を取得し、最初の 1 つに
+      `focus` コマンドを実行する。`focus` だけで、その端末のウィンドウが前面のウィンドウになり、タブと分割が選択される
+      (`activate window` と `select tab` は併用しない — §7-8)。一致なし(0 件)は「該当なし」(何も動かさない)。
+      **Ghostty が起動していなければ起動せずに「該当なし」を返す**(is-running ガード。iterm2 と同じ)。
+      別のアプリが前面にある状態から、Ghostty が前面のアプリになるかどうかと、別の Space にある端末への移動は、未検証である
+      (前面にならない場合は、一致の分岐の中で、`focus` の前に `activate` を実行する — iterm2 と同じ順。§7-8)
+    - `focused()`: Ghostty が最前面アプリのとき、前面のウィンドウの選択中のタブの `focused terminal` の target
+      (`ghostty:<tty パス>`。`tty of focused terminal of selected tab of front window`)を返す。前面でなければ「なし」。
+      最前面かどうかは、Ghostty の `application` の `frontmost` で判定する(§7-8)
+    - `probe()`: doctor 用。起動中の Ghostty に、状態を変更しない照会(`version` の取得)を 1 回送り、オートメーションの権限の有無を返す。
+      Ghostty が起動していなければ、照会を送らずに「未起動」を返す(iterm2 と同じ)
+    - `ghostty_targets(pids)`: **reconcile 用**。渡された pid を `ps` で tty に引き、Ghostty の全 `terminal` の tty(上記の一括の取得)と
+      突き合わせて `{pid → target(`ghostty:<tty パス>`)}` を返す(§3.5。`/dev/` の前置は apple_terminal と同じ)
+    - `open_resume_window(cwd, session_id, fork)`: 新しい Ghostty のウィンドウを開き、その対話シェルで
+      `cd … && claude --resume …` を実行する(`fork` の扱い、rc を通った PATH で `claude` を解決する理由は iterm2 と同じ)。
+      起動方式は、**surface configuration の `initial input`** である: `new surface configuration` で作成したレコードの `initial input` に、
+      コマンドと、末尾の改行(AppleScript の `linefeed`)を指定して、`new window with configuration` を実行する。末尾の改行によって、コマンドは、対話シェルの入力として実行される(§7-8)。
+      `new window` の前に `activate` を実行する(新しいウィンドウを前面にする。iterm2 と apple_terminal の `open_resume_window` と同じ)。
+      `input text` は、文字列を貼り付けとして入力するので、改行を含めても実行されない(実行には `send key "enter"` が必要になる)。そのため、使用しない。
+      surface configuration の `command` の直指定も採らない(ログインシェルの PATH の構築を迂回する — iterm2 と同じ理由)。
+      エスケープは 2 段である: cwd と session_id を、シェルの単一引用符で囲み(中の `'` は `'\''` にする)、できたコマンドの文字列を、
+      AppleScript の文字列としてエスケープする(`\` と `"`)。Ghostty が起動していなければ起動する(iterm2 と同じ「開く動詞」の例外。
+      未起動の状態からの動作は、未検証である — §7-8)
+  - osascript の TCC(オートメーション)権限エラーは「該当なし」と区別して呼び出し元に返す(全モジュール共通)
 
 ### 4.4 shiibar-cc(`crates/shiibar-cc`)
 
@@ -410,11 +662,11 @@ shiibar-cc list [--json]      # 非 --json は「状態 / ラベル / 経過時�
 shiibar-cc wait <selector> --status waiting|idle|working [--timeout SEC]
 shiibar-cc watch              # subscribe のイベントを行 JSON で標準出力へ
 shiibar-cc focus <selector>   # ジャンプ。成功時: daemon に seen を送る
-shiibar-cc focused            # 前面の対応ターミナル(iTerm2 / Terminal.app)の前面セッションの target を出力(なければ exit 2)
-shiibar-cc reconcile          # claude agents + ターミナル走査(iterm2_targets / apple_terminal_targets)を gather → daemon に reconcile を送る(§3.5)。アプリが起動時・再接続時・定期(§4.5)・Refresh で呼ぶ
+shiibar-cc focused            # 前面の対応ターミナル(iTerm2 / Terminal.app / Ghostty)の前面セッションの target を出力(なければ exit 2)
+shiibar-cc reconcile          # claude agents + ターミナル走査(iterm2_targets / apple_terminal_targets / ghostty_targets)を gather → daemon に reconcile を送る(§3.5)。アプリが起動時・再接続時・定期(§4.5)・Refresh で呼ぶ
 shiibar-cc remove <selector>  # 幽霊エントリの手動削除(通常は reconcile が自動で消す)
-shiibar-cc seen <selector>    # unreviewed フラグを消す(daemon に seen を送る。アプリの Mark all as read が target ごとに呼ぶ。§4.5)
-shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] [--fork] <session-id>  # 新しいターミナルウィンドウを開き <dir> で claude --resume を実行(既定 iterm2。--fork は分岐。アプリの Resume / Branch が呼ぶ。§4.6)
+shiibar-cc seen <selector>    # unreviewed フラグを消す(daemon に seen を送る。アプリが、利用者が選択した行の選択が続いた時点と、Mark all as read で target ごとに呼ぶ。§4.5)
+shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal|ghostty] [--fork] <session-id>  # 新しいターミナルウィンドウを開き <dir> で claude --resume を実行(既定 iterm2。--fork は分岐。アプリの Resume / Branch が呼ぶ。§4.6)
 shiibar-cc conversations index [--json]           # 会話索引の更新(差分。初回は全構築。--json = 進捗の行 JSON。§4.6)
 shiibar-cc conversations search [<query>] [--json] # 会話の検索(追いつき込み。クエリ無しは全件 = browse。§4.6)
 shiibar-cc conversations show <session-id> [--json] # 会話全文の取得(§4.6)
@@ -426,26 +678,32 @@ shiibar-cc doctor             # 診断(下記)
   複数一致は exit 1(該当なしの 2 と区別。理由は stderr)
 - **focus の selector 解決**: 完全一致 target は destination そのものなので daemon を介さず、prefix で振り分けたターミナルモジュール(§4.3)へ直接渡す
   (daemon が落ちていても・entry が stale で消えていてもタブが生きていれば飛べる。「該当なし」はターミナル走査の失敗=exit 2)。
+  **`process:` の target は、ジャンプできないので exit 2**(osascript を実行しない。stderr に、対応ターミナル以外で実行中のセッションである旨を出す —
+  `shiibar-cc focus: the session is running in a terminal Shiibar CC can't drive; there is no tab to jump to`。タブが見つからない場合の文言とは別である。
+  `.` で解決したエントリの target が `process:` の場合も同じ)。`seen` / `remove` / `wait` は、`process:` の target を、ほかの target と同じに扱う。
   daemon の list を引くのは `.`(cwd 一致)を解決するときだけ。focus 成功後の `seen` 送信は
   best-effort(失敗しても飛べた事実は覆さない)
 - **exit code(全サブコマンド共通)**: 0 成功 / 1 接続・内部エラー(daemon 不在含む。stderr に理由) /
   2 該当なし(wait では対象消滅。理由は stderr に出す) /
   3 osascript 権限(TCC)エラー / 124 wait タイムアウト。
-  **例外は `report` のみ**: hooks を阻害しないため、daemon 不在・タイムアウトを含め常に exit 0(§4.1)
+  **例外は `report` のみ**: hooks を阻害しないため、daemon 不在・タイムアウトを含め常に exit 0(§4.1)。
+  **reconcile は、1 つのターミナルの走査が TCC エラーになっても、ほかのターミナルの走査の結果を daemon に送ってから、exit 3 で終了する**
+  (その回は `complete:false` である — §3.5。1 つのターミナルの権限の拒否で、ほかのターミナルと、対応ターミナル以外のセッションの照合を止めない)
 - **wait の selector 解決**: 開始時に 1 回解決し、以降はその target を追う(未登録なら出現を待つ)。
   `--timeout` 省略時は無限に待つ
 - **resume は daemon に接続しない**(ターミナルモジュール直呼び。§4.3 の `open_resume_window`)。
   引数は cwd と session_id の明示指定、`--terminal`(省略時 `iterm2`)、`--fork` である — 会話の知識
   (transcript)は持たない(それは conversations モジュール。§4.6)。**どのターミナルで開くかも
   自分では判断しない**: focus と違って飛び先のタブが存在せず target からも導けないため、
-  判断材料(直近エントリの種別)を持つ呼び出し側 = アプリが決めて渡す(§4.6)。
+  呼び出し側 = アプリが、Settings の `Terminal` の値を渡す(§4.6)。
   CLI を直接使うスクリプトには `--terminal` が明示手段になる。
   **`--fork` を付けると、ターミナルで実行するコマンドに `--fork-session` を追加する**
   (`claude --resume <session-id> --fork-session`。その会話のコピーから新しい session ID の会話が始まり、
   元の会話は変更されない — 測定結果は §7-6)。違いはこのフラグだけで、ウィンドウの開き方・cwd の確認・
   exit code は `--fork` なしと同じ。**cwd は絶対パス必須で、実行前に存在を確認する**(相対パス・
   不存在は AppleScript に触る前に exit 1 — transcript はフォルダより長生きするため)。
-  exit code は 0 成功 / 1 内部エラー / 3 TCC(共通系統のうち 2 と 124 は使わない)
+  exit code は 0 成功 / 1 内部エラー / 3 TCC(共通系統のうち 2 と 124 は使わない)。
+  起動中の Ghostty が 1.4.0 未満のときの `--terminal ghostty` は、exit 1 である(stderr には、ほかのエラーと同じ `shiibar-cc resume: ` の接頭辞に続けて、§4.3 の ghostty モジュールの文言を出す)
 - **conversations 系も daemon に接続しない**(データ源は transcript と `~/.claude/sessions/` の
   pid ファイル。§4.6)。exit code: `index` / `search` は 0 成功(検索 0 件も成功)/ 1 内部エラー
   (索引構築不能・有効な検索語が無いクエリを含む — 黙って 0 件を返さない)。`show` は 0 / 1 / 2
@@ -475,7 +733,8 @@ shiibar-cc doctor             # 診断(下記)
   `shiibar-cc` が PATH にあるか /
   osascript の TCC 権限(**起動中の対応ターミナルごとに**無害な走査を 1 回試す。未起動のターミナルは
   probe しない — 使っていないターミナルへの権限プロンプトを誘発しないため(§8.47)。スキップは
-  人間向け出力に `[info]` で明示し、黙って省略しない)/
+  人間向け出力に `[info]` で明示し、黙って省略しない。検査の id は `tcc_iterm2` / `tcc_apple_terminal` / `tcc_ghostty` で、この順に検査する。
+  Ghostty の検査は、バージョンの照会への応答で判定するので、起動中の Ghostty が 1.4.0 未満でも、応答があれば権限ありとして表示する — §4.3 の `probe`)/
   Space 切り替え設定(NSGlobalDomain の `AppleSpacesSwitchOnActivate` が明示 `0` なら warn —
   OFF だと focus がウィンドウのある Space / ディスプレイに切り替われない。§7-1。
   未設定・`1`・読み取り失敗は ok 扱い — 既定が ON のため誤警告より見逃しを選ぶ)。
@@ -489,7 +748,7 @@ shiibar-cc doctor             # 診断(下記)
 SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全セッションの状態の
 ロールアップ 1 つ。常時表示)と、2 つの画面(**ポップオーバー**と**ウィンドウ**)で構成する。アイコンのクリックは、
 表示の形(下記「表示の形」)の画面を開く。ポップオーバーとウィンドウは同じ内容(実行中のセッションと過去の会話の一覧、および
-会話の全文を表示する会話ペイン)を表示し、レイアウトは 1 種類である(§8.49)。通知クリックで focus。
+会話の全文を表示する会話ペイン)を表示し、レイアウトは 1 種類である(§8.49)。通知クリックで focus(ジャンプできないセッションでは、一覧でその行を選択する — 下記「デスクトップ通知」)。
 
 - **見た目の正**: トレイアイコンは `docs/menubar-design.html`、ポップオーバーとウィンドウは
   `docs/window-design.html`。
@@ -553,8 +812,8 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
 
   **ホットキーでポップオーバーまたはウィンドウを開いたとき(ウィンドウを前面に移したときを含む)は、検索欄ではなく一覧にフォーカスを移す**
   (閉じているウィンドウを開いたときは、ウィンドウが key になった時点で移す。開いてから §9 の時間の中で key にならなかった場合は、移さない)。
-  下記「キー操作」の検索欄の Enter と同じく、選択なしの場合は先頭の行を選択する
-  (行が 1 つも無い場合は、検索欄にフォーカスを移す)。
+  **選択は変更しない**(選択なしの場合は、選択なしのままである。↑ / ↓ または Enter で、先頭の行を選択する — 下記「キー操作」。§8.66)。
+  行が 1 つも無い場合は、検索欄にフォーカスを移す。
   詳細ページを表示している場合は、ページを変更せず、会話ペインにフォーカスを移す。
   Settings ウィンドウでキーの組み合わせを記録している間は、ホットキーの登録を一時的に解除する
 - **ポップオーバー**: OS 標準のポップオーバー(`NSPopover`。矢印あり)を、アイコンの直下に表示する。
@@ -730,10 +989,48 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   waiting で未確認の行は、オレンジの状態記号と、アクセントカラーの点の両方を表示する。選択中の行(淡い青または淡い灰色の地 — 下記「行の選択」)でも、
   同じ色で表示する(地は淡い色なので、塗りの点とオレンジの記号は判別できる)。色の意味は §3.1。
   **並びは新しいセッション順**(`created_at` の降順)。キーが不変なので、状態が変化しても行は移動しない。
-  unreviewed を位置では示さない(§8.31)。`agent_removed` で行を消す
+  unreviewed を位置では示さない(§8.31)。`agent_removed` で行を消す。
+  対応ターミナル以外で実行しているセッション(target が `process:` — §2)の行も、内容、状態記号、点、並びは同じである
+  (違いは、下記「実行のボタン」の Jump だけである)
+- **未確認を下ろす操作**(§8.66): Running の行の未確認は、次の操作で下ろす。対応ターミナルのセッションと、それ以外のセッションで、同じ規則である。
+  アプリが下ろすときは、`shiibar-cc seen <target>` を実行する(Jump は、CLI が成功時に送る)
+  - **利用者が選択した行の選択が、§9 の時間続いたとき**: 利用者の操作で Running の行を選択した時点から計測し、その行の選択が §9 の時間続いた時点で、
+    行が未確認であれば下ろす。**選択の時点では下ろさない**(↑ / ↓ で通過しただけの行と、選択してすぐに別の行へ移動した行の点は、残る)。
+    計測を開始する選択の操作は、行のクリック、↑ / ↓、選択なしの間の Enter による先頭の行の選択(検索欄と一覧のどちらでも — 下記「キー操作」)、
+    詳細ページでの前後の会話への切り替え、通知のクリックによる選択(下記「デスクトップ通知」)である。1 列でも 2 列でも同じである。
+    行のドラッグの開始は、Running の行には無い操作なので(ドラッグできるのは Starred と Recent の行 — 下記「行のドラッグ」)、対象に含めない。
+    計測は、選択の時点で行が未確認かどうかに関係なく開始し、未確認かどうかは、時間が経過した時点で判定する
+    (計測中に未確認になった行は、時間が経過した時点で下りる。時間が経過した後に未確認になった行は、次の操作まで下りない)
+  - **選択中の行に対する操作も、選択の操作として扱う**: 次の操作は、計測を最初から開始する。選択を保持している間に未確認になった行は、
+    この操作から §9 の時間の後に下りる
+    - 選択中の行のクリックのうち、選択が残るもの(灰色で表示している選択中の行のクリック — 一覧にフォーカスを移す。下記「行のクリック」)と、
+      選択中の行のダブルクリック(下記「行のダブルクリック」)。青で表示している選択中の行の 1 回のクリックは、選択を解除するので、
+      計測を中止する(下記。計測は、クリックの時点で中止する — 選択の解除は、ダブルクリックにならないことが確定するまで待つが、計測の中止は待たない)。
+      その行をもう一度クリックして選択すると、計測を開始する。同じ行での 3 回目以降の連続のクリックも、計測を最初から開始する
+    - 主ボタンが disabled の Jump である行での Enter(会話を表示する操作 — 下記「行のダブルクリック」。Enter の動作が何も実行しない、1 列の詳細ページを含む)。
+      Jump ができる行の Enter は、Jump の成功で下りる
+    - ジャンプできないセッションの通知のクリック(下記「デスクトップ通知」の「通知のクリック」。その行が既に選択中で、選択が変化しない場合を含む)
+  - **計測の中止**: 選択が別の行に移動したとき、選択が外れたとき(選択の解除と、選択中の行が一覧から無くなったとき — 下記「行の選択」)、
+    ポップオーバーまたはウィンドウを閉じたときは、計測を中止する。中止した後は、上記の操作で、最初から計測する(閉じる前の経過時間を引き継がない)。
+    ウィンドウが key でなくなっただけでは、中止しない
+  - **利用者の操作によらない選択では、計測を開始しない**: ポップオーバーまたはウィンドウを閉じる前から保持している選択 /
+    選択を保持したまま行が Running に移ったとき(Resume の後など — 下記「行の選択」)/
+    target の付け替え(`rekey`)による選択の引き継ぎ(下記「デスクトップ通知」)。これらの選択と、選択中に応答が完了した場合は、
+    選択中の行に点を表示し、上記の操作があるまで下ろさない(画面を見ていない間に、点が消えないようにする)。
+    計測中に target が付け替わった場合は、計測を継続し、時間が経過した時点で、新しい target に `seen` を実行する
+  - **すぐに下ろす操作**: **Jump の成功**(下記「実行のボタン」。通知のクリックの focus を含む)と、**`Mark all as read`**(下記「⌄ メニュー」)
+  - **会話ペインの操作では下ろさない**: 会話ペイン(2 列の右の列、1 列の詳細ページ)の中のクリック、キーの入力、スクロールは、未確認を変更しない
+  - **`rekey` の後の再送**: アプリが実行した `seen` の subprocess の開始から終了までの間に、その target の `rekey`(下記「デスクトップ通知」)を
+    受信した場合に限り、subprocess の終了の後に、`to` のエントリが未確認であれば、`to` に `seen` を 1 回だけ再送する
+    (古い target への `seen` は、何も変更しない — §4.2。この期間の外の `rekey` では、再送しない — 後から立った未確認を下ろさないため)。
+    選択が続いた場合の `seen` と、`Mark all as read` の `seen` の、どちらにも適用する(`Mark all as read` は、対象の行ごとの `seen` を、並行して実行する)
+
+  waiting のオレンジは、未確認とは別の情報で、これらの操作では消えない(waiting でなくなった時点で消える — §3.1)
 - **実行のボタン**(§8.49): Jump / Resume / Branch は、**下部パネル**(§4.6)にラベル付きのボタンで
   表示する。対象は選択中の行である。行の中には、実行のボタンを配置しない。
   主ボタンは **Jump**(Running の行)または **Resume**(History の行)、副ボタンは **Branch** である。
+  **ジャンプできないセッション(target が `process:`、またはアプリが知らない prefix — §4.2)の Running の行では、主ボタンを disabled の Jump にする**
+  (理由 `Running in a terminal Shiibar CC can't drive` を、下部パネルに表示する — §4.6「下部パネル」。§8.66)。Branch は押せる。
   下部パネルは、1 列の一覧のページと詳細ページ、2 列の右の列の下端に表示するので、
   画面に表示する実行のボタンは常に 1 組である。行を選択していない間と、検索欄にフォーカスがある間は、
   ボタンを表示しない(§4.6「下部パネル」)。
@@ -743,7 +1040,8 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
     subscribe でライブに再生成され、消えたタブの行は reconcile で一覧から除かれる
   - **Resume** / **Branch**: §4.6。Branch は Running の行でも History の行でも押せる
     (実行中の会話の分岐は、その時点までに記録された会話のコピーから始まる — §7-6)。
-    Running の行で `session_id` か `cwd` が空のときは Branch を disabled にする
+    Running の行で `session_id` か `cwd` が空のときは Branch を disabled にする。
+    Settings の `Terminal` で選択したターミナルを使用できないときは、Resume と Branch を disabled にする(§4.6「Resume と Branch」)
 - **詳細ページを開く操作**(§8.59): 1 列で詳細ページを開く操作は、下部パネルの **View** ボタン(§4.6「下部パネル」)と
   → である。対象は選択中の行である。行の中には、詳細ページを開くボタンを配置しない。
   2 列には、この操作が無い(選択中の会話は、右の列に表示している)
@@ -753,9 +1051,12 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   フォーカスがある間(下記「キー操作」)である。検索欄にフォーカスがある間と、ウィンドウが key でない間
   (他のアプリを操作している間など)は、灰色で示す。
   行を選択するのは、利用者の操作(行のクリック・行のドラッグの開始・↑ / ↓・選択なしの間の検索欄の Enter・
-  詳細ページでの前後の会話への切り替え)だけである。アプリの起動後は、
+  詳細ページでの前後の会話への切り替え・ジャンプできないセッションの通知のクリック — 下記「デスクトップ通知」)だけである
+  (検索欄の Enter と同じく、一覧にフォーカスがあり選択なしの間の Enter も、先頭の行を選択する — 下記「キー操作」)。
+  グローバルホットキーで開いたときも、行を選択しない(上記「グローバルホットキー」)。アプリの起動後は、
   利用者が行を選択するまで、どの行も選択していない。検索文字列を変更しても、選択中の行が
-  検索結果に含まれている間は、選択を変更しない。
+  検索結果に含まれている間は、選択を変更しない。選択中の Running の行の target が付け替わったとき(reason が `rekey` の `agent_removed` —
+  下記「デスクトップ通知」)は、新しい target の行を選択中のままにする(行が無くなったものとして扱わない)。
   選択中の行が一覧から無くなったとき(検索文字列の変更・再取得・セッションの終了・Archive / Unarchive・通常の一覧と Archive の一覧の切り替え — §4.6「Archive」「Archive の一覧」)は、
   選択なしにする(他の行を選択しない)。1 列の詳細ページで表示中の会話が一覧から無くなったときは、
   一覧のページに戻って、選択なしにする。
@@ -775,8 +1076,8 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   詳細ページのヘッダの位置(`2 / 4`)を表示しない。
   **選択なしの間**は、1 列では詳細ページを開かない。2 列の右の列は、会話ペインのヘッダも下部パネルも
   表示せず、中央に `No conversation selected` の 1 行だけを表示する。
-  **選択した行が一覧の表示範囲の外にあるとき**(↑ / ↓ での移動、選択なしの間の検索欄の Enter と
-  グローバルホットキーによる先頭の行の選択、詳細ページから一覧のページへ戻ったとき)は、その行の全体が表示範囲に収まる最小の量だけ、一覧をスクロールする。
+  **選択した行が一覧の表示範囲の外にあるとき**(↑ / ↓ での移動、選択なしの間の Enter による先頭の行の選択、
+  詳細ページから一覧のページへ戻ったとき)は、その行の全体が表示範囲に収まる最小の量だけ、一覧をスクロールする。
   同じ操作で一覧の先頭の行を選択したときは、行が表示範囲の中にあっても、一覧を最上部までスクロールする
   (先頭の行の上にある区画の見出しも表示する)
 - **行のクリック**: スターと三点リーダー(§4.6)以外の部分をクリックすると、その行を選択する。
@@ -794,6 +1095,11 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
 - **行のダブルクリック**: スターと三点リーダー以外の部分をダブルクリックすると、その行を選択し、一覧にフォーカスを移して、
   Jump(Running の行)または Resume(History の行)を実行する。一覧にフォーカスがある間の Enter と同じ動作であり、
   対応するボタンが disabled のときは、選択とフォーカスの移動だけを実行する。
+  **ただし、主ボタンが disabled の Jump である行**(ジャンプできないセッションの Running の行と、History に残る live の行 — §4.6)**では、
+  Jump の代わりに、その会話を表示する**: 1 列の一覧のページでは詳細ページを開き(View と同じ)、2 列では会話ペインにフォーカスを移す
+  (1 列の詳細ページでは、何も実行しない。未確認を下ろす計測は、どのページでも開始する — 上記「未確認を下ろす操作」)。ターミナルへ移動できない行でも、同じ操作で、そのセッションの内容に到達できるようにする(§8.66)。
+  選択中の Running の行のセッションが終了し、History の再取得を待っている間の行(ボタンをすべて disabled で表示している状態 — 上記「行の選択」)は、
+  この規則の対象にしない(ほかの disabled の行と同じく、選択とフォーカスの移動だけを実行する)。
   行の状態(未選択・青の選択中・灰色の選択中)による違いは無い。
   **⌘ を押しながらダブルクリックすると、Jump / Resume の代わりに Branch を実行する**(一覧にフォーカスがある間の
   ⌘Enter と同じ動作である。§8.59)。⌘ を押しているかどうかは、2 回目のクリックの時点で判定する。
@@ -804,6 +1110,11 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   そのため、青で表示している選択中の行のクリックによる選択の解除は、ダブルクリックでないことが確定した時点
   (マウスのボタンを押してから、システムのダブルクリックの間隔が経過した時点)で実行する
   (History の行で、その時点でボタンを押したままの場合は、下記「行のドラッグ」の「開始」)。
+  **この時点を待っている間に、その行を選択したままにする操作があったときは、選択の解除を取り消す**(操作の直後に、選択が外れないようにする):
+  その行のクリック(2 回目以降のクリック、灰色で表示している間のクリック)/ ↑ / ↓ / Enter による行の選択 /
+  主ボタンが disabled の Jump である行での Enter(会話を表示する操作)/ その行を選択する通知のクリック(下記「通知のクリック」)/
+  キーによる主ボタンまたは Branch の実行(ボタンが disabled で、何も実行しない場合は、取り消さない)/ その行の三点リーダーのメニューを開く操作 / その行のスターの切り替え。
+  選択が別の行に移動した場合と、ページが切り替わった場合も、取り消す。検索欄へのフォーカスの移動、ウィンドウの key の変化、ほかの場所の押下では、取り消さない。
   未選択の行の選択と、灰色の行へのフォーカスの移動は、ダブルクリックの結果と一致するので、
   遅らせない。
   待っている間に、選択中の行または表示中のページが変化したとき(↑ / ↓、別の行のクリック、View ボタン、→、
@@ -835,10 +1146,10 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
     アプリを再起動しても保持する。既定は、すべて開いた状態である。表示していない見出しの状態も保持する。
     保存済みの値が想定の形でない場合と、この 4 つの名前でない値は、無視する
   - **閉じている区画の行は、一覧に表示していない行である**: ↑ / ↓ の移動、「一覧の先頭の行」の選択
-    (検索欄の Enter、グローバルホットキー)、詳細ページの位置(`2 / 4`)と前後の会話への切り替えは、
+    (選択なしの間の Enter)、詳細ページの位置(`2 / 4`)と前後の会話への切り替えは、
     表示している行だけを対象にする(「一覧の先頭の行」は、表示している最初の行である)。選択の扱いは、上記「行の選択」。
     表示している行が 1 つも無いとき(行のある区画をすべて閉じているとき)は、これらの操作では、
-    行が 1 つも無いときと同じ扱いにする(検索欄の Enter は何もしない。ホットキーは検索欄にフォーカスを移す)
+    行が 1 つも無いときと同じ扱いにする(選択なしの間の Enter は何もしない。ホットキーは検索欄にフォーカスを移す)
   - **検索中**(クエリが有効な間 — §4.6「検索の適用範囲」。検索文字列が有効になった時点から、search の結果を
     受け取る前と、search がエラー終了した場合を含む。検索文字列が有効でなくなった時点で終了する): Running、Starred、Recent、History のどれも、記憶している状態に関係なく、
     開いているものとして扱う。Starred と Recent の見出しは表示せず、History の見出しの下に、Starred の行と Recent の行を、
@@ -932,7 +1243,7 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   | ← / → | 検索欄のカーソルを移動する(標準の動作) | → は、1 列の一覧のページで、選択中の行の詳細ページを開く(下部パネルの View と同じ。選択なしの間は何もしない)。← は、1 列の詳細ページで一覧のページに戻る。それ以外では何もしない |
   | ↑ / ↓ | 何もしない | 前後の行に選択を移動する(区画をまたいで移動する。閉じている区画の行は対象にしない — 上記「区画の開閉」。端では移動しない)。選択なしの間は、どちらのキーも一覧の先頭の行を選択する。検索中は検索結果の行だけを移動する。1 列の詳細ページでは、会話をスクロールする(会話ペインの標準の動作。Space と Page Up / Page Down も同じ) |
   | ⌥↑ / ⌥↓ | 検索欄のカーソルを移動する(標準の動作) | 1 列の詳細ページで、表示する会話を前後の行の会話に切り替える(選択も移動する。スライドはしない。端では何もしない)。それ以外では何もしない |
-  | Enter | 一覧にフォーカスを移す。選択なしの間は、一覧の先頭の行を選択する。行が 1 つも無いときは何もしない | 選択中の行の Jump または Resume を実行する(下部パネルの主ボタンと同じ)。どのページでも同じ |
+  | Enter | 一覧にフォーカスを移す。選択なしの間は、一覧の先頭の行を選択する。行が 1 つも無いときは何もしない | 選択中の行の Jump または Resume を実行する(下部パネルの主ボタンと同じ)。どのページでも同じ。選択なしの間は、一覧の先頭の行を選択する(検索欄の Enter と同じ。行が 1 つも無いときは何もしない)。主ボタンが disabled の Jump である行では、会話を表示する(1 列の一覧のページでは詳細ページを開き、2 列では会話ペインにフォーカスを移す — 上記「行のダブルクリック」) |
   | ⌘Enter | 何もしない | 選択中の行の Branch を実行する(下部パネルの Branch と同じ)。どのページでも同じ |
   | ⌘G / ⇧⌘G | 会話内の次のヒット / 前のヒットに移動する(§4.6「ヒットナビゲーション」)。会話ペインを表示している間だけ有効 | 同じ |
   | ⌘F | 何もしない | 検索欄にフォーカスを移す。1 列の詳細ページでは、一覧のページに戻ってから移す |
@@ -944,8 +1255,9 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   **検索欄にフォーカスを移す操作**は、検索欄のクリック(消去のボタンを含む)と ⌘F である。
   ポップオーバーを開いたときのフォーカスは、上記「ポップオーバー」のとおりである。
   Tab と ⇧Tab は標準のフォーカスの移動である。**1 列の詳細ページを表示している間は、一覧のページのビュー(検索欄など)を、
-  Tab と ⇧Tab の移動先にしない**(詳細ページの下に残っている、表示していないビューに、フォーカスを移さない。§8.59)。選択なしの間と、対応するボタンが disabled のとき、
-  一覧にフォーカスがある間の Enter と ⌘Enter は何もしない。
+  Tab と ⇧Tab の移動先にしない**(詳細ページの下に残っている、表示していないビューに、フォーカスを移さない。§8.59)。対応するボタンが disabled のとき、
+  一覧にフォーカスがある間の Enter と ⌘Enter は何もしない(主ボタンが disabled の Jump である行の Enter を除く — 上記の表)。
+  選択なしの間は、⌘Enter は何もせず、Enter は先頭の行を選択する(上記の表)。
   **日本語入力の変換が未確定(marked text)の間は、すべてのキーを日本語入力に渡す**
   (変換の確定の Enter と、候補の選択の ↑ / ↓ を横取りしない)
 - **クリックスルー**: ウィンドウにフォーカスが無い状態でも、行・区画の見出し・下部パネルのボタンは
@@ -1017,7 +1329,7 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   「OK で確定」が無いため。閉じるのはタイトルバーの赤ボタンと ⌘W。§8.26)。
   値はすべて UserDefaults に永続。UI 文言は英語。
   **タブは 2 つ**で、左から `General`(設定)、`Setup Check`(導入の状態の確認 — 下記「Setup Check のタブ」)である。
-  General のタブの構成は、見出し付きの枠が 2 つ(General と Sounds)で、General の枠は Start at Login / Appearance / Text size / Global shortcut の順である。
+  General のタブの構成は、見出し付きの枠が 2 つ(General と Sounds)で、General の枠は Start at Login / Appearance / Text size / Global shortcut / Terminal の順である。
   - **タブの行**: ウィンドウの上端(タイトルバーの下)に、タブのボタンを中央にそろえて並べ、行の下に 1pt の線(`separatorColor`)を引く。
     ボタンは、上にアイコン(18pt)、下に名前(11pt)で、選択中のタブは、アクセントカラーを不透明度 0.16 で重ねた角丸の地と、アクセントカラーのアイコンと文字で示す。
     選択していないタブは、地が無く、アイコンと文字は `labelColor` である(寸法は §9)。アイコンは、General が歯車、Setup Check がチェックの一覧の SF Symbols である
@@ -1047,6 +1359,7 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   | General | `Appearance` | `System follows the appearance setting of your Mac` | セグメント(System / Light / Dark) |
   | General | `Text size` | `Text in the popover and the window` | 数値の入力欄とステッパー |
   | General | `Global shortcut` | `Shows the list from any app` | キーの組み合わせの欄 |
+  | General | `Terminal` | `Resume and Branch open in this terminal` | セグメント(iTerm2 / Terminal / Ghostty) |
   | Sounds | `Mute sound` | `Notifications arrive silently` | スイッチ |
   | Sounds | `Waiting sound` | `Plays when a session needs your input` | ポップアップ |
   | Sounds | `Done sound` | `Plays when a session finishes responding` | ポップアップ |
@@ -1077,6 +1390,23 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
     キーの名前は、記録した時点のキーボード配列での文字を保存して表示する。
     文字を持たないキーは、`Space`、`F1`〜`F20`、メニューで使用する記号(↩ ⇥ ⌫ ⌦ と矢印など)で表示する。
     起動時の登録に失敗した場合は、保存した値を保持したまま、欄に `Record Shortcut` を表示する)
+  - **General** の **Terminal**(§8.66): Resume と Branch で、新しいウィンドウを開くターミナルを選択する(§4.6「Resume と Branch」)。
+    この設定が決めるのは、Resume と Branch を開く先だけである(Jump は、セッションを実行しているターミナルへ移動する操作で、この設定に関係しない)。
+    3 つの選択肢は、インストールの有無に関係なく、常に選択できる。値は UserDefaults に保存し(§9)、選んだ時点で反映する。
+    **選択したターミナルを使用できないとき**(アプリがインストールされていない。Ghostty は、インストールされているバージョンが §9 の最小のバージョン未満の場合を含む)は、
+    説明の下に、エラーと案内の文字の色(§9)で、理由を 1 行表示する — `iTerm2 is not installed` / `Ghostty is not installed` /
+    `Ghostty 1.4.0 or later is required`(Terminal は macOS に含まれるので、この表示は無い)。インストールの有無とバージョンは、
+    バンドル ID(§9)で検索したアプリのバンドルの情報(`CFBundleShortVersionString`。バージョンの解釈は、§4.1 の `TERM_PROGRAM_VERSION` と同じ規則。
+    Ghostty のバンドルにこの値が無い場合と、値を解釈できない場合は、最小のバージョン未満として扱う)で判定する(AppleScript は使用しない。ターミナルを起動しない)。
+    判定は、Settings ウィンドウを表示したとき、ポップオーバーまたはウィンドウを表示したとき、アプリがアクティブになったときに、再度実行する
+    (ウィンドウを表示したままターミナルをインストールした場合にも、アプリに戻った時点で反映する)。
+    インストールされている Ghostty が最小のバージョン以上で、起動中の Ghostty が古い場合(更新の後に再起動していない場合)は、この判定では検出しない。
+    Resume または Branch の実行が失敗し(CLI の exit 1 — §4.4)、メッセージ行にエラーを表示する(§4.6「メッセージ行」)。
+    **最初の値**は、アプリの起動時に、値が保存されていない場合に 1 回だけ決めて保存する。次の順である: UserDefaults に `cc.shiibar.lastObservedTerminal` の値がある場合
+    (保存形式の 1 回の移行 — §8.66。値が `iterm2` または `apple-terminal` の場合に、その値にする。このキーは、アプリの起動時に、
+    この設定の値が保存済みかどうかに関係なく、削除する)
+    → iTerm2 がインストールされていれば iTerm2 → Terminal。保存されている値が 3 つの選択肢のどれでもない場合は、保存されていない場合と同じに扱う。
+    Ghostty は、最初の値にしない(Ghostty と Terminal だけがインストールされている場合は Terminal になる。Ghostty は最小のバージョンの条件があるので、利用者が選択する)
   - **General** の **Text size**: 数値の入力欄(幅 56pt・右寄せ)と、macOS 標準の
     ステッパー(1 ずつ変更。入力欄との間隔は 4pt)。値と適用する範囲は、
     下記「文字の大きさ」。入力欄の値は、Enter を押したときと、入力欄を編集した後にフォーカスが外れたときに
@@ -1172,10 +1502,23 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   ラベルの重複はそのまま表示する(並び順が安定していれば足りる。区別の工夫は §8.10)。
   git/worktree の概念は持たない(文字列整形のみ。`repo/branch` に見えるのは worktree のディレクトリ名の偶然)
 - **デスクトップ通知**: `UNUserNotificationCenter`。**unreviewed フラグの立ち上がり**(false→true)で発火。
-  クリックは delegate で受けて focus。「あなたの番になった」瞬間が通知の起点なので、状態レイヤーと一致する
+  クリックは delegate で受けて、focus、または一覧での行の選択を実行する(下記「通知のクリック」)。「あなたの番になった」瞬間が通知の起点なので、状態レイヤーと一致する。
+  対応ターミナル以外で実行しているセッション(§2 の `process:`)も、同じ規則で通知する
   - 発火は unreviewed の立ち上がりごとに 1 回(再接続 snapshot / reconcile 経由で気づいた unreviewed も含む。切断中の遷移を取りこぼさない)。同じ立ち上がりを二重に通知しないよう発火済みを記録する。
     ただし**アプリ起動後の最初の snapshot は基準線**とし、そこに既に立っている unreviewed には通知しない
-    (起動時に過去の未読を再通知しない — 積み残しは未確認の点が示す。起動後の再接続 snapshot は発火対象のまま)
+    (起動時に過去の未読を再通知しない — 積み残しは未確認の点が示す。起動後の再接続 snapshot は発火対象のまま)。
+    **reason が `rekey` の `agent_removed`(§3.6「pid による統合」。`to` が新しい target)は、削除ではなく、target の付け替えとして扱う**:
+    発火済みの記録、発火を待っている遅延通知、一覧の行の選択、会話ペインの表示を、`to` の target に引き継ぐ
+    (target が付け替わっただけのエントリを、新しい立ち上がりとして通知しない。待っている遅延通知は、`to` の target の最新の状態で再確認し、
+    `to` の target の通知として配信する)。
+    配信済みの通知は消さず、古い target と `to` の対応を記憶する(下記「通知の掃除」と「通知のクリック」で使用する。アプリの終了で破棄する)。
+    対応は、連続して辿る(A → B の後に B → C があれば、A は C に読み替える)。
+    **最新の付け替えの `to` は、読み替えの終端にする**: 対応を記憶するときに、`to` を古い target とする対応があれば、先に破棄する
+    (A → B の後に B → A があれば、A はそのまま、B は A に読み替える。付け替えが元の target に戻る場合も、対応は循環しない)。
+    **エントリが登録または報告された target は、古い target としての対応から外す**: snapshot と `status_changed` に含まれる target を古い target とする対応は、破棄する
+    (以前の `process:<pid>` と同じ target で登録された新しいセッションを、ほかのエントリに読み替えないため)。
+    辿る回数は、記憶している対応の件数を上限にする(対応は循環しないので、通常は到達しない上限である)。
+    古い target と `to` が同じ `rekey` では、何も変更しない(対応を記憶せず、エージェントの一覧も変更しない)
   - **トースト / 音(v1 デフォルト)**: `waiting` の立ち上がり = トースト + 音、interruption level は **time-sensitive**
     (Focus / おやすみモードでも出す。エージェントが止まって待っているのは実際 time-sensitive)。
     完了(idle+unreviewed)の立ち上がり = トースト + **音**(interruption level は active。§8.16)。
@@ -1195,8 +1538,27 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
     (即応した場合だけ通知を出さない仕組み。スリープ跨ぎでも安全)。**対象が前面でも出す**(§8.16 —
     前面かどうかの判定は行わず、`shiibar-cc focused` も呼ばない)
   - 通知の掃除: focus・unreviewed が下りたときに該当 target の配信済み通知を `removeDeliveredNotifications` で消す。
+    **そのエントリの以前の target で配信した通知も、同時に消す**(付け替えの対応 — 上記の `rekey` — で、その target に読み替えられる古い target の通知。
+    付け替えの前に配信した通知が、確認の後に通知センターに残らないようにする)。
     **`agent_removed` の `reason` が `session_end`(ペイン閉じ)のときは消さない**(まだ見ていない完了通知を、
-    タブを閉じただけで撤去しないため。それ以外の reason は掃除してよい。§4.2)
+    タブを閉じただけで撤去しないため)。**`rekey` のときも消さない**(エントリは、新しい target で存続している — 上記)。
+    それ以外の reason は掃除してよい(§4.2)
+  - **通知のクリック**(§8.66): 通知が持つ target を、付け替えの対応(上記の `rekey`)があれば新しい target に読み替えてから、
+    その prefix で分岐する(§4.2「プロトコル契約」)。
+    **ジャンプできる target** は、`shiibar-cc focus <target>` を実行する(成功で未確認が下りる)。
+    **ジャンプできない target** は、次の順で、一覧のその Running の行を選択する(未確認は、この選択が §9 の時間続いた時点で下りる。その行が既に選択中の場合も、計測を最初から開始する — 上記「未確認を下ろす操作」):
+    表示の形の画面(ポップオーバーまたはウィンドウ)を開く → Archive の一覧を表示している場合は、通常の一覧に戻す → Running の区画が閉じている場合は、開く →
+    検索文字列がある場合は、消去する → 1 列の詳細ページで、ほかの会話を表示している場合は、一覧のページに戻る(その会話を表示している場合は、詳細ページのままにする)→
+    その行を選択する(既に選択中の場合は、選択を解除せず、そのままにする)→ 行の全体が表示範囲に入るようにスクロールする → キーのフォーカスを一覧に移す。
+    1 列で、詳細ページを新しく開くことはしない。そのエントリが既に無い場合は、画面を開くだけにする。
+    検索文字列を消去した時点で、検索の結果を表示している場合は、Running の区画の絞り込みを、次の一覧の結果を待たずに解除する
+    (その行を、消去と同時に表示して選択するため。History の区画は、次の結果が届くまで、検索の結果のままである)。
+    **クリックより前に開始した検索の結果は、破棄する**: 消去の時点で、実行中の search を中止し、その結果が後から届いても反映しない
+    (消去の前の検索文字列による結果が、選択した行を一覧から外さないようにする)。Running の区画の絞り込みは、クリックの後に開始した search の結果が届いた時点から、通常の規則に戻る。
+    **行を選択する時点**: ポップオーバーの形と、開いているウィンドウ(前面に移す場合を含む)では、画面を開いた直後に選択する。
+    ウィンドウの形で、閉じているウィンドウを開いた場合は、ウィンドウが key になった時点で選択する(上記「グローバルホットキー」と同じ §9 の時間の中で key になった場合)。
+    その時間の中で key にならなかった場合は、その時間が経過した時点で選択する(グローバルホットキーの場合は、フォーカスを移さないままにする。
+    通知のクリックは、行を選択する操作なので、key にならなかった場合も実行する)。この後に key になっても、もう一度は実行しない
 - **異常の可視化**(黙って機能停止しない): 以下は**固定フッター**(一覧の下。上記)に
   警告行として常設表示する
   (切断はトレイ全体のグレー化が一次シグナルなので、一覧を優先し警告を下に配置する) —
@@ -1218,10 +1580,37 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   検出は、ウィンドウの通知に加えて、ポップオーバーまたはウィンドウを表示した後(§9 の時間の後)に、アプリのプロセスが画面に表示しているウィンドウの一覧を
   取得して実施する(`NSWindow` に対応しないウィンドウは、クラスの名前の代わりに、その旨を記録する)。
   記録するだけで、ウィンドウの表示は変更しない。同じウィンドウは、表示されている間に 1 回だけ記録する(非表示になった後に、再度表示された場合は、再度記録する。§8.65)
+- **入力欄の横に表示される AutoFill のメニューを表示しない**(Edit メニューの AutoFill の項目は対象外である — 上記の Edit メニューの記述): 2 つの設定を使用する。アプリのバンドルの `Info.plist` に、`NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac` を true で入れる
+  (`scripts/lib/bundle.sh` が生成する)。起動時に、UserDefaults の既定値として、`NSAutoFillHeuristicControllerEnabled` を false で登録する
+  (`register(defaults:)` なので、利用者の設定のデータベースには保存しない)。macOS 26 以降は、文字を入力できるすべてのアプリで、Messages または Mail が検出した認証コードの
+  AutoFill のメニューが、入力欄のカーソルの横に表示される。`NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac` が true のアプリでは、認証コードの content type を指定した入力欄以外には表示されない(§7-11)。
+  `NSAutoFillHeuristicControllerEnabled` は、macOS 26 以降の、入力欄が AutoFill の対象かどうかをシステムが推定する処理を、このアプリのプロセスの中だけで無効にする(§7-11)。
+  このアプリには、AutoFill で入力する欄が無い。対象は、検索欄にフォーカスがある間に、アプリが作成していないウィンドウ
+  (クラスの名前は `SPRoundedWindow`、ウィンドウレベルはポップアップメニューのレベル)が、検索欄の位置に表示される事象である。
+  `Info.plist` のキーだけでは、このウィンドウは表示される(§7-11)。`NSAutoFillHeuristicControllerEnabled` を false にした場合に表示されなくなることは、実機で未確認である(§7-11)
 - **daemon のライフサイクル管理**: アプリ起動時に socket へ接続し、応答があれば**既存 daemon にアタッチ**する
   (アプリのクラッシュ等で残った orphan daemon もここで回収される。daemon 側の二重起動防止は §4.2 の
   起動シーケンスが担う)。応答がなければ同梱の `shiibar-ccd` を spawn し、バックオフ再接続で繋ぐ。
-  アプリ終了(Quit)時は `shutdown` を送って daemon も止める
+  アプリ終了(Quit)時は `shutdown` を送って daemon も止める。
+  **バージョンが異なる daemon には、アタッチしない**: 応答があった daemon に `info` を送り、`version` が、アプリのバンドルのバージョン
+  (`CFBundleShortVersionString`。末尾の `-dev` は除いて比較する。アプリと daemon は、同じワークスペースのバージョンでビルドする —
+  §8.28)と異なるときは、その daemon に `shutdown` を送り、daemon が停止した後に、同梱の `shiibar-ccd` を spawn する
+  (アプリを更新した後に、更新の前の daemon が残っている場合に、ワイヤの形式が異なる組み合わせで動作しないようにするため。§8.66)。
+  比較は、アタッチのたびに(起動時と、再接続の時点で)実行し、daemon の `version` からも末尾の `-dev` を除く。
+  「停止した」は、socket のファイルが無くなった、または socket への接続が拒否される状態である(それ以外の接続のエラーは、停止していないと判定する —
+  起動中かもしれない daemon と並べて、同梱の daemon を spawn しないため)。`shutdown` の送信から §9 の時間まで、0.1 秒の間隔で確認し、
+  その時間の中で停止しなかったときは、spawn せず、切断の状態のままにして、切断の警告行を表示する(下記の再接続が続く)。
+  **停止しなかった入れ替えは、保留にする**: その後のアタッチのたびに(このアプリが spawn した daemon が実行中である場合を除く)、daemon が停止しているとき
+  (上記の「停止した」の条件)は、同梱の `shiibar-ccd` を spawn して、アタッチする(保留は、この spawn で終了する。spawn は 1 回だけである)。
+  停止していないときは、`info` も `shutdown` も送らずに、応答した daemon にアタッチし、保留を継続する(その daemon が後で停止した時点のアタッチで、spawn する)。
+  停止を確認できない間は、spawn しない。`shutdown` を送るのは、アプリの 1 回の起動につき 1 回までである。
+  **この入れ替えは、アプリの 1 回の起動につき 1 回だけ実行し、このアプリが spawn した daemon には実行しない**
+  (「このアプリが spawn した daemon」は、このアプリが spawn したプロセスが実行中である間の、応答した daemon である。停止しなかった入れ替えも、1 回に数える)
+  (同梱の daemon のバージョンが、バンドルのバージョンと異なる場合に、終了と起動を繰り返さないため。バージョンが異なる 2 つのアプリが、
+  同じ state dir で同時に起動している場合も、それぞれ 1 回で止まる)。この条件で入れ替えないときは、バージョンが異なっても、アタッチする。
+  **アプリのバンドルのバージョンを取得できない場合、または同梱の `shiibar-ccd` が無い場合(バンドルにしないで実行したアプリ)は、
+  比較せずにアタッチする**(手動で起動した daemon との併用 — `docs/DEVELOPMENT.md`)。
+  `version` が同じときは、そのままアタッチする。`info` が失敗したときは、アタッチする(応答する daemon を、情報の取得の失敗だけで終了させない)
 - **ログイン時起動**: `SMAppService.mainApp` を使う。**初回起動時のみ自動登録**する
   (実施済みかだけを UserDefaults に記録し、以後は自動登録しない — OFF にした選択を次回起動で
   上書きしないため)。以降の ON/OFF は Settings ウィンドウの「Start at Login」スイッチで行い、
@@ -1378,12 +1767,14 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   **3 行目 = その会話で最後に自分が送った発話**(search の `last_prompt`。
   null なら空行にして、行の高さをそろえる)。**3 行目は検索中も最後の発話のままである**
   (ヒットした箇所の抜粋に差し替えない)。記号と時間の列の上は、スターと三点リーダーである(下記「スター」「Archive」)。下部パネルの主ボタンは Resume である(§4.5「実行のボタン」)。
-  - **live の会話が Starred または Recent に残る場合**(daemon が追跡していない会話 = 対応外ターミナル
-    (VS Code のターミナル・SSH 等)で実行中 — §8.11): 1 行目(ラベル)の末尾に `· running` の淡いテキスト印を
-    表示し、下部パネルの主ボタンは **disabled の Jump**(ツールチップ
+  - **live の会話が Starred または Recent に残る場合**(daemon に、その `session_id` のエントリが無い会話 —
+    reconcile がそのセッションを登録するまでの間、ターミナルの走査が不完全な回が続いている間の、hook の報告がまだ無いセッション、
+    ターミナルを持たないセッション(§4.1)、`session_id` が空のエントリのセッション。
+    対応ターミナル以外で実行しているセッションは、daemon が追跡するので、通常は Running の行になる — §8.66): 1 行目(ラベル)の末尾に `· running` の淡いテキスト印を
+    表示し、下部パネルの主ボタンは **disabled の Jump**(理由の表示は
     `Running in a terminal Shiibar CC can't drive` — README と同じ語彙)にする。Branch は押せる
   - **cwd の無い会話**は Resume と Branch を disabled にする(resume は cwd 必須 — §4.4。
-    disabled の間もツールチップは `Resume` / `Branch` のままである)
+    disabled の間もツールチップは `Resume` / `Branch` のままで、下部パネルに理由は表示しない)
   - **空状態**: 通常の一覧で、どの区画にも行が無いときだけ(閉じている区画の行も、行として数える。Archive した会話は数えない)、一覧の位置に 1 行を表示する —
     クエリが空の結果を表示している間は `No conversations`、有効なクエリの結果を表示している間は `No matching conversations`。
     索引の全構築中(下記「ポップオーバーまたはウィンドウを開いたとき」)と、起動後に最初の search の結果を
@@ -1436,7 +1827,7 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
     一覧から外さないためである
   - **Archive の自動の解除**: **live の会話は、Archive の一覧に含めない**。Archive した会話が live である場合は、その会話の Archive を解除する。
     live の判定は 2 つで、どちらかに該当すれば live である: session_id が同じ Running の行がある / search の結果が、その会話を live(`live: true`)と報告している
-    (対応外のターミナルで再開した会話は、Running の行にならないので、search の結果で判定する)。
+    (daemon にエントリが無い実行中の会話は、Running の行にならないので、search の結果で判定する — 上記「Recent の区画」)。
     Running の行は、検索の条件で一覧に表示していない間も、この判定の対象にする(live であることは、セッションの状態で、表示の状態ではない)。
     メニューを開いた後に live になった会話で `Archive` を選択した場合は、何も変更しない(Archive せず、スターも外さない)。
     判定は、エージェントの一覧、search の結果、Archive の一覧のどれかが変化するたびに実行する(アプリの起動後の最初の一覧、
@@ -1719,14 +2110,22 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   `Copied` は、枠線と地を持つ小さい角丸の表示で(寸法は window-design.html の CSS 値が正)、ラベルの行の高さと、
   ほかの要素の位置を変更しない。同じ発言のボタンを、表示の間にもう一度押したときは、その時点から一定時間、表示を続ける。
   コピーのボタンと `Copied` の表示は、選択・コピーの対象に含めない
-- **下部パネル**(1 列の一覧のページの下端と、会話ペインの下端。常に同じ高さ): 選択中の行を対象にする
+- **下部パネル**(1 列の一覧のページの下端と、会話ペインの下端。disabled のボタンの理由を表示している間を除いて、常に同じ高さ): 選択中の行を対象にする
   Jump / Resume / Branch を、ラベル付きのボタンで表示する(§4.5「実行のボタン」)。
   右端が主ボタン(**Resume** または **Jump**)、その左が **Branch**(副ボタン)。
   主ボタンは選択中の会話の状態で決まる(§8.48 / §8.49):
-  - Running の行にある会話 → **Jump**
+  - Running の行にある会話 → **Jump**(ジャンプできないセッションの行では **disabled の Jump** — §4.5「実行のボタン」)
   - History の会話 → **Resume**
-  - History に残る live の会話 → **disabled の Jump**(ツールチップ
+  - History に残る live の会話 → **disabled の Jump**(理由の表示は
     `Running in a terminal Shiibar CC can't drive`)
+
+  **disabled のボタンに理由がある間は、理由を、ボタンの行のすぐ上の行に、右寄せの文字で表示する**(§8.66)。ポインタをボタンに重ねる操作をしなくても、
+  押せない理由が画面で分かる。文字の大きさはキーの案内と同じで、色は淡色である。理由があるのは、disabled の Jump(上記の文言)と、
+  選択したターミナルを使用できないときの Resume と Branch(下記「Resume と Branch」の文言)である。同じ文言を、
+  そのボタンのツールチップにも設定する。主ボタンと Branch の理由が同じ場合は 1 行だけ表示し、異なる場合は、主ボタンの理由、Branch の理由の順に
+  2 行で表示する。理由が無い disabled(cwd の無い会話、再取得が完了するまでの間)と、ボタンを表示していない間は、表示しない。
+  理由を表示している間は、パネルが理由の行の分だけ高くなり、一覧またはメッセージ面の表示範囲が、その分だけ狭くなる。ボタンの行(キーの案内とボタン)の配置と、
+  パネルの下端からのボタンの位置は、理由の有無で変わらない。理由の 1 行は、パネルの幅の全体を使用する(幅が不足する場合は、末尾を省略する)。
 
   **1 列の一覧のページでは、Branch の左に View ボタンを表示する**(副ボタン。§8.59)。押すと、選択中の行の
   詳細ページを開く(一覧にフォーカスがある間の → と同じ)。View は、ほかのボタンと同じ条件で表示し、
@@ -1754,15 +2153,19 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   除かれる。Branch で作成された会話は新しい session ID を持つ)。
   **Branch は実行中の会話にも実行できる**(その時点までに記録された会話のコピーから始まり、
   元の会話には影響しない — §7-6)。
-  **どのターミナルで開くかは観測で決める**(設定も質問も持たない。§8.47): エージェント一覧の
-  最新エントリ(`last_seen` 最大)の target prefix → それが無ければ最後に観測した種別
-  (UserDefaults に記憶 — エントリを観測するたび更新)→ それも無ければ `iterm2`。
-  一方のターミナルしか使用しない人には常に正しく、乗り換えにも自動で追随する。
+  **どのターミナルで開くかは、Settings の `Terminal` の値で決める**(§4.5「Settings ウィンドウ」。§8.66): 値を `--terminal` に渡す
+  (iTerm2 = `iterm2`、Terminal = `apple-terminal`、Ghostty = `ghostty`)。実行中のセッションのターミナルは、開く先に影響しない
+  (対応ターミナル以外で実行しているセッションの Branch も、選択したターミナルで開く)。
+  **選択したターミナルを使用できないとき**(§4.5「Settings ウィンドウ」の Terminal)は、Resume と Branch を disabled にして、
+  下部パネルに理由を表示する(上記) — `iTerm2 is not installed — choose a terminal in Settings` /
+  `Ghostty is not installed — choose a terminal in Settings` / `Ghostty 1.4.0 or later is required — choose a terminal in Settings`
+  (cwd の無い会話の disabled には、理由の表示が無い。両方に該当する場合は、ターミナルの理由を表示する)。
   **一覧の表示からクリックまでの時間差で、他の場所で resume された会話への二重 resume は防がない**
   (意図的な割り切り。§8.34)
 - **Jump**: 選択中の会話に対応する Running の行の target へ `shiibar-cc focus <target>` を実行する。
   成功時の seen 送信・TCC(exit 3)の扱い・該当なし(exit 2)でエラーを表示しない点は、
   §4.5「実行のボタン」のとおりである。成功すると、ポップオーバーは閉じ、ウィンドウは閉じない。
+  ジャンプできるかどうかは、target の prefix で判定する(§4.2。ジャンプできない target では、主ボタンが disabled で、focus を実行しない)。
   Jump の後に search の再実行はしない
   (会話の状態は何も変化しないため)。**事前チェックは持たない** — 行き先の有無は focus の全走査が
   確認であり、タブが残っていれば claude が終了していても着地する(focus の意味は「タブへ行く」。§8.48)
@@ -1812,9 +2215,9 @@ shiibar-cc/
 │   ├── dev-install.sh      # バイナリ配置 + .app 化(shiibar-ccd・shiibar-cc 同梱)+ CLI symlink + Login Items + プラグイン導入案内
 │   ├── dev-uninstall.sh
 │   ├── dev-reload.sh       # 開発中の daemon / app 差し替え(ドッグフーディング用)
-│   ├── dev-demo.sh         # 偽 hook 再生でデモ用セッションを並べる(README スクリーンショット用)
+│   ├── dev-demo.sh         # README のスクリーンショット用の、実際の会話と設定から分離した撮影用の環境を用意する
 │   ├── generate-app-icon.swift  # アプリアイコンの唯一の原本(bundle.sh が実行して .icns を生成・同梱)
-│   ├── lib/                # スクリプト共有部(bundle.sh = .app 組み立て+署名の単一ソース、署名 ID 管理、アプリ/daemon 停止)
+│   ├── lib/                # スクリプト共有部(bundle.sh = .app 組み立て+署名の単一ソース、署名 ID 管理、アプリ/daemon 停止、撮影用のサンプルのデータ)
 │   └── release/            # リリースビルド用(タグ⇔バージョン検査・署名付きビルド・リリースノート生成・draft の本文差し替えと publish。§8.28)
 ├── fixtures/               # 実 hook JSON の採取物(M1 で採取・コミット。統合テストが再生する)
 ├── docs/
@@ -1891,6 +2294,7 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
 3. **hook イベントのペイロード仕様** — ✅ 公式ドキュメント確認済み(2026-07-04)。Notification は `notification_type` で 8 種、
    Stop の `background_tasks`(v2.1.145+)、SessionStart の `source`、SessionEnd の `reason`。
    実機確認済み: **SessionEnd はペイン閉じで発火**(agent_removed を実測)、幽霊が残るのは daemon 不在中に閉じた場合のみ。
+   ウィンドウを閉じた場合の SessionEnd の時点では、`claude` のプロセスは制御端末を持たない(下記 12。hook は、`target` を持たない report を送る — §4.1)。
    **`waiting` は実「許可プロンプト」でも出る**(2026-07-04 実機スモークで確認: daemon 不在中に
    許可待ちになった実セッションを reconcile が waiting + unreviewed で復元。SessionEnd 取りこぼしの
    幽霊 prune も実機確認)。
@@ -1919,12 +2323,14 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
    (`~/.claude/projects/<slug>/<session_id>.jsonl`)を持たない(削除済みの resume で候補絞りの根拠に
    していた — §8.15)。**会話内の Task サブエージェントは hook を発火しない**(親の遷移列が乱れないことを
    subscribe ストリームで実観測)。
-   **spawn 型セッションの表示影響(実測)**: 子の SessionStart / UserPromptSubmit / Stop / SessionEnd が
+   **spawn 型セッションの report を、親のエントリにそのまま適用した場合の影響(実測)**: 子の SessionStart / UserPromptSubmit / Stop / SessionEnd が
    親と同じ target を上書きする。子の Stop で親の target が idle + unreviewed になり(親が作業中でも
    「あなたの番」フラグが立つ偽アラート)、子の SessionEnd(reason:"other")で `agent_removed` =
    タブのエントリが一旦メニューバーから消える。親の次の hook で working として再登録される(task 欄は
    次の UserPromptSubmit まで空)。短命な子ならチラつく程度だが、親が idle / waiting で止まっている間に
-   子が終了するとタブのエントリが消えたまま残り得る(復元の契機は起動時 / 再接続時 / 手動再スキャンのみ)。
+   子が終了するとタブのエントリが消えたまま残り得る。
+   **この影響は、§3.6「入れ子のセッション」の規則で防ぐ**: 子の report は、親と同じ pid を持ち、`session_id` が親と異なるので、daemon が無視する
+   (pid が親と同じになることは、Bash ツールが起動した `claude -p` で実測 — 下記 9。コーディネータが起動する種類の子では、実測していない)。
 4. **同一 iTerm2 タブ内での Claude Code 再起動**: target は同一で session_id が変わる。
    target をプライマリキーにし、session_id は属性として上書きする(§3.6)
 5. **配布パイプラインの外部挙動** — ✅ 実測済み(2026-07-08〜09):
@@ -2032,10 +2438,202 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
    - `application id "com.apple.Terminal" is running` の照会は Terminal.app を起動させない(実測)。
      `do script` は起動させる → focus / 走査は is-running ガード必須(iTerm2 と同じパターン)
    - VS Code への env 相続は個別には未測。構造的に「間違ったタブに飛ぶ」経路が無い:
-     `TERM_PROGRAM` は VS Code が `vscode` で上書きし(§7-1 で実測済み)report が drop、
-     仮に通っても VS Code の pty は Terminal.app のタブ一覧に無いので focus は「該当なし」・
-     reconcile は skip。iTerm2 の UUID 相続と違い、相続される値(`TERM_SESSION_ID`)を
+     `TERM_PROGRAM` は VS Code が `vscode` で上書きする(§7-1 で実測済み)ので、report の target は `apple-terminal:` にならず(`process:` になる — §4.1)、
+     仮に `apple-terminal:` になっても VS Code の pty は Terminal.app のタブ一覧に無いので focus は「該当なし」・
+     reconcile は `process:` で送る(完全な走査の回に、エントリは `process:` に付け替わる — §3.6「pid による統合」の「reconcile」)。iTerm2 の UUID 相続と違い、相続される値(`TERM_SESSION_ID`)を
      target に使っていないため、誤誘導の材料が残らない
+   - **`id` もタブも読み取れないウィンドウ**(2026-11-21、macOS 27.2.1。`osascript` の実行で確認): Terminal.app は、ターミナルのウィンドウをすべて閉じた後も
+     起動している間、ターミナルのウィンドウではないウィンドウのオブジェクトを保持する場合がある。その状態では、`count of windows` は 1、
+     そのウィンドウの `exists` は true で、`id of w` はエラー(-1728)、`tabs of w` と `count of tabs of w` はエラー(-10000 または -1728)になる。
+     `tabs of w` を `try` の外で読み取るスクリプトは、この状態でスクリプトの全体がエラーになる。
+     §4.3 の走査と `focused` のスクリプトを、この状態の Terminal.app で実行し、走査が失敗 0 件で完了すること、`focused` が「なし」を返すことを確認した。
+     この規則を加えた focus のスクリプトでの、実際のタブへの移動は、未検証である(実機スモークで確認する)
+8. **Ghostty の実挙動** — 実機で検証済み(2026-11-21、Ghostty 1.4.0 / macOS 27.2.1 / Claude Code 2.1.330)。未検証の点は、末尾に列挙する:
+   - **アプリのバンドル**(インストールされているアプリのバンドルの `Info.plist` を読んで確認): バンドル ID は `com.mitchellh.ghostty`、
+     `CFBundleShortVersionString` は `1.4.0`
+   - **AppleScript の辞書**(アプリのバンドルの `Ghostty.sdef` を読んで確認): クラス `terminal` に `id` / `name` / `working directory` /
+     `pid` / `tty`。`tab` に `selected` / `focused terminal`、`window` に `selected tab`、`application` に `front window` / `version` / `frontmost`。
+     コマンドは `focus`(terminal を対象にして、そのウィンドウを前面にする)/ `activate window` / `select tab` / `new window` / `new tab`
+     (surface configuration のレコードを渡す: `initial working directory` / `command` / `initial input` / `environment variables` など)/
+     `input text` / `send key`
+   - **環境変数**(Ghostty のタブのシェルと、そこで起動した `claude` の hook で確認): `TERM_PROGRAM=ghostty`、
+     `TERM_PROGRAM_VERSION=1.4.0`、`TERM=xterm-ghostty`、`GHOSTTY_SURFACE_ID`(16 進の値で、AppleScript の `id` とは一致しない)。`ITERM_SESSION_ID` は無い
+   - **hook の祖先 walk と tty**(Ghostty のタブで対話の `claude` を起動し、hook で親連鎖を記録して確認。SessionStart と SessionEnd):
+     親連鎖は `hook の sh(??) → claude(ttysNNN) → シェル → login → ghostty` で、最初に制御端末を持つ祖先は `claude` 本体である(Terminal.app と同じ — 上記 7)。
+     その pid と tty は、AppleScript の `pid of terminal` と `tty of terminal`、`claude agents --json` の一覧の pid と一致した
+   - **列挙の結果**(2 つのウィンドウ、2 つのタブ、1 つの分割を作成して、全 `terminal` の `id` / `tty` / `pid` を取得して確認):
+     `id` は UUID の形式の文字列。`tty` は `/dev/ttysNNN` の形式で、ウィンドウ、タブ、分割のそれぞれの端末が、別の `terminal` と `tty` を返した。
+     `pid` は、`claude` を実行している端末では `claude` のプロセスの pid、シェルだけの端末ではシェルの pid である。ウィンドウの `id` は `tab-group-…` の形式である
+   - **列挙中に端末を閉じた場合**: `terminal` を 1 つずつ取り出す列挙(`repeat with s in terminals`)は、列挙の途中で端末が閉じられると、
+     エラー -1719(正しくないインデックス)になる(3 回の試行で 3 回)。`tty of every terminal` の形の、1 回の照会での取得は動作する。
+     → 列挙は 1 回の照会で取得し、エラーは不完全な走査として扱う(§4.3)
+   - **`focus`**(別のウィンドウ、同じウィンドウの別のタブ、同じタブの別の分割の端末を対象にして確認): `every terminal whose tty is "<tty パス>"` で端末を特定できる。
+     `focus` だけで、前面のウィンドウの選択中のタブの `focused terminal` が、対象の端末に変化した(`activate window` と `select tab` の併用は不要)。
+     tty が一致しない場合は、該当が 0 件になり、何も動かない。前面の端末は `tty of focused terminal of selected tab of front window` で取得できる
+   - **新しいタブとウィンドウでのコマンドの実行**: surface configuration の `initial input` に、コマンドと末尾の改行を指定すると、`new tab` でも `new window` でも、
+     対話シェルでコマンドが実行された。`claude` は、シェルの rc を通った PATH で解決された。`input text` は貼り付けの扱いで、改行を含めても実行されない
+     (実行には `send key "enter"` が必要)。空白、`'`、`"` を含むフォルダへの `cd '…'` は、シェルの単一引用符のエスケープ(`'\''`)と、
+     AppleScript の文字列のエスケープの組み合わせで成功した
+   - **ghostty モジュールが生成するスクリプトの形での確認**(§4.3 のスクリプトを `osascript` で実行して確認): バージョンの照会
+     (`application "Ghostty"` の is-running の確認の中での `version` の取得)は、`1.4.0` を返した。一括の走査(`tty of every terminal`)は、全端末の tty を返した。
+     `activate` の後の `new window with configuration`(`initial input` に、コマンドと `linefeed`)は、新しいウィンドウの対話シェルでコマンドを実行した。
+     `focused` のスクリプトは、Ghostty が前面でない状態で「なし」を返した
+   - **1.4.0 未満の Ghostty**(Ghostty のリポジトリのタグ `v1.3.0` と `v1.3.1` のソースを読んで確認。実物では実行していない): `macos/Ghostty.sdef` の
+     `terminal` には `tty` と `pid` が無い(§9 の最小のバージョンを 1.4.0 とする根拠)。`application` の `version` はある。
+     `TERM_PROGRAM_VERSION` は、`v1.3.1` でも設定される(`src/termio/Exec.zig`)
+   - **リリースではないビルドのバージョンの形式**(タグ `v1.4.0` の `src/build/Config.zig` を読んで確認): `X.Y.Z-<ブランチ名>+<短いハッシュ>`、
+     または `X.Y.Z-dev+0000000`。→ 比較は、最初の `-` または `+` より前の部分で行う(§4.1)
+   - **AppleScript を無効にする設定**(タグ `v1.4.0` の `src/config/Config.zig` を読んで確認): 設定の名前は `macos-applescript`、既定の値は true である
+   - **帰結**: 中(hook の環境)と外(AppleScript)の両方から導出できる鍵は tty である。target は `ghostty:<tty パス>` とし、
+     hook では祖先 walk で tty を取り(§4.1)、reconcile と focus では `tty of terminal` と突き合わせる(§4.3)
+   - **未検証**(実機スモークで確認する。結果によって §4.3 を変更する項目は、その旨を記載する):
+     - 別のアプリが前面にある状態からの `focus` で、Ghostty が前面のアプリになること(ならない場合は、`focus` の前に `activate` を実行する — §4.3)。
+       別の Space にある端末への移動
+     - Ghostty が前面のアプリである状態で、`focused` のスクリプトが、前面の端末の tty を返すこと
+     - Ghostty が起動していないときに、`application "Ghostty" is running` の照会が Ghostty を起動しないこと、
+       `new window` が Ghostty を起動して、`initial input` のコマンドが実行されること
+     - Ghostty がインストールされていない Mac で、バージョンの照会のスクリプトが「未起動」を返すこと(下記 10 は、インストールされていない別の名前での確認である)
+     - オートメーション(TCC)の許可が無いときのエラーが、ほかのターミナルと同じ判定(exit 3 — §4.4)で扱えること
+     - **`macos-applescript` が false のとき**: `version` の照会と `tty of every terminal` の照会が返すエラー(番号と文言)。
+       §4.3 の規則(TCC 以外のエラーは、不完全な走査)では、この設定の Ghostty が起動している間、reconcile の prune が止まる。
+       エラーを判別できる場合は、1.4.0 未満と同じ扱い(空の結果を完全な走査として返す。セッションは `process:` になる)にする。
+       doctor の検査に加えるかどうかも、この結果で決める
+     - Ghostty から起動した別のアプリ(エディタなど)の中のターミナルに、`TERM_PROGRAM=ghostty` と `TERM_PROGRAM_VERSION` が相続されるかどうか
+       (相続される場合、その中のセッションは `ghostty:<tty>` で報告されるが、その tty は Ghostty の terminal に無いので、
+       完全な走査の reconcile が `process:<pid>` で送り、エントリは `process:` に付け替わる — §3.6「pid による統合」の「reconcile」。
+       付け替えまでの間は、Jump が「該当なし」になる。付け替えの後は、hook の report が target を戻さない)
+     - AppleScript の `version` が、リリースではないビルドで返す値の形式(`TERM_PROGRAM_VERSION` と同じ形式であることを前提にしている)
+9. **祖先 walk の pid、入れ子のセッション、対応ターミナル以外のセッションの追跡** — 一部を実機で検証済み(2026-11-21、Claude Code 2.1.330 /
+   iTerm2 3.7.6 / Ghostty 1.4.0 / macOS 27.2.1)。未検証の点は、末尾に列挙する:
+   - **祖先 walk の pid**(hook で親連鎖を記録して確認): Ghostty の対話の `claude` では、hook の `sh` は制御端末を持たず、その親の `claude` が持つ(上記 8)。
+     iTerm2 では、`claude` の子のシェル(Bash ツールのシェル)が制御端末を持たず、親の `claude` が持つことを確認した。Terminal.app は上記 7。
+     Ghostty と iTerm2 のどちらでも、walk で取る pid(制御端末を持つ `claude` の pid)は、`claude agents --json` の一覧の、同じセッションの pid と一致した
+     (hook が登録する `process:<pid>` と、reconcile が送る `process:<pid>` が、同じ target になる前提である — §3.5)
+   - **walk の段数**: `shiibar-cc report` → hook の `sh` → `claude` で、2〜3 段である。入れ子の `claude -p` の hook から親の `claude` までは、5 段程度で、§9 の上限に収まる
+   - **Bash ツールが起動した `claude -p`**(iTerm2 で実行中のセッションの Bash ツールから実行し、子の hook で親連鎖を記録して確認):
+     親連鎖は `hook の sh(??) → 子の claude(??) → Bash ツールのシェル(??) → 親の claude(ttysNNN)` である。子の `claude` は制御端末を持たないので、
+     walk は親の `claude` に到達し、子の SessionStart(`source` は `startup`)/ UserPromptSubmit / Stop / SessionEnd(`reason` は `other`)は、
+     すべて、親と同じ pid と tty を取る。`ITERM_SESSION_ID` と `TERM_PROGRAM` も相続する。`session_id` は、親と異なる。
+     hook の内容の項目は、対話のセッションのものと同じで、入れ子であることを示す項目は無い。
+     → 子の report は、pid と `session_id` の組で判別して無視する(§3.6「入れ子のセッション」)。
+     子のプロセスは tty を持たないので、`claude agents` の一覧に含まれる場合も、reconcile は送らない(§3.5)
+   - **切り離して起動した `claude -p`**(親が pid 1 のプロセス): 制御端末を持つ祖先が無いので、report は drop される(§4.1)。
+     `claude agents --json` の一覧には、`kind` が `interactive` で含まれる(tty を持たないので、reconcile は送らない)
+   - **ターミナルのシェルから実行した `claude -p`**(Ghostty のタブで確認): hook は実行され、`claude -p` のプロセス自身が、そのタブの制御端末を持つ。
+     実行している間は、`claude agents --json` の一覧に、`kind` が `interactive` で含まれる。**一覧の `kind` では、`claude -p` と対話のセッションを判別できない**。
+     そのため、ターミナルのシェルから実行した `claude -p` は、実行している間だけ、Running の行になる(hook の report と reconcile のどちらでも登録され、
+     完了の Stop で未確認になり、SessionEnd で削除される。対応ターミナルでも同じ扱いである)
+   - **Stop が 2 回送信される場合**: 上の `claude -p` の実行では、1 回の応答で Stop が 2 回送信された(2 回目は、項目 `stop_hook_active` が true)。
+     2 回とも §3.4 の同じ行を適用する(結果は同じである)
+   - **hook の実行時間**(2026-11-21。リリースビルドの `shiibar-cc report PostToolUse` を、条件ごとに 60 回実行して計測。開始から終了までの時間。
+     どの条件でも祖先 walk を実行し、対応ターミナル以外は、`process:` の report を socket に書き込む):
+
+     | 条件 | 中央値 | 最大 |
+     | --- | --- | --- |
+     | iTerm2、daemon あり | 3.7 ms | 5.5 ms |
+     | iTerm2、daemon なし | 3.6 ms | 4.3 ms |
+     | Terminal.app、daemon あり | 3.6 ms | 4.6 ms |
+     | Terminal.app、daemon なし | 3.7 ms | 4.5 ms |
+     | 対応ターミナル以外(`process:` として送信)、daemon あり | 3.7 ms | 6.0 ms |
+
+     どの条件も 100 ms より小さく、§4.1 のタイムアウト(1 秒)に対して、十分に短い。
+     ビルドの直後の、バイナリの最初の 1 回の実行は 233 ms である(表には含めない)
+   - hook の内容には、pid と tty は含まれない(`fixtures/` の各ファイルの内容。項目の一覧は `fixtures/README.md`)
+   - **SessionStart の `source` と SessionEnd の `reason` の値**(Claude Code の公式の文書の hooks のページを読んで確認、2026-11-21):
+     `source` は `startup` / `resume`(`--resume`、`--continue`、セッションの中での `/resume`)/ `clear` / `compact` / `fork`
+     (`--fork-session`、セッションの中での分岐、バックグラウンドへの移動など)。`reason` は `clear` / `resume`(セッションの中での `/resume` による切り替え)/
+     `logout` / `prompt_input_exit` / `other`
+   - **既知の制限**(どれも、§3.6 の規則のとおりの動作である。回復の方法を併記する):
+     - **iTerm2 のタブの中で、独自の端末を持つプロセスから起動した `claude`**: 独自の端末を持ち、`TERM_PROGRAM` と `ITERM_SESSION_ID` を相続するプロセス
+       (`screen` など)から起動した `claude` の report は、タブの target(`iterm2:<UUID>`)を持つ。report は、target が一致するエントリを、pid が一致するエントリより
+       先に解決するので(§3.6「pid による統合」)、タブのエントリに適用される(タブのセッションの状態と `session_id` を上書きし、SessionEnd では、タブのエントリを削除する)。
+       次の完全な reconcile が、タブのエントリを `claude agents` の内容で上書きする。その後の report で、もう一度発生する
+     - **制御端末を持つ、`claude` 以外の祖先から、切り離して起動された `claude`**(ターミナルから起動したサーバーが、tty を持たない `claude` を起動する場合など):
+       祖先 walk は、その祖先に到達するので、report は、祖先の pid の `process:<pid>` で登録される。`claude` のプロセス自身は tty を持たないので、reconcile は送らず、
+       完全な reconcile のたびに、エントリを prune する。次の report で、もう一度登録される。この形で `claude` を起動する実物は、確認していない
+     - **daemon の起動の後、最初の reconcile より前に受信した report**: 復元したエントリは pid が不明なので(§3.6)、復元したエントリと種類が異なる target の report
+       (復元したエントリが `ghostty:<tty>` で、report が `process:<pid>` の場合など)は、新しいエントリとして登録され、同じセッションのエントリが 2 件になる。
+       次の完全な reconcile が、片方に pid を設定し、もう片方を prune する。prune された側で立っていた未確認は、失われる
+     - **完全な reconcile が実行されない状態が続く間**(起動中のターミナルの Automation の許可が無い場合など): prune が実行されないので、終了したセッションのエントリが、
+       pid を保持したまま残る(stale の削除まで — §3.6 の「削除経路」)。同じ pid を再利用した新しいセッションの report は、そのエントリに pid で解決され、`session_id` が異なるので、
+       入れ子のセッションの report として無視される場合がある。完全な reconcile が実行されると、回復する
+     - **ウィンドウを閉じてから、行が消えるまでの時間**: ターミナルのウィンドウを閉じて終了したセッションの行は、SessionEnd の hook が実行されるまで(約 3.5〜5.5 秒 — 下記 12)残る。
+       その間に、走査が完全な reconcile があると、行は `process:<pid>` の行(ジャンプできない行)になり、SessionEnd で消える。
+       hook が実行されない終了(プロセスの強制終了、クラッシュなど)では、次の完全な reconcile の prune で消える
+     - **同じ `session_id` を、2 つのプロセスが resume している場合の、片方のウィンドウを閉じる操作**: `target` を持たない SessionEnd は、
+       `session_id` が同じエントリをすべて削除するので(§3.6)、実行を続けている側のエントリも削除される。実行を続けている側は、次の reconcile で、
+       新しいエントリとして登録される(§3.5)
+     - **Resume のコマンドの中の制御文字**: Resume のコマンドは、ターミナルに入力として渡す(§4.3)。`session_id` または cwd に制御文字が含まれる場合、
+       シェルの単一引用符では、ターミナルの入力としての働き(キーの入力として解釈される文字)を無効にできない。回復の方法は無い
+       (`session_id` は UUID で、cwd は実在するフォルダである)
+   - **未検証**:
+     - 対応ターミナル以外のターミナル(エディタのターミナルなど)で、hook の `sh` が制御端末を持たず、walk が `claude` に到達すること、
+       その pid が `claude agents --json` の一覧の pid と一致すること、一覧が、そのセッションを pid と一緒に含むこと
+     - Terminal.app での、対話の hook の親連鎖の、Claude Code 2.1.330 での再確認(上記 7 は 2026-07-16 の値)
+     - `TERM_PROGRAM` が無い環境で、ターミナルから起動したセッションが、`process:` で報告されること
+     - **ターミナルを持たないセッション**(エディタの拡張機能、常駐プロセスが起動する実行など): hook が実行されるかどうか、
+       祖先 walk が制御端末を持つプロセスに到達しないこと(report を drop する前提である — §4.1)
+     - **セッションの中での切り替え**: `/resume` と、セッションの中での分岐で、SessionEnd と SessionStart が送信される順序、それぞれの `session_id`、
+       `source` と `reason` の実際の値(`/clear` は上記 3 で実測済み。§3.6「入れ子のセッション」の 3 が適用する `source` の根拠である)
+     - **`claude -p` 以外の子のセッション**(コーディネータが起動する種類 — 上記 3、バックグラウンドに移動したセッションなど): 子の hook の祖先 walk が到達するプロセス、
+       取る pid と tty、`claude agents` の一覧に含まれるかどうか。子のプロセスが自分の制御端末を持つ場合は、その tty または pid の target になり、
+       親とは別のエントリになる(iTerm2 では、相続した `ITERM_SESSION_ID` から親と同じ target を導出し、pid が親と異なるので、§3.6「入れ子のセッション」の 2 で、親のエントリを上書きする)
+     - 対応ターミナル以外で、daemon が無い場合の、hook の実行時間(対応ターミナル以外のセッションでも、hook のたびに daemon の socket への接続を試みる)
+10. **インストールされていないアプリを対象にした AppleScript** — 実機で検証済み(2026-11-21、macOS 27.2.1。インストールされていないアプリの名前と
+    バンドル ID を指定したスクリプトを、`osascript` で実行して確認)。未検証の点は、末尾に列挙する:
+    - **バンドル ID での指定**: `application id "<インストールされていないアプリのバンドル ID>"` を含むスクリプトは、実行の前にエラー(-1728)になる。
+      その参照が、`is running` の条件の中、または `try` の中にあっても同じである
+    - **名前での指定**: `application "<インストールされていないアプリの名前>" is running` は、false を返す(エラーにならない)。
+      is-running の確認の中で、`tell` で `version` だけを取得するスクリプトも、エラーにならず、起動していない側の分岐を実行する
+    - **固有の用語**: アプリの固有の用語(そのアプリの辞書が定義するクラス、プロパティ、コマンド)を `tell` の中で使用するスクリプトは、
+      そのアプリがインストールされていない場合、名前で指定しても、実行の前にエラー(-2741)になる。同じスクリプトの中の is-running の確認は、実行されない。
+      iterm2 モジュールの走査と同じ形のスクリプト(`tabs of w`、`session si of t`、`tty of thisSession`)と、ghostty モジュールの走査と focus と同じ形の
+      スクリプトで確認した
+    - **帰結**: 固有の用語を使用するスクリプトは、固有の用語を使用しない照会で起動中であることを確認した後に送り、アプリは名前で指定する(§4.3「共通規則」)
+    - **未検証**: iTerm2 がインストールされていない Mac と、Ghostty がインストールされていない Mac での、実物の名前での確認
+      (`shiibar-cc reconcile` が完全な走査を送ること、doctor がそのターミナルを `[info]` の「未起動」として表示すること)
+11. **認証コードの AutoFill のメニュー** — Apple の公式の文書で確認(2026-11-21、Information Property List の
+    `NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac` のページ)。未検証の点は、末尾に列挙する:
+    - macOS 26 以降は、文字を入力できるすべてのアプリで、Messages または Mail が受信した認証コードの AutoFill が有効である。
+      コードを検出してから 3 分以内で、入力欄にフォーカスがある場合に、AutoFill のメニューが、入力のカーソルの横に表示される
+    - `Info.plist` の `NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac`(Boolean。既定は NO。macOS 26.0 以降)を true にしたアプリでは、
+      認証コードの content type(AppKit では、入力欄の `contentType` に `oneTimeCode`)を指定した入力欄以外に、このメニューが表示されない
+    - **アプリの中で記録した事象**(2026-11-21、macOS 27.2.1。§4.5「異常の可視化」の記録で確認): 検索欄にフォーカスが移った時点で、
+      アプリが作成していないウィンドウが、検索欄の入力の位置に表示される。クラスの名前は `SPRoundedWindow`、ウィンドウレベルは 101
+      (ポップアップメニューのレベル)で、内容は表示されない
+    - **`Info.plist` のキーだけでは、上の事象は止まらない**(2026-11-21、macOS 27.2.1。キーを true にしたバンドルで、同じウィンドウが表示された。
+      表示と同じ時点で、システムのログに、`com.apple.SafariPlatformSupport.Helper` への接続の開始が記録される)
+    - **`NSAutoFillHeuristicControllerEnabled`**(UserDefaults。false で、AutoFill の対象の推定を無効にする): Apple の公式の文書には記載が無い。
+      macOS 26 で、AutoFill の推定が原因の問題に対して、ほかのアプリケーションが採用している設定である(2026-11-21 に、Web の検索の結果で採用の事実を確認。
+      それぞれの変更の内容は未確認)
+    - **未検証**: 上の事象のウィンドウが、どの種類の AutoFill のメニューであるか / `NSAutoFillHeuristicControllerEnabled` を false にしたアプリで、
+      そのウィンドウが表示されなくなること(`docs/tasks/M56.md` の実機スモーク 20 で確認する。表示される場合は、別の方法を調査する)
+12. **ターミナルのウィンドウを閉じたときの SessionEnd** — 実機で検証済み(2026-11-21。Terminal.app 488.9 / Ghostty 1.4.0 / iTerm2 3.7.6 / macOS 27.2.1。
+    対話の `claude` を起動したウィンドウを、AppleScript の `close window` で閉じ、SessionEnd の hook の中で、時刻と、`ps -o pid,ppid,tty` による
+    祖先の連鎖を記録して確認)。未検証の点は、末尾に列挙する:
+    - **hook は実行される**: 3 つのターミナルのどれでも、SessionEnd の hook は、ウィンドウを閉じてから約 3.5〜5.5 秒後に実行され、最後まで実行される。
+      payload の `reason` は `other` である
+    - **その時点で、制御端末が無い**: hook の親の `claude` のプロセスは、制御端末を持たない(`ps` の tty は `??`)。その祖先(親が pid 1 になっている)も持たない。
+      環境変数(`TERM_PROGRAM`、`ITERM_SESSION_ID` など)は残っている。`claude` の pid は、それ以前の report の祖先 walk で取った pid と同じである
+    - **閉じてから hook までの間**: 約 3.5〜5.5 秒の間、`claude` のプロセスは、tty を持ったまま動作している。この間に reconcile が実行されると、
+      そのセッションは、ターミナルの走査には無く、`ps` では tty を持つので、エントリは `process:<pid>` に付け替わる(§3.5)。付け替えは `session_id` を引き継ぐ
+    - **帰結**: 制御端末を持つ祖先が無い SessionEnd は、`target` を持たない report として送り、daemon は `session_id` でエントリを決める
+      (§4.1、§3.6「`target` を持たない SessionEnd」)
+    - **`target` を持たない SessionEnd による削除**(2026-11-21。同じ版のターミナル。一時的な state dir で起動した daemon に、すべての hook のイベントの
+      report を送る設定で、対話の `claude` を起動し、ウィンドウを閉じてから、daemon の一覧からエントリが無くなるまでの時間を、0.5 秒の間隔で計測して確認):
+      エントリが無くなるまでの時間は、Terminal.app が 3.6 秒、Ghostty(`close window`)が 5.4 秒、iTerm2 が 5.4 秒である。daemon は、どの場合も、
+      `target` を持たない SessionEnd で、`session_id` が一致するエントリを削除した。SessionEnd の hook の時点の `claude` のプロセスは、どの場合も、
+      制御端末を持たず、親が pid 1 である
+    - **iTerm2 の、タブを閉じる操作**(同じ方法。2 つのタブを持つウィンドウの、片方のタブを閉じた): ウィンドウを閉じた場合と同じで、
+      SessionEnd の時点で制御端末が無く、エントリは 5.4 秒で無くなる
+    - **閉じた直後の reconcile との組み合わせ**(iTerm2。ウィンドウを閉じた約 1 秒後に、`shiibar-cc reconcile` を実行した): エントリは、
+      閉じてから 2.5 秒の時点で `process:<pid>` に付け替わり、5.6 秒の時点で、`target` を持たない SessionEnd によって無くなる
+    - **Ghostty の、端末を対象にした `close`**: AppleScript の `close`(`terminal` を対象にするコマンド)で閉じた 1 回の確認では、ウィンドウは
+      `windows` と `terminals` の列挙から無くなったが、シェルと `claude` のプロセスは、tty を持ったまま 2 分以上動作を続け、SessionEnd の hook は実行されなかった
+      (エントリは残る。セッションが実行中のためである)。そのシェルに SIGHUP を送ると、`claude` は、制御端末が無い状態で SessionEnd の hook を実行し、
+      エントリは、`target` を持たない SessionEnd で無くなった。`close window` で閉じた確認では、この動作は発生していない。原因は確認していない
+    - **未検証**: Terminal.app と Ghostty の、タブだけを閉じる操作 / 分割のペインだけを閉じる操作(上記 3 の「ペイン閉じで発火」は、制御端末の有無を記録していない)/
+      画面の操作(閉じるボタン、キーの操作)でウィンドウを閉じた場合 / Terminal.app の、実行中のプロセスがあるウィンドウを閉じる前に確認のダイアログを表示する設定での動作
 
 ## 8. 決定の記録
 
@@ -3649,6 +4247,167 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
   アクセントカラーの設定があると判明したとき(トレイアイコンの点を、固定の色にすることを検討する)/ 導入の問題に気付く経路として、
   ⌄ メニューの項目が必要になったとき。
 
+### 8.66 対応ターミナル以外のセッションを追跡し、Ghostty に対応し、Resume のターミナルを設定にし、行の選択で未確認を下ろす(M56)
+
+- **決定(対応ターミナル以外のセッションの追跡)**: 対応ターミナルの target を導出できない、ターミナルで実行しているセッションを、
+  `process:<pid>` の target で追跡する(§2・§3.4・§3.5・§3.6・§4.1)。状態の表示、未確認、通知、音、トレイアイコンの集計は、ほかのセッションと同じである。
+  できないのは、タブへのジャンプだけである(主ボタンは disabled の Jump。Branch は押せる)。
+- **理由**: §8.11 の時点では、アプリの機能は「状態を見る」と「タブに飛ぶ」の 2 つで、飛べないセッションは、一覧に表示しても使用できなかった。
+  その後、waiting と完了の通知、会話ペインでの会話の閲覧(実行中の会話の更新を含む — §8.65)、Branch が加わり、
+  飛べないセッションでも、許可待ちに気付く、返答を読む、分岐する、という使用ができる。追跡しない場合、これらが、ターミナルの種類だけを理由に使用できない。
+- **鍵を、`claude` のプロセスの pid にする理由**: 対応ターミナルの target は、タブ(端末)を鍵にしていて、同じタブでの `/clear` と、セッションの中での resume の後も、
+  target は同じである(§7-3・§7-4)。ターミナルに依存しない鍵で、同じ性質を持つのは、そのタブで実行している
+  `claude` のプロセスである。`session_id` を鍵にすると、`/clear` のたびに target が変化し、同じ `session_id` を 2 つのプロセスが resume している場合に、
+  2 つのセッションが 1 つのエントリになり、入れ子のセッション(下記)が、親とは別のエントリになる。
+  pid は、hook(祖先 walk)と reconcile(`claude agents` の一覧)の両方から導出できる(同じ値になることは、iTerm2 と Ghostty で実測 — §7-9)。
+  target の項目に prefix を付けて入れるので、daemon の検索、アプリの行の識別、通知の識別は、target のままである。
+  ジャンプできるかどうかは、クライアントが prefix で判定する(未知の prefix を「ジャンプできない」に分類するので、ターミナルを追加したときにも成立する)。
+- **ターミナルを持たないセッションは追跡しない**: 制御端末を持つ祖先が無い report は drop し、reconcile は tty を持たない pid を送らない。
+  対象は、この規則で決まる(エディタの拡張機能、常駐プロセスが起動する実行など)。利用者が画面で操作するセッションではなく、
+  それぞれを Running の行と完了の通知にすると、利用者の番を示す表示が埋もれる。
+- **決定(制御端末を持つ祖先が無い SessionEnd は、`target` を持たない report として送り、`session_id` でエントリを削除する)**(§3.6「`target` を持たない SessionEnd」):
+  ターミナルのウィンドウを閉じて終了したセッションでは、SessionEnd の hook の時点で、制御端末が無い(§7-12 の実測。iTerm2、Terminal.app、Ghostty で同じ)。
+  この report を drop すると、ウィンドウを閉じたセッションの行は、次の定期の reconcile の prune(約 1 分)まで残る。
+- **理由(pid ではなく `session_id` で決める)**: `session_id` は、エントリが保持し、`state.json` にも保存していて、target の付け替えと daemon の起動の後も、
+  report の値と一致する。pid は、制御端末が無い状態では、祖先の連鎖の中のどのプロセスが対象の `claude` であるかを、hook の側で判定できない
+  (祖先 walk は、制御端末を持つことを目印にしている)。`session_id` の一致だけで決めるので、入れ子のセッションの SessionEnd が、親のエントリを削除することも無い。
+  一致するエントリが無い場合に登録しないので、ターミナルを持たないセッションを追跡しない規則(上記)は、変化しない。
+  送るのを SessionEnd だけにするのは、ほかのイベントでは、エントリを登録または更新するための target が必要で、制御端末が無い状態では導出できないためである。
+- **入れ子のセッションの report を無視する**(§3.6「入れ子のセッション」): 実行中のセッションの Bash ツールが起動した `claude -p` の hook は、
+  祖先 walk が親の `claude` に到達するので、親と同じ pid、同じ target で、子の `session_id` を持つ report を送る(§7-9 の実測)。
+  適用すると、親が作業中でも、子の Stop で完了の通知が発生し、子の SessionEnd で親の行が消える。pid が同じで `session_id` が異なる report を、
+  同じプロセスの中でのセッションの切り替え(`source` が `clear` または `resume` の SessionStart)を除いて、無視する。
+  判別に使用できる値は、pid と `session_id` だけである(hook の内容には、入れ子であることを示す項目が無い)。
+  対応ターミナルの target にも、同じ規則を適用する(iTerm2 では、相続した `ITERM_SESSION_ID` によって、子の report が親のエントリを上書きしていた — §7-3)。
+  pid で判定できない間(daemon の起動の後)と、子が `resume` で起動された場合は、子の report を適用する。次の reconcile が、`claude agents` の一覧の内容でエントリを上書きするので、
+  この間隔での誤りは、受け入れる。
+  `/clear` で、SessionEnd がエントリを削除して、SessionStart が再登録する動作(行は、Running の先頭に移動する)は、変更しない。
+- **ターミナルのシェルから実行した `claude -p` は、実行している間だけ行になる**: プロセスが制御端末を持ち、`claude agents` の一覧の `kind` でも、
+  対話のセッションと判別できない(§7-9)。対応ターミナルでは、この扱いは、この決定の前から同じである。
+- **終了の検出**: reconcile が、`claude agents` の一覧にあって、tty を持ち、どの対応ターミナルの走査にも一致しないセッションを `process:` で送る。
+  一覧から無くなったセッションは、既存の prune が削除する。pid の生存の監視などの、新しい仕組みは追加しない。
+- **走査が不完全な回の扱い**: どの走査にも一致しないセッションを、更新専用として送る(走査の取りこぼしを、対応ターミナル以外のセッションと区別できないため、
+  エントリを作成しない。登録済みのエントリの `last_seen` は更新するので、不完全な回が続いても、生きているエントリは stale で削除されない。`pid` が不明のエントリを除く — daemon の起動の後は、
+  target が一致する report または reconcile を受け取るまで、pid で突き合わせられない)。
+  更新専用のセッションには、登録済みのセッションと同じ規則(status、unreviewed、`message`)を適用するので、不完全な回が続く間も、
+  hook を取りこぼした waiting を拾える。
+  1 つのターミナルの走査の失敗(権限の拒否を含む)は、ほかのターミナルの走査の結果の送信を止めない。走査が不完全な回が続く間も、
+  登録済みのエントリの更新は続く。その間に止まるのは、prune と、reconcile による新しい `process:` のセッションの登録である
+  (hook の report による登録は続く。SessionEnd を受け取らずに終了したセッションのエントリは、走査が完全な回、または stale まで残る)。
+- **1 つのセッションを 2 つの target で登録しない**(§3.6「pid による統合」): hook は環境変数で、reconcile はターミナルの走査で target を導出するので、
+  同じプロセスに、異なる target を導出する場合がある(環境変数の相続、環境変数の上書き、走査が不完全な回の後など)。
+  **エントリの target を決めるのは、走査が完全な回の reconcile だけにする**。hook の report は、target が未登録でも、pid が同じエントリがあれば、
+  そのエントリに適用して、target を変更しない。走査は、そのプロセスの tty を持つターミナルを実際に確認するので、環境変数より強い根拠である。
+  hook にも target を変更させると、hook と reconcile が異なる target を導出するセッションで、hook のたびと照合のたびに、target が往復する。
+  reconcile は、target が登録済みのセッションを先に適用してから、残りのセッションで付け替えを判定する(1 回の reconcile の結果が、
+  セッションの並びの順に依存しないようにするため)。daemon は、target の prefix を見分けない(付け替えは、target の文字列の一致と pid だけで判定する)。
+- **pid を `state.json` に保存しない理由**: daemon が停止している間(マシンの再起動を含む)に、プロセスが終了して、pid が別のプロセスに再利用される場合がある。
+  保存した pid を根拠にすると、終了したセッションのエントリに、別のセッションの内容を適用する。起動の直後は、target だけで突き合わせる。
+- **pid の再利用**: SessionEnd を受け取らずに終了したプロセスの pid が、次の照合(§9 の周期)までの間に、別の `claude` のプロセスに再利用された場合、
+  新しいセッションの report は、前のエントリに適用される(SessionStart が、状態と未確認を初期化する。`created_at` と `task` は、次の上書きまで前の値が残る)。
+  この間隔での再利用は、受け入れる。
+- **daemon の起動の直後の二重の登録**: `pid` が不明の間は、hook が導出した target が、登録済みのエントリの target と異なると、
+  同じセッションのエントリを、もう 1 つ作成する(未確認と通知を伴う場合がある)。次の完全な回の reconcile の prune が、走査に無い側を削除する。
+  この間隔での二重の登録は、受け入れる(保存した pid を根拠にする場合の誤りより、影響が小さい)。
+- **バージョンが異なる daemon にアタッチしない**(§4.5「daemon のライフサイクル管理」): `pid`、`update_only`、`rekey` は、アプリ、CLI、daemon の
+  3 つが同じバージョンであることを前提にしている。アプリを更新した後に、更新の前の daemon が残っていると、更新専用のセッションからエントリを作成するなど、
+  この前提が成立しない。アプリが、アタッチの時点で daemon のバージョンを確認して、異なる場合は同梱の daemon に入れ替える。
+  入れ替えを、1 回の起動につき 1 回にして、アプリが spawn した daemon を対象にしないのは、バンドルのバージョンと同梱の daemon のバージョンが
+  一致しない構成でも、終了と起動を繰り返さないためである。古い daemon の停止は、Quit と同じ `shutdown` の要求で依頼する(シグナルは送らない)。
+  待ち時間の中で停止しなかった入れ替えを保留にして、後のアタッチで停止を確認した時点で spawn するのは、停止が待ち時間より遅い daemon の後に、
+  アプリを起動し直すまで daemon が無い状態が続かないようにするためである(既存の spawn は、最初の接続の失敗のときだけ実行する)。
+  保留の間に、応答する daemon に `shutdown` をもう一度送らないのは、終了と起動を繰り返さないための上限(1 回の起動につき 1 回)を維持するためである。
+- **付け替えの対応は、最新の付け替え先を終端にする**(§4.5「デスクトップ通知」): 走査の結果によって、付け替えは元の target に戻る場合がある
+  (`ghostty:<tty>` → `process:<pid>` → `ghostty:<tty>`。§3.6)。対応を追加するだけにすると、対応が循環し、読み替えの結果が、エントリの現在の target にならない。
+  付け替え先を古い target とする対応を先に破棄すると、エントリの以前の target は、どれも現在の target に読み替えられる。
+- **最初の照合の通知**: 対応ターミナル以外で既に実行中のセッションは、この決定の実装を含むバージョンに更新した後の、最初の reconcile で、
+  新しく見つかったセッションとして登録される。idle または waiting のセッションは、未確認になり、通知が 1 回発生する(§3.5 の既存の規則。変更しない)。
+- **SSH の接続先のセッションは、対象外のままである**: 接続先の hook は、このマシンの daemon の socket に報告を送れない(§1「非スコープ」)。
+- **決定(Ghostty)**: Ghostty 1.4.0 以上を、3 つ目の対応ターミナルにする。target は `ghostty:<tty パス>` である(§2・§4.3・§7-8)。
+- **理由**: Ghostty 1.4.0 の AppleScript の `terminal` には `tty` があり(§7-8)、「中からセッションを特定できる値と、外からそのセッションに移動できる手段」の組
+  (§8.47 の条件)が成立する。鍵は、Terminal.app と同じ tty なので、祖先 walk と、tty の正規化を、そのまま使用できる。
+  最小のバージョンを 1.4.0 にするのは、`tty` があることを確認したバージョンが 1.4.0 で、`v1.3.0` と `v1.3.1` の AppleScript の `terminal` には、`tty` が無いからである(§7-8)。
+  1.4.0 未満は、`process:` として追跡する。
+- **ターミナルモジュールは、モジュールごとの実装のままにする**(§8.2 と §8.47 の「3 例目の実物を見てから」の判断): 3 つのモジュールで共通なのは、
+  関数の形(focus / focused / probe / <ターミナル>_targets / open_resume_window)だけで、中身は、鍵の種類(UUID と tty)、
+  走査する構造(セッション、タブ、端末)、コマンドを入力する方法が、モジュールごとに異なる。共通の型を導入しても、モジュールの中の記述は減らず、
+  振り分けの入口(prefix → モジュール)は 1 箇所のままである。ターミナルの知識を含まない純関数(tty の正規化など)は、共有する。
+  アプリが持つ、ターミナルのバンドル ID と Ghostty の最小のバージョン(Settings の Terminal の判定 — §9)と、report が持つ環境変数の判定(§4.1)は、
+  AppleScript と ID の形式の知識ではないので、ターミナルモジュールの外に置く。
+- **固有の用語を使用するスクリプトの前に、起動中であることを別のスクリプトで確認する**(§4.3「共通規則」): 対応ターミナルが 3 つになり、
+  インストールされていない対応ターミナルがある構成が通常になる。アプリの固有の用語を使用するスクリプトと、バンドル ID でアプリを指定するスクリプトは、
+  そのアプリがインストールされていない Mac では、実行の前にエラーになる(§7-10)。reconcile は、エラーになった走査を不完全な走査として扱うので、
+  1 つのスクリプトのままでは、その Mac で prune が止まり、終了したセッションの行が残る。iterm2 にも同じ規則を適用する
+  (iTerm2 がインストールされていない Mac で、同じ事象が発生するため)。iTerm2 と Ghostty に対する focus、focused、probe、走査で、
+  osascript の実行が 1 回増える(iTerm2 の起動中の照会の 1 回の実行は、約 0.05 秒である — 2026-11-21、6 回の計測)。Terminal.app は macOS に含まれるので、対象にしない。
+- **apple_terminal の走査と focus は、`id` もタブも読み取れないウィンドウを読み飛ばす**(§4.3・§7-7): Terminal.app は、ターミナルのウィンドウを
+  すべて閉じた後も起動している間、そのウィンドウのオブジェクトを保持する場合がある。タブの読み取りがエラーになると、走査のスクリプトの全体がエラーになり、
+  reconcile が毎回不完全になる。対応ターミナルが 3 つになり、Terminal.app を、ウィンドウを閉じたまま起動している状態で、ほかのターミナルを使用する構成が
+  通常になるので、その状態で prune が止まらないようにする。`id` を読み取れるウィンドウでの失敗は、実在するウィンドウの一時的な失敗として、不完全な走査のままにする
+  (生きているセッションを prune しない側に倒す — §3.5)。focus の `activate` と選択の操作を `try` の外に置くのは、iterm2 と同じく、
+  操作のエラー(TCC のエラーなど)を「該当なし」と区別して返すためである。
+- **入力欄の横に表示される AutoFill のメニューを、アプリの全体で表示しない**(§4.5・§7-11。Edit メニューの AutoFill の項目は対象外である): このアプリには、AutoFill で入力する欄が無い。`Info.plist` の `NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac` を true にしても、
+  `NSAutoFillHeuristicControllerEnabled` を false にしても、失う機能が無い。`Info.plist` のキーだけでは事象が止まらなかったので、公式の文書に記載の無い `NSAutoFillHeuristicControllerEnabled` を併用する(`NSAutoFillHeuristicControllerEnabled` で事象が止まることは、実機で未確認である — §7-11)。
+  検索欄の位置に表示される、内容の無いウィンドウ(§7-11)が、検索の結果を隠す事象への対応である。
+- **決定(Resume と Branch のターミナル)**: 開く先を、Settings の `Terminal` で選択する(§4.5・§4.6)。観測による決定と、その記憶
+  (`cc.shiibar.lastObservedTerminal`)は廃止する。最初の値は、記憶していた種別から引き継ぐ。
+- **理由**: 対応ターミナル以外のセッションを追跡すると、最新のエントリのターミナルが、開く先にできないターミナルである場合が発生し、
+  観測では開く先が決まらない。対応ターミナルが 3 つになり、複数を併用する場合に、開く先が直前の操作で変化すると、予測できない。
+  §8.47 が設定を採用しなかった理由(設定と、実際に使用しているターミナルの不一致)は、開く先だけを決める設定には当てはまらない
+  (セッションを実行しているターミナルの判定は、引き続き、セッションごとに環境変数で実行する)。
+- **決定(未確認を下ろす操作)**: 利用者の操作で選択した Running の行の選択が、§9 の時間続いた時点で、未確認を下ろす(§4.5「未確認を下ろす操作」)。
+  どのセッションでも同じである。Jump の成功と `Mark all as read` では、すぐに下ろす。選択中の行が未確認になった場合は、自動では下ろさず、
+  その行に対する操作(選択が残るクリック、ダブルクリック、Jump ができない行での Enter)から、同じ時間の後に下ろす。会話ペインの操作では下ろさない。
+- **理由**: 会話ペインで実行中の会話の返答を読める(§8.65)ので、ターミナルに移動せずに内容を確認する使用が、通常の使用になる。
+  Jump の成功だけで下ろす規則では、アプリで返答を読んだ後も点が残り、ジャンプできないセッションでは、`Mark all as read` 以外に下ろす操作が無い。
+  ターミナルの種類で規則を分けると、同じ見た目の行で、点が消える操作が異なる。waiting はオレンジで別に示す(§8.65)ので、
+  選択で点を下ろしても、操作を待っているセッションは、色で区別できる。
+  **選択の時点で下ろさない理由**: ↑ / ↓ で目的の行まで移動する間に通過した行と、誤って選択してすぐに別の行へ移動した行の点が、
+  内容を見ていないのに消える。選択が続いた行だけを、確認した行として扱う。
+  閉じる前から保持している選択などの、利用者の操作によらない選択は、利用者がその行を選んだ操作ではないので、計測を開始しない。
+  ポップオーバーまたはウィンドウを閉じたときに計測を中止するのは、画面を見ていない間に点が消えないようにするためである。
+  **会話ペインの操作で下ろさない理由**: スクロールには、利用者の入力によるものと、更新への追従などのアプリが実行するものがあり、
+  点が消える場合と消えない場合を、画面から区別できない。下ろす操作を行に対する操作だけにすると、点が消える条件を 1 つの規則で説明できる。
+- **決定(グローバルホットキーで開いたときに、行を選択しない)**: ホットキーで開いたときは、一覧にフォーカスを移すだけで、選択を変更しない
+  (§4.5「グローバルホットキー」)。選択なしの間は、↑ / ↓ に加えて、一覧にフォーカスがある間の Enter でも、先頭の行を選択する。
+- **理由**: 選択は、閉じて開いた後も保持するので、開いたときに先頭の行を選択する動作が発生するのは、選択なしで開いた場合だけである。
+  Running は新しいセッションの順(§8.31)なので、先頭の行が、対応の必要な行とは限らない。
+  行を選択するのは利用者の操作だけである、という規則(§8.49)に例外が無くなり、「利用者が選択した行は、選択が続くと確認済みになる」を、例外なしで説明できる。
+  選択なしで開いた直後に Enter を押した場合に、何も起こらない状態を避けるため、検索欄の Enter と同じ動作を、一覧の Enter にも与える。
+- **主ボタンが disabled の Jump である行の、Enter とダブルクリック**: Jump の代わりに、その会話を表示する(1 列では詳細ページ、
+  2 列では会話ペインへのフォーカス)。どの行でも、Enter とダブルクリックで、そのセッションの内容に到達できるようにするためである。
+  通知のクリックも、ジャンプできないセッションでは、一覧でその行を選択する。
+- **disabled のボタンの理由を、下部パネルに文字で表示する**(§4.6「下部パネル」): 理由をツールチップだけで示すと、ポインタをボタンに重ねる操作をしない限り、
+  Jump を押せない理由が画面に現れない。ジャンプできないセッションの行は、ほかの Running の行と同じ見た目で、主ボタンだけが押せないので、
+  理由を常に表示する。選択したターミナルを使用できないときの Resume と Branch の理由も、同じ位置に表示する。
+  表示する位置は、ボタンの行の上の行である。ポップオーバーの幅では、3 つのボタンの横に、どの理由の文言も収まらない(実機で、理由が先頭の 1 文字だけになった)。
+  専用の行にすると、どの幅でも全文を表示でき、表示する位置が幅で変化しない。代わりに、理由を表示している間は、パネルが理由の行の分(1 行または 2 行)だけ高くなる。
+  カードに印を表示する案は、選択の前に分かるが、理由の全文を表示できず、すべての行に共通の理由(ターミナルを使用できない)には使用できないので、採用しない
+- **トレイアイコンの窓の形を、画像の左右の中央に配置する**(menubar-design.html): 窓の左右に同じ幅(3.2pt)の余白を取り、画像の幅を 22.4pt にする。
+  右の余白だけを右肩の点の領域にすると、点が無い間は、窓の形が画像の中央から左に寄り、ポップオーバーの矢印が窓の形の中央を指さない。
+  点が無い間だけ画像の幅を狭くする案は、点の表示と消去のたびに、隣のアイコンの位置が移動するので採用しない。点を小さくして右の余白をなくす案は、点が目立たなくなるので採用しない
+- **hook の実行時間**: すべての report で祖先 walk を実行し、対応ターミナル以外のセッションでも socket に 1 行を書き込むので、hook の 1 回の実行時間が増える。
+  この変更の前の値は、中央値で、iTerm2(祖先 walk なし)が 3.1 ms、Terminal.app(祖先 walk あり)が 3.7 ms、対応ターミナル以外(report を破棄)が 3.0 ms だった
+  (2026-11-21、条件ごとに 60 回の計測)。変更の後の値(§7-9)は、どの条件も、この値の 2 倍より小さく、100 ms より小さい。祖先 walk による増加は、約 0.6 ms である
+- **この決定が変更する仕様**: §8.11(飛べないセッションを追跡しない。フォールバック target を作らない)/ §8.47 の「Resume のターミナルは観測追随」と、
+  「対応外を drop する規則」/ §8.48 の「disabled が残るのは、live だが Agents 一覧に一致が無い行だけ」(ジャンプできないセッションの Running の行にも、
+  disabled の Jump を表示する。History に残る live の行の表示は、daemon にエントリが無い場合の表示として残る)/ §3.2 の「focus した = seen」
+  (利用者が選択した行の選択が続いた場合も seen を送る)/ グローバルホットキーで開いたときの、選択なしの間の先頭の行の選択(行を選択しない)/ reconcile が、TCC エラーのときに何も送らない動作(送ってから exit 3 にする)/
+  別プロセスの子のセッションの report が、親のエントリを上書きする動作(§7-3。入れ子のセッションの report として無視する)/
+  §8.49 の「disabled の Jump の理由は、ボタンのツールチップで示す」(下部パネルの、ボタンの行の上の行にも表示する)。
+  §8.2 の「抽象化レイヤーを作らない」と、§3.4 の遷移の表の各行は、変更しない。
+- **再検討の条件**: 別プロセスで起動される子のセッションが、`process:` の別の行と通知になり、利用の妨げになったとき(§7-9)/
+  入れ子のセッションの規則が、必要な report を無視していると判明したとき(セッションの中での切り替えの `source` — §7-9)/
+  ターミナルのシェルから実行した `claude -p` の行と通知が、利用の妨げになったとき / `/clear` の後も、行の位置と選択を維持する必要が生じたとき
+  (SessionEnd の `reason` を report で運び、`clear` では削除しない規則を検討する)/
+  エディタのターミナルのセッションの通知を、ターミナルの種類ごとに止める必要が生じたとき / 内容を読んでいない行の点が、選択が §9 の時間続いたことで消え、
+  確認の漏れの原因になったとき / Ghostty の tty の再利用による誤ジャンプが問題になったとき(§8.47 の Terminal.app と同じ安全弁を検討する)/
+  ターミナルを持たないセッションの追跡が必要になったとき / ウィンドウを閉じてから行が消えるまでの時間(SessionEnd の hook までの約 3.5〜5.5 秒 — §7-12)と、
+  その間に行が `process:<pid>` の行になることが、利用の妨げになったとき / 4 つ目のターミナルに対応するとき(関数の形の共通化を、その時点の実物で判断する)/
+  `NSAutoFillHeuristicControllerEnabled` を false にした後も、検索欄の位置に、アプリが作成していないウィンドウが表示されると判明したとき(§7-11。ウィンドウの種類を特定して、対応を検討する)/
+  §7-9 の「既知の制限」のいずれかが、利用の妨げになったとき(iTerm2 のタブの中の、独自の端末を持つプロセスから起動したセッションでは、
+  target が一致するエントリの pid が report の pid と異なり、report の pid を持つエントリが別にある場合に、pid の一致を優先する規則を検討する)。
+
 ## 9. 定数表
 
 | 定数                         | 値                   | 変更手段                 |
@@ -3663,7 +4422,11 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
 | アプリ再接続バックオフ       | 1 秒 → 倍々 → 上限 30 秒 | 固定                 |
 | 遅延通知                     | 3 秒(発火時に再確認) | 固定                     |
 | task(prompt)の切り詰め      | 先頭 80 文字         | 固定                     |
-| report の tty 祖先 walk 上限 | 10 段(上限まで制御端末が見つからなければ drop。§4.1) | 固定 |
+| バージョンが異なる daemon の停止を待つ時間 | 3 秒(`shutdown` の送信から。停止したかどうかを 0.1 秒の間隔で確認する。停止しなければ、spawn せずに入れ替えを保留にする — §4.5「daemon のライフサイクル管理」) | 固定 |
+| report の祖先 walk 上限      | 10 段(上限まで、制御端末を持つプロセスが見つからなければ、report を drop する。SessionEnd だけは、`target` を持たない report として送る。§4.1) | 固定 |
+| Ghostty の最小のバージョン   | 1.4.0(AppleScript の `terminal` に `tty` があることを確認したバージョン。`v1.3.1` には無い。比較は、最初の `-` または `+` より前の部分で行う。これ未満の Ghostty のセッションは `process:` になり、Resume / Branch の開く先にできない。§4.1・§4.3・§7-8) | 固定 |
+| 対応ターミナルのバンドル ID  | iTerm2 = `com.googlecode.iterm2` / Terminal = `com.apple.Terminal` / Ghostty = `com.mitchellh.ghostty`(Settings の Terminal の、インストールの判定に使用する。§4.5) | 固定 |
+| Resume / Branch のターミナル | UserDefaults の `cc.shiibar.resumeTerminal`(`iterm2` / `apple-terminal` / `ghostty`)。最初の値の決め方は §4.5「Settings ウィンドウ」の Terminal | Settings ウィンドウ |
 | last_assistant_message の切り詰め | 先頭 200 文字   | 固定                     |
 | Refresh の結果の一時表示     | 2 秒(`✓ Refresh done` / `Refresh failed`。§4.6) | 固定 |
 | Refresh のアイコンの回転     | 時計回りに 1 秒で 1 回転(Refresh の実行中。等速。「視差効果を減らす」が ON の間は回転しない。§4.5「見出し行」) | 固定 |
@@ -3682,7 +4445,7 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
 | ドラッグ中の表示             | ポインタに追従する行の画像は不透明度 0.92、元の行は不透明度 0.35、挿入位置にならない行は不透明度 0.4 | 固定 |
 | ドラッグできない理由の表示   | 2 秒(§4.5「行のドラッグ」の「ドラッグできない行」) | 固定 |
 | 検索欄の高さ                 | 28pt(文字の大きさ 13 のとき。比率で連動する。§4.5「文字の大きさ」) | 文字の大きさに連動 |
-| ホットキーで開いたウィンドウの、一覧へのフォーカスの期限 | ウィンドウを開いてから 1 秒(この時間の中で key になった場合だけ、一覧にフォーカスを移す。§4.5「グローバルホットキー」) | 固定 |
+| ホットキーで開いたウィンドウの、一覧へのフォーカスの期限 | ウィンドウを開いてから 1 秒(この時間の中で key になった場合だけ、一覧にフォーカスを移す。§4.5「グローバルホットキー」。通知のクリックで開いたウィンドウの、行の選択にも使用する — この時間の中で key にならなかった場合は、時間が経過した時点で選択する。§4.5「通知のクリック」) | 固定 |
 | ボタンを離したイベントを受信しない場合の、ドラッグの取り消し | ボタンが離れた状態が 0.25 秒続いたとき(§4.5「行のドラッグ」の「取り消し」) | 固定 |
 | ドラッグ中の自動スクロール   | 一覧の上端と下端から 40pt 以内(文字の大きさ 13 のとき。比率で連動する)。速さは、端で 1200pt/秒、範囲の内側の端で 120pt/秒(間は直線で変化する。速さは文字の大きさに連動しない)。ポインタが上端より上、または下端より下にある間は 1200pt/秒 | 範囲だけ文字の大きさに連動 |
 | ポップオーバーの高さを初回の高さに固定する範囲 | 初回の高さの前後 12pt 以内(ドラッグ中だけ) | 固定 |
@@ -3697,6 +4460,7 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
 | 経過時間の再取得             | 60 秒(ポップオーバーまたはウィンドウの表示中のみ) | 固定 |
 | wait の既定タイムアウト      | なし(無限待ち)       | `--timeout`              |
 | 会話ペインのミニマップ      | 幅 20pt・本文はミニマップ手前 8pt で折り返す(挙動は §4.6) | 固定 |
+| 選択で未確認を下ろすまでの時間 | 1 秒(利用者の操作で Running の行を選択した時点から計測する。§4.5「未確認を下ろす操作」) | 固定 |
 | 発言コピーの反応             | 1 秒(アイコンをチェックマークに替え、アイコンの左に `Copied` を表示する時間。§4.6「発言ごとのコピー」) | 固定 |
 | Settings のタブの行の寸法    | 行の余白は上下 6pt・左右 12pt、ボタンの間隔 4pt。ボタンは、最小の幅 72pt、余白が上下 6pt・左右 8pt、アイコン 18pt、アイコンと名前の間隔 3pt、名前 11pt、選択中の地の角の半径 7pt。§4.5「Settings ウィンドウ」 | 固定 |
 | Settings ウィンドウの寸法    | ウィンドウの幅 600pt(どのタブでも同じ)。内容の余白は上 16pt・左右 24pt・下 20pt。枠と枠の間隔 14pt。見出しと枠の間隔 6pt、見出しの左の字下げ 4pt。枠の角の半径 10pt。行の余白は上下 9pt・左右 14pt、行の内容の最小の高さ 22pt、左と右の列の間隔 12pt、ラベルと説明の間隔 2pt。右の列の幅 240pt(中の間隔 8pt)。§4.5「Settings ウィンドウ」 | 固定 |

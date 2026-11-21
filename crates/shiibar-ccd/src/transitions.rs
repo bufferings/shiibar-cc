@@ -250,7 +250,12 @@ fn apply_transition(
         None => match unregistered_action {
             UnregisteredAction::Ignore => Outcome::Ignored,
             UnregisteredAction::Register(status) => {
-                let mut entry = create_entry(report, now, status);
+                // A targetless report (only valid for SessionEnd, which never
+                // registers) cannot key a new entry.
+                let Some(target) = &report.target else {
+                    return Outcome::Ignored;
+                };
+                let mut entry = create_entry(target, report, now, status);
                 entry.unreviewed = flag_on_transition.unwrap_or(false);
                 if update_message_on_transition {
                     entry.message = report.message.clone();
@@ -281,9 +286,9 @@ fn apply_transition(
     }
 }
 
-fn create_entry(report: &ReportPayload, now: i64, status: Status) -> AgentEntry {
+fn create_entry(target: &str, report: &ReportPayload, now: i64, status: Status) -> AgentEntry {
     AgentEntry {
-        target: report.target.clone(),
+        target: target.to_string(),
         status,
         unreviewed: false,
         session_id: report.session_id.clone(),
@@ -298,6 +303,8 @@ fn create_entry(report: &ReportPayload, now: i64, status: Status) -> AgentEntry 
         // every subsequent hook report (M5 T9).
         created_at: now,
         last_report_at: now,
+        // The caller (core.rs) sets the pid from the report (§3.6).
+        pid: None,
     }
 }
 
@@ -377,6 +384,8 @@ pub fn apply_reconcile_session(
                 // this entry to the bottom of "Recent activity" until then.
                 created_at: now,
                 last_report_at: 0,
+                // The caller (core.rs) sets the pid from the session (§3.6).
+                pid: None,
             })
         }
         Some(prev) => {
@@ -453,6 +462,7 @@ mod reconcile_tests {
             },
             created_at: 100,
             last_report_at: 400,
+            pid: None,
         }
     }
 
@@ -463,6 +473,8 @@ mod reconcile_tests {
             cwd: "/new".into(),
             status,
             waiting_for: waiting_for.map(str::to_string),
+            pid: None,
+            update_only: false,
         }
     }
 

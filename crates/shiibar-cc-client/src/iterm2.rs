@@ -67,6 +67,28 @@ fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
 // Pure: AppleScript generation
 // ---------------------------------------------------------------------
 
+/// AppleScript that only asks whether iTerm2 is running. Every operation
+/// except `open_resume_window` sends this first, and sends its own script
+/// only when the answer is `RUNNING`.
+///
+/// A script that uses iTerm2's terminology (`tabs`, `sessions`, `tty`,
+/// `current session`, ...) does not compile when iTerm2 is not installed,
+/// because the terminology cannot be loaded; the whole script then fails
+/// before it runs, so an `is running` guard inside the same script cannot
+/// protect it. This script uses no `tell` and no iTerm2-specific term, so
+/// it compiles and runs on a Mac without iTerm2, where it prints
+/// `NOT_RUNNING`. It sends no Apple event to iTerm2, so it never launches
+/// it. Prints `RUNNING` or `NOT_RUNNING`.
+pub fn build_running_script() -> String {
+    r#"if application "iTerm2" is running then
+    return "RUNNING"
+else
+    return "NOT_RUNNING"
+end if
+"#
+    .to_string()
+}
+
 /// AppleScript that scans iTerm2 for a session whose `id` equals `uuid`,
 /// and if found: activates iTerm2 FIRST, then selects its window, its tab,
 /// and the matched session (pane). Activate must come before the selects:
@@ -82,6 +104,8 @@ fn split_leading_digits(s: &str) -> Option<(&str, &str)> {
 /// what keeps `focus` from launching iTerm2 when it isn't running
 /// (DESIGN.md §4.3: "if iTerm2 isn't running, return 'no match' without
 /// launching it"; a bare `tell application "iTerm2"` would auto-launch it).
+/// `focus` sends `build_running_script` before this script; the guard here
+/// still keeps iTerm2 from launching when it quits between the two scripts.
 /// Prints `FOUND` or `NOTFOUND` as the last line of stdout.
 ///
 /// Uses explicit numeric indices (`session si of t`) with a per-session
@@ -211,6 +235,23 @@ return "OK"
 // Pure: osascript output parsing
 // ---------------------------------------------------------------------
 
+/// Parse `build_running_script`'s output: `true` for `RUNNING`, `false`
+/// for `NOT_RUNNING`. A failed run is `PermissionDenied` for a TCC denial
+/// and `Other` otherwise, like every other parser here.
+pub fn parse_running_output(output: &AppleScriptOutput) -> TerminalResult<bool> {
+    if is_permission_denied(output) {
+        return Err(TerminalError::PermissionDenied);
+    }
+    if !output.success {
+        return Err(TerminalError::Other(output.stderr.trim().to_string()));
+    }
+    match output.stdout.trim() {
+        "RUNNING" => Ok(true),
+        "NOT_RUNNING" => Ok(false),
+        other => Err(bad_output(other)),
+    }
+}
+
 pub fn parse_focus_output(output: &AppleScriptOutput) -> TerminalResult<()> {
     if is_permission_denied(output) {
         return Err(TerminalError::PermissionDenied);
@@ -282,13 +323,26 @@ pub fn parse_resume_output(output: &AppleScriptOutput) -> TerminalResult<()> {
 // Impure: wire pure generation/parsing to a runner
 // ---------------------------------------------------------------------
 
+/// Send `build_running_script` (see there for why it is a separate script)
+/// and report whether iTerm2 is running.
+fn iterm2_is_running(runner: &dyn AppleScriptRunner) -> TerminalResult<bool> {
+    let output = runner
+        .run(&build_running_script())
+        .map_err(|e| TerminalError::Other(e.to_string()))?;
+    parse_running_output(&output)
+}
+
 /// `focus(target)` (DESIGN.md §4.3): jump to the iTerm2 session matching
-/// `target`'s UUID half. `NoMatch` covers both "no such session found in
-/// iTerm2" and "target isn't in the `wNtNpN:UUID` shape at all" (the
-/// `session:` fallback target, or garbage input) — no osascript is run in
-/// the latter case.
+/// `target`'s UUID half. `NoMatch` covers "no such session found in
+/// iTerm2", "iTerm2 isn't running" (only `build_running_script` is sent),
+/// and "target isn't in the `wNtNpN:UUID` shape at all" (the `session:`
+/// fallback target, or garbage input) — no osascript is run in the last
+/// case.
 pub fn focus(target: &str, runner: &dyn AppleScriptRunner) -> TerminalResult<()> {
     let uuid = extract_uuid(target).ok_or(TerminalError::NoMatch)?;
+    if !iterm2_is_running(runner)? {
+        return Err(TerminalError::NoMatch);
+    }
     let script = build_focus_script(uuid);
     let output = runner
         .run(&script)
@@ -297,8 +351,12 @@ pub fn focus(target: &str, runner: &dyn AppleScriptRunner) -> TerminalResult<()>
 }
 
 /// `focused()` (DESIGN.md §4.3): the frontmost iTerm2 session's target, if
-/// iTerm2 is the frontmost application; `Ok(None)` otherwise.
+/// iTerm2 is the frontmost application; `Ok(None)` otherwise, including
+/// when iTerm2 isn't running (only `build_running_script` is sent).
 pub fn focused(runner: &dyn AppleScriptRunner) -> TerminalResult<Option<String>> {
+    if !iterm2_is_running(runner)? {
+        return Ok(None);
+    }
     let output = runner
         .run(&build_focused_script())
         .map_err(|e| TerminalError::Other(e.to_string()))?;
@@ -306,7 +364,12 @@ pub fn focused(runner: &dyn AppleScriptRunner) -> TerminalResult<Option<String>>
 }
 
 /// Harmless iTerm2 probe for `shiibar-cc doctor`'s TCC permission check.
+/// When iTerm2 isn't running, only `build_running_script` is sent and the
+/// result is `NotRunning`.
 pub fn probe(runner: &dyn AppleScriptRunner) -> TerminalResult<ProbeOutcome> {
+    if !iterm2_is_running(runner)? {
+        return Ok(ProbeOutcome::NotRunning);
+    }
     let output = runner
         .run(&build_probe_script())
         .map_err(|e| TerminalError::Other(e.to_string()))?;
@@ -346,6 +409,9 @@ pub fn open_resume_window(
 /// `SESSION<TAB>tty<TAB>uuid` line per session found, followed by a final
 /// `DONE<TAB><failure count>` line; `failures > 0` is the signal callers use
 /// to treat the scan as incomplete (§3.5: skip pruning that round).
+/// `iterm2_targets` sends `build_running_script` before this script; the
+/// `is running` guard here still keeps iTerm2 from launching when it quits
+/// between the two scripts.
 pub fn build_iterm2_targets_script() -> String {
     r#"if application "iTerm2" is running then
     tell application "iTerm2"
@@ -428,17 +494,30 @@ pub struct Iterm2Targets {
 ///   output, per-session `-1719`s) degrades to `Ok` with `complete: false`
 ///   and whatever could still be resolved (§3.5: caller sends
 ///   `complete:false` and skips pruning, but still adds/updates from what
-///   it *did* get).
+///   it *did* get). A failure of `build_running_script` is the same:
+///   empty and incomplete.
+///
+/// `build_running_script` is sent first. When iTerm2 isn't running, the
+/// result is empty and complete without running `ps` or the enumeration
+/// script.
 pub fn iterm2_targets(
     pids: &[u32],
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
 ) -> TerminalResult<Iterm2Targets> {
+    let empty = |complete| Iterm2Targets {
+        targets: std::collections::HashMap::new(),
+        complete,
+    };
     if pids.is_empty() {
-        return Ok(Iterm2Targets {
-            targets: std::collections::HashMap::new(),
-            complete: true,
-        });
+        return Ok(empty(true));
+    }
+
+    match iterm2_is_running(script_runner) {
+        Ok(true) => {}
+        Ok(false) => return Ok(empty(true)),
+        Err(TerminalError::PermissionDenied) => return Err(TerminalError::PermissionDenied),
+        Err(_) => return Ok(empty(false)),
     }
 
     let (pid_tty, ps_ok) = match ps_runner.run(pids) {
@@ -807,16 +886,96 @@ mod tests {
         );
     }
 
-    // ---- fake runner: focus()/focused()/probe() wiring ----
+    // ---- build_running_script / parse_running_output ----
 
-    struct FakeRunner {
-        output: AppleScriptOutput,
+    #[test]
+    fn running_script_uses_no_tell_and_no_iterm2_terminology() {
+        // A script that uses iTerm2's terminology does not compile when
+        // iTerm2 is not installed, so the preliminary query must use none.
+        let script = build_running_script();
+        assert!(script.contains(r#"application "iTerm2" is running"#));
+        assert!(!script.contains("tell"), "{script}");
+        for term in [
+            "window", "tab", "session", "tty", "activate", "select", "write text", "id of",
+        ] {
+            assert!(!script.contains(term), "must not use `{term}`: {script}");
+        }
+        assert!(script.contains("\"RUNNING\""));
+        assert!(script.contains("\"NOT_RUNNING\""));
     }
 
-    impl AppleScriptRunner for FakeRunner {
-        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
-            Ok(self.output.clone())
+    #[test]
+    fn parse_running_output_classifies_running_and_not_running() {
+        assert_eq!(parse_running_output(&out(true, "RUNNING\n", "")), Ok(true));
+        assert_eq!(parse_running_output(&out(true, "NOT_RUNNING\n", "")), Ok(false));
+    }
+
+    #[test]
+    fn parse_running_output_distinguishes_tcc_denial_from_other_errors() {
+        assert_eq!(
+            parse_running_output(&out(false, "", "Not authorized to send Apple events to iTerm2. (-1743)")),
+            Err(TerminalError::PermissionDenied)
+        );
+        assert_eq!(
+            parse_running_output(&out(false, "", "some other osascript error")),
+            Err(TerminalError::Other("some other osascript error".to_string()))
+        );
+        assert!(matches!(
+            parse_running_output(&out(true, "garbage\n", "")),
+            Err(TerminalError::Other(_))
+        ));
+    }
+
+    // ---- scripted runner: focus()/focused()/probe() wiring ----
+
+    /// Answers each script with the next output in order and records the
+    /// scripts it was sent. Running out of outputs is a test failure.
+    struct ScriptedRunner {
+        outputs: std::cell::RefCell<std::collections::VecDeque<AppleScriptOutput>>,
+        scripts: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl ScriptedRunner {
+        fn new(outputs: Vec<AppleScriptOutput>) -> Self {
+            ScriptedRunner {
+                outputs: std::cell::RefCell::new(outputs.into()),
+                scripts: std::cell::RefCell::new(Vec::new()),
+            }
         }
+
+        fn scripts(&self) -> Vec<String> {
+            self.scripts.borrow().clone()
+        }
+    }
+
+    impl AppleScriptRunner for ScriptedRunner {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            self.scripts.borrow_mut().push(script.to_string());
+            Ok(self
+                .outputs
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| panic!("unexpected extra script: {script}")))
+        }
+    }
+
+    /// Fails every run with an I/O error (osascript could not be started).
+    struct IoErrorRunner;
+
+    impl AppleScriptRunner for IoErrorRunner {
+        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+            Err(std::io::Error::other("osascript unavailable"))
+        }
+    }
+
+    const TCC_DENIED: &str = "Not authorized to send Apple events to iTerm2. (-1743)";
+
+    fn running() -> AppleScriptOutput {
+        out(true, "RUNNING\n", "")
+    }
+
+    fn not_running() -> AppleScriptOutput {
+        out(true, "NOT_RUNNING\n", "")
     }
 
     #[test]
@@ -832,22 +991,25 @@ mod tests {
     }
 
     #[test]
-    fn focus_success_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(true, "FOUND\n", ""),
-        };
+    fn focus_sends_the_running_query_first_then_the_focus_script() {
+        let runner = ScriptedRunner::new(vec![running(), out(true, "FOUND\n", "")]);
         assert_eq!(focus("w0t0p0:UUID", &runner), Ok(()));
+        assert_eq!(
+            runner.scripts(),
+            vec![build_running_script(), build_focus_script("UUID")]
+        );
     }
 
     #[test]
-    fn focus_permission_denied_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(
-                false,
-                "",
-                "Not authorized to send Apple events to iTerm2. (-1743)",
-            ),
-        };
+    fn focus_when_iterm2_is_not_running_is_no_match_after_only_the_running_query() {
+        let runner = ScriptedRunner::new(vec![not_running()]);
+        assert_eq!(focus("w0t0p0:UUID", &runner), Err(TerminalError::NoMatch));
+        assert_eq!(runner.scripts(), vec![build_running_script()]);
+    }
+
+    #[test]
+    fn focus_permission_denied_end_to_end_with_scripted_runner() {
+        let runner = ScriptedRunner::new(vec![running(), out(false, "", TCC_DENIED)]);
         assert_eq!(
             focus("w0t0p0:UUID", &runner),
             Err(TerminalError::PermissionDenied)
@@ -855,41 +1017,114 @@ mod tests {
     }
 
     #[test]
-    fn focused_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(true, "FOCUSED:UUID\n", ""),
-        };
-        assert_eq!(focused(&runner), Ok(Some("iterm2:UUID".to_string())));
-    }
+    fn focus_maps_a_failed_running_query_like_a_failed_focus_script() {
+        let runner = ScriptedRunner::new(vec![out(false, "", TCC_DENIED)]);
+        assert_eq!(focus("w0t0p0:UUID", &runner), Err(TerminalError::PermissionDenied));
+        assert_eq!(runner.scripts().len(), 1);
 
-    #[test]
-    fn probe_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(true, "NOT_RUNNING\n", ""),
-        };
-        assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
-    }
-
-    #[test]
-    fn open_resume_window_success_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(true, "OK\n", ""),
-        };
+        let runner = ScriptedRunner::new(vec![out(false, "", "some other osascript error")]);
         assert_eq!(
-            open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
-            Ok(())
+            focus("w0t0p0:UUID", &runner),
+            Err(TerminalError::Other("some other osascript error".to_string()))
+        );
+        assert_eq!(runner.scripts().len(), 1);
+
+        assert!(matches!(
+            focus("w0t0p0:UUID", &IoErrorRunner),
+            Err(TerminalError::Other(_))
+        ));
+    }
+
+    #[test]
+    fn focused_sends_the_running_query_first_then_the_focused_script() {
+        let runner = ScriptedRunner::new(vec![running(), out(true, "FOCUSED:UUID\n", "")]);
+        assert_eq!(focused(&runner), Ok(Some("iterm2:UUID".to_string())));
+        assert_eq!(
+            runner.scripts(),
+            vec![build_running_script(), build_focused_script()]
         );
     }
 
     #[test]
-    fn open_resume_window_permission_denied_end_to_end_with_fake_runner() {
-        let runner = FakeRunner {
-            output: out(
-                false,
-                "",
-                "Not authorized to send Apple events to iTerm2. (-1743)",
-            ),
-        };
+    fn focused_when_iterm2_is_not_running_is_none_after_only_the_running_query() {
+        let runner = ScriptedRunner::new(vec![not_running()]);
+        assert_eq!(focused(&runner), Ok(None));
+        assert_eq!(runner.scripts(), vec![build_running_script()]);
+    }
+
+    #[test]
+    fn focused_maps_a_failed_running_query_like_a_failed_focused_script() {
+        let runner = ScriptedRunner::new(vec![out(false, "", TCC_DENIED)]);
+        assert_eq!(focused(&runner), Err(TerminalError::PermissionDenied));
+        assert_eq!(runner.scripts().len(), 1);
+
+        let runner = ScriptedRunner::new(vec![out(false, "", "some other osascript error")]);
+        assert_eq!(
+            focused(&runner),
+            Err(TerminalError::Other("some other osascript error".to_string()))
+        );
+    }
+
+    #[test]
+    fn probe_sends_the_running_query_first_then_the_probe_script() {
+        let runner = ScriptedRunner::new(vec![running(), out(true, "2\n", "")]);
+        assert_eq!(probe(&runner), Ok(ProbeOutcome::Granted));
+        assert_eq!(
+            runner.scripts(),
+            vec![build_running_script(), build_probe_script()]
+        );
+    }
+
+    #[test]
+    fn probe_when_iterm2_is_not_running_is_not_running_after_only_the_running_query() {
+        let runner = ScriptedRunner::new(vec![not_running()]);
+        assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
+        assert_eq!(runner.scripts(), vec![build_running_script()]);
+    }
+
+    #[test]
+    fn probe_maps_a_failed_running_query_like_a_failed_probe_script() {
+        let runner = ScriptedRunner::new(vec![out(false, "", TCC_DENIED)]);
+        assert_eq!(probe(&runner), Err(TerminalError::PermissionDenied));
+        assert_eq!(runner.scripts().len(), 1);
+
+        let runner = ScriptedRunner::new(vec![out(false, "", "some other osascript error")]);
+        assert_eq!(
+            probe(&runner),
+            Err(TerminalError::Other("some other osascript error".to_string()))
+        );
+    }
+
+    #[test]
+    fn probe_is_not_running_when_iterm2_quits_after_the_running_query() {
+        let runner = ScriptedRunner::new(vec![running(), out(true, "NOT_RUNNING\n", "")]);
+        assert_eq!(probe(&runner), Ok(ProbeOutcome::NotRunning));
+    }
+
+    #[test]
+    fn probe_surfaces_a_tcc_denial_of_the_probe_script() {
+        let runner = ScriptedRunner::new(vec![running(), out(false, "", TCC_DENIED)]);
+        assert_eq!(probe(&runner), Err(TerminalError::PermissionDenied));
+    }
+
+    #[test]
+    fn open_resume_window_sends_only_the_resume_script() {
+        // The resume script launches iTerm2 on purpose, so no running
+        // query precedes it.
+        let runner = ScriptedRunner::new(vec![out(true, "OK\n", "")]);
+        assert_eq!(
+            open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
+            Ok(())
+        );
+        assert_eq!(
+            runner.scripts(),
+            vec![build_resume_script("/Users/example/project", "SESSION-1", false)]
+        );
+    }
+
+    #[test]
+    fn open_resume_window_permission_denied_end_to_end_with_scripted_runner() {
+        let runner = ScriptedRunner::new(vec![out(false, "", TCC_DENIED)]);
         assert_eq!(
             open_resume_window("/Users/example/project", "SESSION-1", false, &runner),
             Err(TerminalError::PermissionDenied)
@@ -981,13 +1216,14 @@ mod tests {
                 stdout: "111 ttys000\n222 ttys003\n".to_string(),
             },
         };
-        let script_runner = FakeRunner {
-            output: out(
+        let script_runner = ScriptedRunner::new(vec![
+            running(),
+            out(
                 true,
                 "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys003\tUUID-B\nDONE\t0\n",
                 "",
             ),
-        };
+        ]);
         let result = iterm2_targets(&[111, 222], &ps, &script_runner).unwrap();
         assert_eq!(result.targets.get(&111).map(String::as_str), Some("iterm2:UUID-A"));
         assert_eq!(result.targets.get(&222).map(String::as_str), Some("iterm2:UUID-B"));
@@ -1002,9 +1238,10 @@ mod tests {
                 stdout: "111 ttys009\n".to_string(), // no iTerm2 session on this tty
             },
         };
-        let script_runner = FakeRunner {
-            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
-        };
+        let script_runner = ScriptedRunner::new(vec![
+            running(),
+            out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
+        ]);
         let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
         assert!(result.targets.is_empty());
         assert!(result.complete, "a pid outside iTerm2 isn't a scan failure");
@@ -1018,9 +1255,10 @@ mod tests {
                 stdout: "111 ttys000\n".to_string(),
             },
         };
-        let script_runner = FakeRunner {
-            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", ""),
-        };
+        let script_runner = ScriptedRunner::new(vec![
+            running(),
+            out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n", ""),
+        ]);
         let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
         assert_eq!(result.targets.get(&111).map(String::as_str), Some("iterm2:UUID-A"));
         assert!(!result.complete);
@@ -1034,9 +1272,10 @@ mod tests {
                 stdout: String::new(),
             },
         };
-        let script_runner = FakeRunner {
-            output: out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
-        };
+        let script_runner = ScriptedRunner::new(vec![
+            running(),
+            out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
+        ]);
         let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
         assert!(!result.complete);
     }
@@ -1052,17 +1291,80 @@ mod tests {
                 stdout: "111 ttys000\n".to_string(),
             },
         };
-        let script_runner = FakeRunner {
-            output: out(
-                false,
-                "",
-                "Not authorized to send Apple events to iTerm2. (-1743)",
-            ),
-        };
+        let script_runner = ScriptedRunner::new(vec![running(), out(false, "", TCC_DENIED)]);
         assert_eq!(
             iterm2_targets(&[111], &ps, &script_runner),
             Err(TerminalError::PermissionDenied)
         );
+    }
+
+    #[test]
+    fn iterm2_targets_sends_the_running_query_first_then_the_enumeration_script() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n".to_string(),
+            },
+        };
+        let script_runner = ScriptedRunner::new(vec![
+            running(),
+            out(true, "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n", ""),
+        ]);
+        iterm2_targets(&[111], &ps, &script_runner).unwrap();
+        assert_eq!(
+            script_runner.scripts(),
+            vec![build_running_script(), build_iterm2_targets_script()]
+        );
+    }
+
+    #[test]
+    fn iterm2_targets_when_iterm2_is_not_running_is_empty_and_complete_after_only_the_running_query() {
+        struct PanicPs;
+        impl PsRunner for PanicPs {
+            fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+                panic!("ps must not run when iTerm2 is not running");
+            }
+        }
+        let script_runner = ScriptedRunner::new(vec![not_running()]);
+        let result = iterm2_targets(&[111], &PanicPs, &script_runner).unwrap();
+        assert!(result.targets.is_empty());
+        assert!(result.complete, "no iTerm2 at all is zero sessions, not a failed scan");
+        assert_eq!(script_runner.scripts(), vec![build_running_script()]);
+    }
+
+    #[test]
+    fn iterm2_targets_is_incomplete_when_the_running_query_fails() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n".to_string(),
+            },
+        };
+        let script_runner = ScriptedRunner::new(vec![out(false, "", "some other osascript error")]);
+        let result = iterm2_targets(&[111], &ps, &script_runner).unwrap();
+        assert!(result.targets.is_empty());
+        assert!(!result.complete, "a failed running query is an incomplete scan");
+        assert_eq!(script_runner.scripts().len(), 1);
+
+        let result = iterm2_targets(&[111], &ps, &IoErrorRunner).unwrap();
+        assert!(result.targets.is_empty());
+        assert!(!result.complete);
+    }
+
+    #[test]
+    fn iterm2_targets_surfaces_a_tcc_denial_of_the_running_query_as_permission_denied() {
+        let ps = FakePs {
+            output: PsOutput {
+                success: true,
+                stdout: "111 ttys000\n".to_string(),
+            },
+        };
+        let script_runner = ScriptedRunner::new(vec![out(false, "", TCC_DENIED)]);
+        assert_eq!(
+            iterm2_targets(&[111], &ps, &script_runner),
+            Err(TerminalError::PermissionDenied)
+        );
+        assert_eq!(script_runner.scripts().len(), 1);
     }
 
     #[test]

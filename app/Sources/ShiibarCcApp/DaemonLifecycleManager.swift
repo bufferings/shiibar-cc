@@ -3,6 +3,11 @@
 // bundled `shiibar-ccd` and keep retrying with backoff. On quit, send
 // `{"cmd":"shutdown"}` so the daemon exits with the app (§8.8: daemon
 // lifecycle is subordinate to the menu bar app, never launchd-resident).
+// Before each attach, `DaemonVersionGate` (ShiibarCcCore) replaces a daemon
+// whose version differs from the bundle's with the bundled one, sending at
+// most one `shutdown` per launch and never to one this app spawned (§4.5,
+// §8.66). A replacement whose wait timed out is completed by the gate at a
+// later attach that finds the old daemon stopped.
 
 import Foundation
 import ShiibarCcCore
@@ -20,6 +25,8 @@ final class DaemonLifecycleManager {
     private var reconnectWorkItem: DispatchWorkItem?
     private var hasEverConnected = false
     private var daemonProcess: Process?
+    private var gate: DaemonVersionGate!
+    private var isShuttingDown = false
 
     /// Called (main actor) whenever the daemon connection's coarse state
     /// changes — drives the "disconnected" warning row + tray dimming
@@ -28,10 +35,47 @@ final class DaemonLifecycleManager {
     /// Called (main actor) for every decoded subscribe event.
     var onEvent: ((SubscribeEvent) -> Void)?
 
-    init(socketPath: String, daemonLogPath: String, helpersDirectory: URL?) {
+    /// `bundleVersion`: the app bundle's `CFBundleShortVersionString`, nil
+    /// when the app runs outside a bundle (§4.5: then no version check).
+    init(socketPath: String, daemonLogPath: String, helpersDirectory: URL?, bundleVersion: String?) {
         self.socketPath = socketPath
         self.daemonLogPath = daemonLogPath
         self.helpersDirectory = helpersDirectory
+        let socketPath = socketPath
+        gate = DaemonVersionGate(environment: .init(
+            bundleVersion: bundleVersion,
+            hasBundledDaemon: { [weak self] in self?.bundledDaemonPath() != nil },
+            fetchDaemonVersion: {
+                await Self.offMain { DaemonSocketProbe.fetchVersion(socketPath: socketPath) }
+            },
+            sendShutdown: {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    // The one-shot send keeps its own reference to the
+                    // underlying connection, so this object only has to
+                    // live until `sendOneShot` returns (same as `shutdown`).
+                    let shutdownConnection = DaemonConnection(socketPath: socketPath)
+                    shutdownConnection.sendOneShot(Self.shutdownRequest) {
+                        continuation.resume()
+                    }
+                }
+            },
+            isDaemonStopped: {
+                await Self.offMain { DaemonSocketProbe.isStopped(socketPath: socketPath) }
+            },
+            spawnBundledDaemon: { [weak self] in self?.spawnBundledDaemonIfPossible() },
+            now: { ProcessInfo.processInfo.systemUptime },
+            sleep: { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        ))
+    }
+
+    private static let shutdownRequest = "{\"cmd\":\"shutdown\"}"
+
+    private static func offMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: work())
+            }
+        }
     }
 
     func start() {
@@ -40,6 +84,27 @@ final class DaemonLifecycleManager {
 
     private func attemptConnect() {
         reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
+        // The daemon this app spawned is still running, so the one that
+        // answers is ours: never replaced (§4.5).
+        let daemonSpawnedByApp = daemonProcess?.isRunning == true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let outcome = await self.gate.checkBeforeAttach(daemonSpawnedByApp: daemonSpawnedByApp)
+            guard !self.isShuttingDown else { return }
+            switch outcome {
+            case .attach, .replaced:
+                self.openSubscribeConnection()
+            case .oldDaemonStillRunning:
+                // §4.5: spawn nothing, stay disconnected (the warning row
+                // shows), and keep reconnecting.
+                self.onConnectedChanged?(false)
+                self.scheduleReconnect()
+            }
+        }
+    }
+
+    private func openSubscribeConnection() {
         let conn = DaemonConnection(socketPath: socketPath)
         connection = conn
         conn.onStateChange = { [weak self] state in
@@ -66,7 +131,9 @@ final class DaemonLifecycleManager {
             // First-ever failure to attach: nothing is listening yet, so
             // spawn the bundled daemon (dev builds without a helpers
             // directory rely on a manually-started `shiibar-ccd
-            // --foreground`, per the M4 task brief).
+            // --foreground`, per the M4 task brief). The spawn after a
+            // version replacement runs from `DaemonVersionGate` instead,
+            // at any attach (§4.5).
             if !hasEverConnected, reconnectAttempt == 0, daemonProcess == nil {
                 spawnBundledDaemonIfPossible()
             }
@@ -77,6 +144,7 @@ final class DaemonLifecycleManager {
     }
 
     private func scheduleReconnect() {
+        guard !isShuttingDown else { return }
         let delay = ReconnectBackoff.delay(forAttempt: reconnectAttempt)
         reconnectAttempt += 1
         let workItem = DispatchWorkItem { [weak self] in
@@ -86,10 +154,18 @@ final class DaemonLifecycleManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func spawnBundledDaemonIfPossible() {
-        guard let helpersDirectory else { return }
+    /// The bundled `shiibar-ccd`, nil when the app has no helpers directory
+    /// or the binary is missing (an app run outside a bundle).
+    private func bundledDaemonPath() -> String? {
+        guard let helpersDirectory else { return nil }
         let path = HelperPathResolver.resolvedPath(for: .shiibarCcd, helpersDirectory: helpersDirectory)
-        guard FileManager.default.isExecutableFile(atPath: path) else { return }
+        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+    }
+
+    /// Spawns the bundled daemon: on the first failure to attach, and after
+    /// a daemon of a different version stopped (§4.5).
+    private func spawnBundledDaemonIfPossible() {
+        guard let path = bundledDaemonPath() else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = []
@@ -128,9 +204,10 @@ final class DaemonLifecycleManager {
 
     /// Send `{"cmd":"shutdown"}` and tear down (app Quit, §4.5).
     func shutdown(completion: @escaping () -> Void) {
+        isShuttingDown = true
         reconnectWorkItem?.cancel()
         let shutdownConnection = DaemonConnection(socketPath: socketPath)
-        shutdownConnection.sendOneShot("{\"cmd\":\"shutdown\"}") {
+        shutdownConnection.sendOneShot(Self.shutdownRequest) {
             completion()
         }
     }

@@ -76,6 +76,7 @@ final class GlobalShortcutFieldClickTests: XCTestCase {
         let windowModel = SettingsWindowModel(
             general: settings, textSizeField: textSizeField, hotKey: model,
             setupCheck: SetupCheckViewModel(performChecks: { _ in }),
+            resumeTerminal: ResumeTerminalSetting(defaults: defaults, lookup: { _ in nil }, center: NotificationCenter()),
             center: NotificationCenter())
         let root = SettingsTabContent(model: windowModel)
             .frame(width: SettingsLayout.windowWidth)

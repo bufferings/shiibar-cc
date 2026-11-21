@@ -122,13 +122,41 @@ public struct RowButton: Equatable, Sendable {
         self.tooltip = tooltip
     }
 
-    /// §4.6: tooltip of the disabled Jump on a live conversation that stays
-    /// in History (running in a terminal this app cannot drive — §8.11).
+    /// Tooltip of the disabled Jump: on the Running row of a session the app
+    /// cannot jump to (§4.5 "action buttons"), and on a live conversation
+    /// that stays in History (§4.6 "Recent section").
     public static let untrackedRunningTooltip = "Running in a terminal Shiibar CC can't drive"
+
+    /// The disabled Jump of a row the app cannot jump to — the Running row
+    /// of a session whose target is not jumpable, or a live conversation
+    /// left in History (§4.5 "action buttons", §4.6 "bottom panel").
+    public static let undrivableJump = RowButton(kind: .jump, invocation: nil, tooltip: untrackedRunningTooltip)
+
+    /// This is the disabled Jump of a row the app cannot jump to. Enter and
+    /// a double-click on such a row show its conversation instead of doing
+    /// nothing (§4.5 "row double-click", "key operations"). Compares the
+    /// whole button, so the disabled snapshot of a jumpable row's Jump
+    /// (kept while awaiting the History refetch, with the `Jump` tooltip)
+    /// is not one; the snapshot of a row the app cannot jump to compares
+    /// equal, and `UnifiedListState.selectedRowShowsConversation` excludes
+    /// the awaiting-refetch row itself.
+    public var isUndrivableJump: Bool { self == .undrivableJump }
 
     /// The same button, disabled (tooltip unchanged).
     public func disabled() -> RowButton {
         RowButton(kind: kind, invocation: nil, tooltip: tooltip)
+    }
+
+    /// Why the button is disabled, shown as text in the bottom panel
+    /// (`BottomPanelButtons.disabledReasons`): the tooltip of a disabled
+    /// button, unless the tooltip is empty or only the verb itself (the
+    /// disabled Resume and Branch without a cwd or session_id, and the
+    /// disabled snapshot of a jumpable row's Jump, keep the verb as their
+    /// tooltip — that names the button, not a reason). nil while enabled:
+    /// an enabled button's tooltip is never a reason.
+    public var disabledReason: String? {
+        guard !isEnabled, !tooltip.isEmpty, tooltip != kind.title else { return nil }
+        return tooltip
     }
 }
 
@@ -307,6 +335,22 @@ public struct UnifiedListRow: Equatable, Identifiable, Sendable {
             label: label, elapsedSeconds: elapsedSeconds, labelLine: labelLine,
             showsRunningMark: showsRunningMark, lastPrompt: lastPrompt, symbol: symbol,
             primaryButton: primaryButton.disabled(), branchButton: branchButton.disabled(),
+            headerTitle: headerTitle, headerLabelAndElapsed: headerLabelAndElapsed,
+            menuItems: menuItems
+        )
+    }
+
+    /// The same row with Resume and Branch disabled while the chosen
+    /// terminal cannot be used (§4.6 "Resume and Branch"); unchanged while
+    /// it can.
+    func applying(_ availability: ResumeTerminalAvailability) -> UnifiedListRow {
+        guard !availability.isAvailable else { return self }
+        return UnifiedListRow(
+            id: id, section: section, sessionID: sessionID, cwd: cwd, title: title,
+            label: label, elapsedSeconds: elapsedSeconds, labelLine: labelLine,
+            showsRunningMark: showsRunningMark, lastPrompt: lastPrompt, symbol: symbol,
+            primaryButton: primaryButton.applying(availability),
+            branchButton: branchButton.applying(availability),
             headerTitle: headerTitle, headerLabelAndElapsed: headerLabelAndElapsed,
             menuItems: menuItems
         )
@@ -771,6 +815,8 @@ public enum UnifiedListBuilder {
         let elapsed = max(0, now - agent.since)
         let rowTitle = runningRowTitle(agent: agent, title: title, label: label)
         let prompt = agent.task.flatMap { $0.isEmpty ? nil : singleLine($0) }
+        // A target the app cannot jump to gets the disabled Jump; Branch is
+        // unaffected (§4.5 "action buttons").
         let primary = ConversationAction.derive(forRunningAgent: agent)
             .button(sessionID: agent.sessionId, cwd: agent.cwd)
         let branch = ConversationAction.branchButton(sessionID: agent.sessionId, cwd: agent.cwd)
@@ -810,7 +856,8 @@ public enum UnifiedListBuilder {
     /// buttons as a Recent row; the column's top is the more button alone,
     /// whose menu is `Unarchive`). The summary is never one that matches a
     /// Running row (those are excluded before this), so a `live` summary is
-    /// a conversation running in a terminal this app cannot drive.
+    /// a running conversation the daemon has no entry for (§4.6 "Recent
+    /// section"): it gets ` · running` and the disabled Jump.
     ///
     /// Assumption (spec silent): with no title and no cwd, the title is empty.
     public static func historyRow(

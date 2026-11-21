@@ -131,6 +131,7 @@ final class SetupCheckTabTests: XCTestCase {
             textSizeField: TextSizeFieldModel(store: TextSizeStore(defaults: defaults)),
             hotKey: GlobalHotKeyModel(registrar: Registrar(), defaults: defaults),
             setupCheck: setupCheck,
+            resumeTerminal: ResumeTerminalSetting(defaults: defaults, lookup: { _ in nil }, center: center),
             center: center)
         window.select(.setupCheck)
         window.select(.general)

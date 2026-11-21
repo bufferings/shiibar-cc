@@ -5,7 +5,7 @@
 // the title bar's red button / ⌘W is the only way to close, because every
 // control here applies immediately (no "OK to confirm").
 // Two tabs (`SettingsTab`): General — two headed boxes, General (Start at
-// Login, Appearance, Text size, Global shortcut) and Sounds (Mute sound,
+// Login, Appearance, Text size, Global shortcut, Terminal) and Sounds (Mute sound,
 // Waiting sound, Done sound, Waiting above Done per the product's own
 // waiting > working > idle priority) — and Setup Check (SetupCheckView.swift).
 // Each row is a label with a one-line description on the left and one
@@ -288,6 +288,7 @@ enum SettingsRow: CaseIterable, Equatable {
     case appearance
     case textSize
     case globalShortcut
+    case terminal
     case muteSound
     case waitingSound
     case doneSound
@@ -298,6 +299,7 @@ enum SettingsRow: CaseIterable, Equatable {
         case .appearance: return "Appearance"
         case .textSize: return "Text size"
         case .globalShortcut: return "Global shortcut"
+        case .terminal: return "Terminal"
         case .muteSound: return "Mute sound"
         case .waitingSound: return "Waiting sound"
         case .doneSound: return "Done sound"
@@ -310,6 +312,7 @@ enum SettingsRow: CaseIterable, Equatable {
         case .appearance: return "System follows the appearance setting of your Mac"
         case .textSize: return "Text in the popover and the window"
         case .globalShortcut: return "Shows the list from any app"
+        case .terminal: return "Resume and Branch open in this terminal"
         case .muteSound: return "Notifications arrive silently"
         case .waitingSound: return "Plays when a session needs your input"
         case .doneSound: return "Plays when a session finishes responding"
@@ -319,7 +322,7 @@ enum SettingsRow: CaseIterable, Equatable {
     var control: SettingsControlKind {
         switch self {
         case .startAtLogin, .muteSound: return .toggleSwitch
-        case .appearance: return .segmented
+        case .appearance, .terminal: return .segmented
         case .textSize: return .numberFieldAndStepper
         case .globalShortcut: return .shortcutField
         case .waitingSound, .doneSound: return .popup
@@ -337,7 +340,7 @@ struct SettingsBoxSpec: Equatable {
 /// "Settings window").
 enum SettingsGeneralLayout {
     static let boxes: [SettingsBoxSpec] = [
-        SettingsBoxSpec(title: "General", rows: [.startAtLogin, .appearance, .textSize, .globalShortcut]),
+        SettingsBoxSpec(title: "General", rows: [.startAtLogin, .appearance, .textSize, .globalShortcut, .terminal]),
         SettingsBoxSpec(title: "Sounds", rows: [.muteSound, .waitingSound, .doneSound]),
     ]
 }
@@ -356,6 +359,7 @@ final class SettingsWindowModel: ObservableObject {
     let textSizeField: TextSizeFieldModel
     let hotKey: GlobalHotKeyModel
     let setupCheck: SetupCheckViewModel
+    let resumeTerminal: ResumeTerminalSetting
     private let center: NotificationCenter
     private var closeObserver: NSObjectProtocol?
 
@@ -364,12 +368,14 @@ final class SettingsWindowModel: ObservableObject {
         textSizeField: TextSizeFieldModel,
         hotKey: GlobalHotKeyModel,
         setupCheck: SetupCheckViewModel,
+        resumeTerminal: ResumeTerminalSetting,
         center: NotificationCenter = .default
     ) {
         self.general = general
         self.textSizeField = textSizeField
         self.hotKey = hotKey
         self.setupCheck = setupCheck
+        self.resumeTerminal = resumeTerminal
         self.center = center
         // No queue: AppKit posts `willClose` on the main thread.
         closeObserver = center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: nil) { [weak self] notification in
@@ -404,6 +410,14 @@ final class SettingsWindowModel: ObservableObject {
         openScene(SettingsWindow.id)
     }
 
+    /// The window appeared: re-read the Login Item status (never cached —
+    /// §4.5) and decide again whether the chosen terminal can be used
+    /// (§4.5 "Settings window" > Terminal).
+    func windowShown() {
+        general.refreshLoginItemStatus()
+        resumeTerminal.refreshAvailability()
+    }
+
     /// The window is closing: the next open shows General, and a check run
     /// in flight is discarded when it lands (§4.5 "Setup Check tab").
     func windowWillClose() {
@@ -433,7 +447,7 @@ struct SettingsView: View {
             // `NSApp.activate` is required in an LSUIElement (accessory)
             // app: without it the window can open behind other apps (§4.5).
             NSApp.activate(ignoringOtherApps: true)
-            model.general.refreshLoginItemStatus()
+            model.windowShown()
         }
     }
 }
@@ -446,7 +460,9 @@ struct SettingsTabContent: View {
         Group {
             switch model.selectedTab {
             case .general:
-                SettingsGeneralTab(viewModel: model.general, textSizeField: model.textSizeField, hotKey: model.hotKey)
+                SettingsGeneralTab(
+                    viewModel: model.general, textSizeField: model.textSizeField, hotKey: model.hotKey,
+                    resumeTerminal: model.resumeTerminal)
             case .setupCheck:
                 SetupCheckTab(model: model.setupCheck)
             }
@@ -585,6 +601,7 @@ struct SettingsGeneralTab: View {
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject var textSizeField: TextSizeFieldModel
     @ObservedObject var hotKey: GlobalHotKeyModel
+    @ObservedObject var resumeTerminal: ResumeTerminalSetting
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsLayout.boxSpacing) {
@@ -629,6 +646,23 @@ struct SettingsGeneralTab: View {
             TextSizeRow(field: textSizeField)
         case .globalShortcut:
             GlobalShortcutRow(hotKey: hotKey)
+        case .terminal:
+            // Terminal (§4.5/§8.66): iTerm2 / Terminal / Ghostty, every one
+            // selectable; the reason the chosen one cannot be used shows
+            // under the description.
+            SettingsRowView(row: row, message: resumeTerminal.availability.settingsMessage) {
+                Picker(row.label, selection: Binding(
+                    get: { resumeTerminal.terminal },
+                    set: { resumeTerminal.select($0) }
+                )) {
+                    ForEach(ResumeTerminal.allCases, id: \.self) { terminal in
+                        Text(terminal.displayName).tag(terminal)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
         case .muteSound:
             SettingsRowView(row: row) {
                 SettingsSwitch(isOn: Binding(

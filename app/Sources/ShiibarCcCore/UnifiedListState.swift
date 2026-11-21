@@ -133,18 +133,29 @@ public enum UnifiedListEvent: Equatable, Sendable {
     /// Enter in the search field (§4.5 "key operations"): focus moves to the
     /// list; with no selection the first row is selected (no rows: nothing).
     case enterFromSearchField
+    /// Enter with list focus and no selection (§4.5 "key operations"): the
+    /// first row is selected, as Enter in the search field does (no rows:
+    /// nothing).
+    case selectFirstRow
     /// → with list focus, and the bottom panel's View button (§4.5 "opening
     /// the detail page"): the one-column list page opens the detail page of
     /// the selected row.
     case openDetail
     /// The detail page's back button and ← with list focus.
     case back
+    /// Enter with list focus on a row whose primary button is the disabled
+    /// Jump of a row the app cannot jump to (`RowButton.isUndrivableJump`):
+    /// show its conversation instead (§4.5 "row double-click", "key
+    /// operations") — the one-column list page opens the detail page, two
+    /// columns move focus to the conversation pane, and the one-column
+    /// detail page does nothing. Any other row: nothing.
+    case showConversation
     /// ⌘F.
     case focusSearch
     /// The global hotkey opened the popover or brought the window forward
-    /// (§4.5 "global hotkey"): focus goes to the list by the rule of Enter in
-    /// the search field (no selection: the first row is selected; no rows:
-    /// the search field instead). On the one-column detail page the page
+    /// (§4.5 "global hotkey", §8.66): focus goes to the list and the
+    /// selection stays as it is (none stays none); with no rows the search
+    /// field takes focus instead. On the one-column detail page the page
     /// stays and the conversation pane takes focus.
     case openedByHotKey
     /// The search field gained (true) or lost (false) keyboard focus on the
@@ -237,6 +248,32 @@ public enum UnifiedListEvent: Equatable, Sendable {
     case archiveHeadingClicked
     /// Esc while the Archive view is shown: return to the normal list.
     case leaveArchiveView
+    /// The §9 time has passed since the timer with this id started
+    /// (`markReadTimerID`): the selected Running row is marked read when it
+    /// is unreviewed now (`.markRead`). A timer that was cancelled or
+    /// started over ignores its answer.
+    case markReadDue(id: Int)
+    /// The daemon moved an entry from one target to another (an
+    /// `agent_removed` with reason `rekey` — §4.5 "desktop notifications").
+    /// Send this before the agent table with the new target: the row is not
+    /// treated as gone, its selection and the conversation pane carry over,
+    /// and a running mark-read timer keeps running (it marks the new
+    /// target).
+    case targetRekeyed(from: String, to: String)
+    /// A notification of a session the app cannot jump to was clicked, and
+    /// the surface is open (§4.5 "notification click"). In order: back to
+    /// the normal list, open Running, clear the search text
+    /// (`hasSearchText`: the search field has any text), back to the list
+    /// page when the one-column detail page shows another conversation,
+    /// select the row (a selected row stays selected), start the mark-read
+    /// timer over, scroll the row into view, focus the list. Nothing when
+    /// the entry is gone.
+    case notificationClicked(target: String, hasSearchText: Bool)
+    /// Whether the terminal chosen in Settings > Terminal can be used was
+    /// decided again (§4.5 "Settings window" > Terminal): while it cannot,
+    /// every row's Resume and Branch are disabled with the reason as the
+    /// tooltip (§4.6 "Resume and Branch").
+    case resumeTerminalAvailabilityChanged(ResumeTerminalAvailability)
 }
 
 public enum UnifiedListEffect: Equatable, Sendable {
@@ -291,6 +328,13 @@ public enum UnifiedListEffect: Equatable, Sendable {
     /// the reason a row cannot be dragged stays this long).
     case scheduleDragRefusalDismiss(id: Int, afterSeconds: Double)
     case closePopover
+    /// Run `shiibar-cc seen <target>`: the selected row's selection lasted
+    /// the §9 time and the row is unreviewed (§4.5 "operations that lower
+    /// the unreviewed flag").
+    case markRead(target: String)
+    /// Empty the search field (a notification click — §4.5 "notification
+    /// click"). The state already counts the search as ended.
+    case clearSearchText
     /// Run Refresh (§4.6: the search and `shiibar-cc reconcile`), the same
     /// as the header row's Refresh button.
     case refresh
@@ -337,6 +381,11 @@ public struct BottomPanelModel: Equatable, Sendable {
     /// the buttons are shown, so the hidden buttons keep the layout.
     public let slots: [BottomPanelSlot]
 
+    /// The lines above the button row that say why a shown button is
+    /// disabled (`BottomPanelButtons.disabledReasons`); empty while the
+    /// buttons are not shown, so the placeholders never carry a reason.
+    public var disabledReasons: [String] { buttons?.disabledReasons ?? [] }
+
     public init(hints: [KeyHint], buttons: BottomPanelButtons?, showsViewButton: Bool) {
         self.hints = hints
         self.buttons = buttons
@@ -382,6 +431,19 @@ public struct BottomPanelButtons: Equatable, Sendable {
     /// refetch after a selected Running row ended — §4.5).
     public init(row: UnifiedListRow) {
         self.init(primary: row.primaryButton, branch: row.branchButton)
+    }
+
+    /// The disabled buttons' reasons (`RowButton.disabledReason`), one line
+    /// each above the button row, primary button's first. Two buttons
+    /// disabled for the same reason (an unusable terminal disables both
+    /// Resume and Branch) give one entry. Empty when no button has a reason.
+    public var disabledReasons: [String] {
+        var reasons: [String] = []
+        for reason in [primary.disabledReason, branch.disabledReason].compactMap({ $0 })
+        where !reasons.contains(reason) {
+            reasons.append(reason)
+        }
+        return reasons
     }
 }
 
@@ -470,6 +532,9 @@ public struct UnifiedListState: Equatable, Sendable {
     public let home: String?
     public private(set) var now: Int64
     public private(set) var agents: [Agent] = []
+    /// Whether the terminal Resume and Branch open in can be used (§4.5
+    /// "Settings window" > Terminal); applied to every row's buttons.
+    public private(set) var resumeTerminalAvailability: ResumeTerminalAvailability = .available
     /// The latest delivered search result; nil before the first delivery and
     /// during a full index build.
     public private(set) var history: [ConversationSummary]?
@@ -495,6 +560,17 @@ public struct UnifiedListState: Equatable, Sendable {
     public private(set) var page: ListPage = .list
     /// nil after launch until the user selects a row (§4.5).
     public private(set) var selection: RowSelection?
+    /// The running mark-read timer (§4.5 "operations that lower the
+    /// unreviewed flag"); nil = none. A new id means the timer started (or
+    /// started over): the app answers `.markReadDue(id:)` after
+    /// `SelectionMarkRead.delaySeconds`.
+    public private(set) var markReadTimerID: Int?
+    private var nextMarkReadTimerID = 0
+    /// Set when a notification click cleared the search while the shown
+    /// result is still the filtered one: Running shows every row until the
+    /// next search result arrives, so the clicked row is in the list at
+    /// once (§4.5 "notification click").
+    private var runningFilterSuspended = false
     /// Set while the selected Running row has disappeared and the History
     /// refetch it triggered has not completed (§4.5): a snapshot of the row
     /// with its buttons disabled.
@@ -807,6 +883,16 @@ public struct UnifiedListState: Equatable, Sendable {
 
     public var isAwaitingRefetch: Bool { awaitingRefetchRow != nil }
 
+    /// The selected row's primary button is the disabled Jump of a row the
+    /// app cannot jump to, so Enter and a double-click show its
+    /// conversation instead (§4.5 "row double-click", "key operations").
+    /// Assumption: not while awaiting the History refetch — the session has
+    /// ended and every button is disabled meanwhile (§4.5 "row selection").
+    public var selectedRowShowsConversation: Bool {
+        guard awaitingRefetchRow == nil, let row = selectedRow else { return false }
+        return row.primaryButton.isUndrivableJump
+    }
+
     /// The selected row as displayed (the disabled snapshot while awaiting
     /// the refetch).
     public var selectedRow: UnifiedListRow? {
@@ -925,6 +1011,7 @@ public struct UnifiedListState: Equatable, Sendable {
             hasRows: !visibleRows.isEmpty,
             hasSelection: selection != nil,
             primaryEnabled: row?.primaryButton.isEnabled ?? false,
+            primaryShowsConversation: selectedRowShowsConversation,
             branchEnabled: row?.branchButton.isEnabled ?? false,
             conversationPaneVisible: isConversationPaneVisible,
             isPopover: isPopover,
@@ -976,6 +1063,10 @@ public struct UnifiedListState: Equatable, Sendable {
         let starsBefore = stars
         var effects: [UnifiedListEffect] = []
         var movedSelection = false
+        var markReadTrigger = SelectionMarkRead.Trigger.other
+        /// The event operated on the selected row and kept it selected
+        /// (beyond what `markReadTrigger == .userSelection` covers).
+        var operatedOnSelectedRow = false
 
         switch event {
         case .agentsUpdated(let newAgents):
@@ -984,6 +1075,7 @@ public struct UnifiedListState: Equatable, Sendable {
         case .historyDelivered(let results, let isFiltered):
             history = results
             historyIsFiltered = isFiltered
+            runningFilterSuspended = false
             if !isFiltered, let pruned = stars.pruned(browseResults: results) {
                 stars = pruned
                 effects.append(.persistStars(stars.sessionIDs))
@@ -1030,6 +1122,10 @@ public struct UnifiedListState: Equatable, Sendable {
             now = newNow
             rebuild()
 
+        case .resumeTerminalAvailabilityChanged(let availability):
+            resumeTerminalAvailability = availability
+            rebuild()
+
         case .rowClicked(let key):
             // §4.5 "row click": select; the selected row deselects only when
             // it was shown in accent at the press — a gray selected row keeps
@@ -1058,6 +1154,10 @@ public struct UnifiedListState: Equatable, Sendable {
             switch clickOrdinal(on: key, clickCount: press?.clickCount ?? 1) {
             case 1:
                 if selection?.key == key {
+                    // §4.5: a click on the selected row that keeps it (gray)
+                    // counts as selecting it again; the accent row's click
+                    // deselects it, so the mark-read timer stops.
+                    markReadTrigger = wasActive ? .deselectClick : .userSelection
                     if wasActive {
                         if let press {
                             // §4.5 "row double-click": a double-click never
@@ -1071,6 +1171,7 @@ public struct UnifiedListState: Equatable, Sendable {
                     }
                 } else {
                     select(row)
+                    markReadTrigger = .userSelection
                 }
                 effects.append(.focusList)
             case 2:
@@ -1082,7 +1183,14 @@ public struct UnifiedListState: Equatable, Sendable {
                 if selection?.key != key {
                     select(row)
                 }
+                markReadTrigger = .userSelection
                 effects.append(.focusList)
+                if press?.commandKey != true, selectedRowShowsConversation {
+                    // §4.5 "row double-click": a row the app cannot jump to
+                    // shows its conversation instead of the disabled Jump.
+                    showSelectedConversation(effects: &effects)
+                    break
+                }
                 let button = press?.commandKey == true ? selectedRow?.branchButton : selectedRow?.primaryButton
                 if let invocation = button?.invocation {
                     effects.append(.invoke(invocation))
@@ -1092,24 +1200,34 @@ public struct UnifiedListState: Equatable, Sendable {
                 if selection?.key != key {
                     select(row)
                 }
+                markReadTrigger = .userSelection
                 effects.append(.focusList)
             }
 
         case .moveUp, .moveDown:
             movedSelection = move(up: event == .moveUp)
+            if movedSelection { markReadTrigger = .userSelection }
 
         case .previousConversation, .nextConversation:
             // The same row step as ↑ / ↓; only offered on the one-column
             // detail page (§4.5 "key operations").
             movedSelection = move(up: event == .previousConversation)
+            if movedSelection { markReadTrigger = .userSelection }
 
         case .enterFromSearchField:
             if selection == nil {
                 guard let first = visibleRows.first else { break }
                 select(first)
                 movedSelection = true
+                markReadTrigger = .userSelection
             }
             effects.append(.focusList)
+
+        case .selectFirstRow:
+            guard selection == nil, let first = visibleRows.first else { break }
+            select(first)
+            movedSelection = true
+            markReadTrigger = .userSelection
 
         case .openDetail:
             guard columns == .one, page == .list, selection != nil else { break }
@@ -1120,6 +1238,14 @@ public struct UnifiedListState: Equatable, Sendable {
                 page = .list
             }
 
+        case .showConversation:
+            if selectedRowShowsConversation {
+                showSelectedConversation(effects: &effects)
+                // §4.5: Enter on a row that cannot be jumped to counts as
+                // selecting it again, on every page.
+                markReadTrigger = .userSelection
+            }
+
         case .focusSearch:
             if columns == .one {
                 page = .list
@@ -1127,13 +1253,10 @@ public struct UnifiedListState: Equatable, Sendable {
             effects.append(.focusSearchField)
 
         case .openedByHotKey:
+            // §4.5 "global hotkey" / §8.66: the selection never changes.
             if columns == .one && page == .detail {
                 effects.append(.focusConversationPane)
-            } else if selection != nil {
-                effects.append(.focusList)
-            } else if let first = visibleRows.first {
-                select(first)
-                movedSelection = true
+            } else if selection != nil || !visibleRows.isEmpty {
                 effects.append(.focusList)
             } else {
                 effects.append(.focusSearchField)
@@ -1178,6 +1301,7 @@ public struct UnifiedListState: Equatable, Sendable {
             }
 
         case .surfaceHidden:
+            markReadTrigger = .surfaceClosed
             // §4.6 "Archive view": not remembered — closing the surface
             // (switching the form included) returns to the normal list.
             leaveArchiveView(effects: &effects)
@@ -1212,6 +1336,9 @@ public struct UnifiedListState: Equatable, Sendable {
             // §4.6 "stars": shown at once, without a new search; a new star
             // goes to the end of Starred. A row that moves into a closed
             // section deselects (§4.5 "row selection").
+            if !sessionID.isEmpty, selection?.sessionID == sessionID {
+                operatedOnSelectedRow = true
+            }
             stars = stars.toggled(sessionID, results: history ?? [])
             effects.append(.persistStars(stars.sessionIDs))
             rebuild()
@@ -1280,6 +1407,9 @@ public struct UnifiedListState: Equatable, Sendable {
                 if selection?.key != press.key {
                     select(row)
                 }
+                // Only Starred and Recent rows start a drag, so this
+                // selection has nothing to lower (§4.5).
+                markReadTrigger = .userSelection
                 effects.append(.focusList)
                 cardDrag = CardDrag(key: press.key, sessionID: row.sessionID, section: row.section)
             } else if !isRepeatPress(on: press.key, clickCount: press.clickCount),
@@ -1335,6 +1465,9 @@ public struct UnifiedListState: Equatable, Sendable {
             effects.append(.makeSurfaceKey)
             if let row = visibleRows.first(where: { $0.id == key }), !row.menuItems.isEmpty {
                 effects.append(.showRowMenu(key))
+                if selection?.key == key {
+                    operatedOnSelectedRow = true
+                }
             }
 
         case .archiveRequested(let sessionID):
@@ -1386,6 +1519,24 @@ public struct UnifiedListState: Equatable, Sendable {
         case .leaveArchiveView:
             leaveArchiveView(effects: &effects)
 
+        case .markReadDue(let id):
+            guard id == markReadTimerID else { break }
+            markReadTimerID = nil
+            if let target = SelectionMarkRead.targetToMarkRead(
+                selection: selection?.key, awaitingRefetch: awaitingRefetchRow != nil, agents: agents) {
+                effects.append(.markRead(target: target))
+            }
+
+        case .targetRekeyed(let from, let to):
+            markReadTrigger = .rekey
+            applyRekey(from: from, to: to)
+
+        case .notificationClicked(let target, let hasSearchText):
+            if openRowForNotification(target: target, hasSearchText: hasSearchText, effects: &effects) {
+                movedSelection = true
+                markReadTrigger = .userSelection
+            }
+
         }
 
         // §4.6 "Archive view": once no conversation is archived (the last
@@ -1409,10 +1560,29 @@ public struct UnifiedListState: Equatable, Sendable {
         let after = Observation(self)
         // A pending deselect belongs to the selection and page the click
         // saw: any other change of either cancels it (another row clicked,
-        // ↑ / ↓, the row left the list, the detail page opened).
-        if pendingDeselect != nil,
+        // ↑ / ↓, the row left the list, the detail page opened). A `rekey`
+        // renames the pending deselect's row along with the selection.
+        if pendingDeselect != nil, markReadTrigger != .rekey,
            after.selectionKey != before.selectionKey || after.page != before.page {
             pendingDeselect = nil
+        }
+        // An operation on the selected row that keeps it selected cancels
+        // it too: the user acted on the row after the click, so the click's
+        // deselect would undo that (selecting it again — a gray click,
+        // Enter showing the conversation, a notification click — its menu,
+        // its star).
+        if markReadTrigger == .userSelection || operatedOnSelectedRow {
+            pendingDeselect = nil
+        }
+        switch SelectionMarkRead.decide(
+            trigger: markReadTrigger, before: before.selectionKey, after: after.selectionKey) {
+        case .start:
+            nextMarkReadTimerID += 1
+            markReadTimerID = nextMarkReadTimerID
+        case .cancel:
+            markReadTimerID = nil
+        case .keep:
+            break
         }
         if after.displayedSessionID != before.displayedSessionID,
            let sessionID = after.displayedSessionID, !sessionID.isEmpty {
@@ -1449,13 +1619,15 @@ public struct UnifiedListState: Equatable, Sendable {
         case .nextConversation: return handle(.nextConversation)
         case .cancelCardDrag: return handle(.cardDragCancelled)
         case .enterFromSearchField: return handle(.enterFromSearchField)
+        case .selectFirstRow: return handle(.selectFirstRow)
         case .openDetail: return handle(.openDetail)
         case .back: return handle(.back)
         case .focusSearch: return handle(.focusSearch)
+        case .showConversation: return handle(.showConversation)
         case .primary:
-            return selectedRow?.primaryButton.invocation.map { [.invoke($0)] } ?? []
+            return runOnSelectedRow(selectedRow?.primaryButton.invocation)
         case .branch:
-            return selectedRow?.branchButton.invocation.map { [.invoke($0)] } ?? []
+            return runOnSelectedRow(selectedRow?.branchButton.invocation)
         case .nextMatch: return [.nextMatch]
         case .previousMatch: return [.previousMatch]
         case .closePopover: return [.closePopover]
@@ -1468,6 +1640,92 @@ public struct UnifiedListState: Equatable, Sendable {
     }
 
     // MARK: Internals
+
+    /// A button of the selected row run by key (Enter / ⌘Enter): it acts
+    /// on the selected row and keeps it selected, so a pending deselect of
+    /// that row is cancelled. A disabled button runs nothing and changes
+    /// nothing.
+    private mutating func runOnSelectedRow(_ invocation: RowInvocation?) -> [UnifiedListEffect] {
+        guard let invocation else { return [] }
+        pendingDeselect = nil
+        return [.invoke(invocation)]
+    }
+
+    /// A `rekey` (§4.5 "desktop notifications" / "row selection"): the
+    /// entry keeps every attribute under its new target, so the agent table
+    /// that follows has the same rows; the selection, a pending deselect
+    /// and a click sequence on the row move with it.
+    private mutating func applyRekey(from: String, to: String) {
+        guard from != to else { return }
+        agents = AgentRemovalHandling.agentsAfterRekey(agents, from: from, to: to)
+        let old = UnifiedRowKey.running(target: from)
+        let new = UnifiedRowKey.running(target: to)
+        if let current = selection, current.key == old {
+            selection = RowSelection(key: new, sessionID: current.sessionID)
+        }
+        if let pending = pendingDeselect, pending.key == old {
+            pendingDeselect = PendingDeselect(id: pending.id, key: new)
+        }
+        if let sequence = clickSequence, sequence.row == old {
+            clickSequence = ClickSequence(row: new, baseCount: sequence.baseCount)
+        }
+        rebuild()
+        if awaitingRefetchRow == nil {
+            reconcileSelection()
+        }
+    }
+
+    /// The list part of a notification click on a session the app cannot
+    /// jump to (§4.5 "notification click"), in the spec's order. Returns
+    /// whether the row is selected. False when the entry is gone or unknown
+    /// (nothing changed), or when its row is still not in the list after
+    /// the steps above (the Archive view left, Running opened, the search
+    /// cleared, the detail page of another conversation left — those
+    /// changes stay, but nothing is selected).
+    private mutating func openRowForNotification(
+        target: String, hasSearchText: Bool, effects: inout [UnifiedListEffect]
+    ) -> Bool {
+        guard agents.contains(where: { $0.target == target && $0.status != .unknown }) else { return false }
+        leaveArchiveView(effects: &effects)
+        if collapsedSections.contains(.running) {
+            collapsedSections.remove(.running)
+            effects.append(.persistCollapsedSections(collapsedSections))
+        }
+        if hasSearchText {
+            effects.append(.clearSearchText)
+            isQueryValid = false
+            // The filtered result stays until the browse result arrives;
+            // Running must not hide the row meanwhile.
+            if historyIsFiltered { runningFilterSuspended = true }
+            rebuild()
+        }
+        let key = UnifiedRowKey.running(target: target)
+        if columns == .one, page == .detail, selection?.key != key {
+            page = .list
+        }
+        guard let row = visibleRows.first(where: { $0.id == key }) else { return false }
+        if selection?.key != key {
+            select(row)
+        }
+        effects.append(.focusList)
+        return true
+    }
+
+    /// Show the selected row's conversation in place of its disabled Jump
+    /// (§4.5 "row double-click"): open the detail page on the one-column
+    /// list page (like View), move focus to the conversation pane in two
+    /// columns, and do nothing on the one-column detail page (the
+    /// conversation is already on screen).
+    private mutating func showSelectedConversation(effects: inout [UnifiedListEffect]) {
+        switch columns {
+        case .one:
+            if page == .list {
+                page = .detail
+            }
+        case .two:
+            effects.append(.focusConversationPane)
+        }
+    }
 
     private struct Observation {
         /// nil = no pane on screen; "" = a row without a session_id.
@@ -1540,19 +1798,21 @@ public struct UnifiedListState: Equatable, Sendable {
                 stars = unstarred
             }
         }
+        let availability = resumeTerminalAvailability
         runningRows = UnifiedListBuilder.runningRows(
-            agents: agents, results: history, isFiltered: historyIsFiltered, now: now, home: home
-        )
+            agents: agents, results: history, isFiltered: historyIsFiltered && !runningFilterSuspended,
+            now: now, home: home
+        ).map { $0.applying(availability) }
         let conversations = UnifiedListBuilder.conversationRows(
             results: history, agents: agents, stars: stars, archived: archived, now: now, home: home
         )
-        starredRows = conversations.starred
-        recentRows = Array(conversations.recent.prefix(RecentDisplayLimit.maxRows))
+        starredRows = conversations.starred.map { $0.applying(availability) }
+        recentRows = Array(conversations.recent.prefix(RecentDisplayLimit.maxRows)).map { $0.applying(availability) }
         hiddenRecentCount = conversations.recent.count - recentRows.count
         let archivedAll = UnifiedListBuilder.archivedRows(
             results: history, agents: agents, archived: archived, now: now, home: home
         )
-        archivedRows = Array(archivedAll.prefix(RecentDisplayLimit.maxRows))
+        archivedRows = Array(archivedAll.prefix(RecentDisplayLimit.maxRows)).map { $0.applying(availability) }
         hiddenArchivedCount = archivedAll.count - archivedRows.count
     }
 

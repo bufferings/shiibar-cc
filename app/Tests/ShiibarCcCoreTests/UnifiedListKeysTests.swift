@@ -70,9 +70,15 @@ final class UnifiedListKeysTests: XCTestCase {
                 // selected); no rows: nothing.
                 return (c.hasSelection || c.hasRows) ? .perform(.enterFromSearchField) : .ignore
             }
-            // Jump / Resume, every page; nothing without a selection or
-            // with a disabled button.
-            return (c.hasSelection && c.primaryEnabled) ? .perform(.primary) : .ignore
+            // No selection: the first row, as in the search field (§8.66);
+            // no rows: nothing.
+            if !c.hasSelection { return c.hasRows ? .perform(.selectFirstRow) : .ignore }
+            // A row the app cannot jump to (its primary is the disabled
+            // Jump): show its conversation, every page (§4.5 "key
+            // operations"; the one-column detail page shows nothing more).
+            if c.primaryShowsConversation { return .perform(.showConversation) }
+            // Jump / Resume, every page; nothing with a disabled button.
+            return c.primaryEnabled ? .perform(.primary) : .ignore
         case "⌘Enter":
             // Search field: nothing. List: Branch.
             if field { return .ignore }
@@ -113,7 +119,9 @@ final class UnifiedListKeysTests: XCTestCase {
     /// Every reachable context: the detail page exists only in one column
     /// and only with a selection; a selection needs rows except while a
     /// just-ended Running row awaits the refetch (selected but not listed);
-    /// buttons are enabled only with a selection.
+    /// buttons are enabled only with a selection. The selected row's primary
+    /// is enabled, disabled, or the disabled Jump of a row the app cannot
+    /// jump to (`primaryShowsConversation`, never with an enabled primary).
     private var contexts: [ListKeyContext] {
         var result: [ListKeyContext] = []
         let bools = [false, true]
@@ -122,7 +130,9 @@ final class UnifiedListKeysTests: XCTestCase {
                 for hasSelection in bools {
                     if page == .detail && !hasSelection { continue }
                     for hasRows in bools {
-                        for primaryEnabled in (hasSelection ? bools : [false]) {
+                        let primaryStates: [(enabled: Bool, showsConversation: Bool)] = hasSelection
+                            ? [(true, false), (false, false), (false, true)] : [(false, false)]
+                        for (primaryEnabled, primaryShowsConversation) in primaryStates {
                             for branchEnabled in (hasSelection ? bools : [false]) {
                                 for searchFieldFocused in bools {
                                     for hasMarkedText in bools {
@@ -133,7 +143,9 @@ final class UnifiedListKeysTests: XCTestCase {
                                                     columns: columns, page: page,
                                                     searchFieldFocused: searchFieldFocused, hasRows: hasRows,
                                                     hasSelection: hasSelection,
-                                                    primaryEnabled: primaryEnabled, branchEnabled: branchEnabled,
+                                                    primaryEnabled: primaryEnabled,
+                                                    primaryShowsConversation: primaryShowsConversation,
+                                                    branchEnabled: branchEnabled,
                                                     conversationPaneVisible: paneVisible, isPopover: isPopover,
                                                     hasMarkedText: hasMarkedText, isArchiveView: isArchiveView))
                                             }
@@ -153,15 +165,47 @@ final class UnifiedListKeysTests: XCTestCase {
         let all = contexts
         // Per focus × marked text × normal list or Archive view (8
         // combinations): one column list page (no selection 2 rows-states ×
-        // 2 surfaces + selection 2 × 4 buttons × 2) = 20, detail page 2 × 4
-        // × 2 = 16, two columns 2 + 2 × 4 = 10.
-        XCTAssertEqual(all.count, (20 + 16 + 10) * 8)
+        // 2 surfaces + selection 2 × 6 buttons × 2) = 28, detail page 2 × 6
+        // × 2 = 24, two columns 2 + 2 × 6 = 14. Buttons: 3 primary states ×
+        // Branch enabled / disabled.
+        XCTAssertEqual(all.count, (28 + 24 + 14) * 8)
         for keyCase in tableKeys {
             for context in all {
                 XCTAssertEqual(
                     UnifiedListKeys.decide(key: keyCase.key, modifiers: keyCase.modifiers, context: context),
                     expected(keyCase.name, context),
                     "\(keyCase.name) in \(context)")
+            }
+        }
+    }
+
+    /// §4.5 "key operations": with list focus, Enter on a row whose primary
+    /// is the disabled Jump of a row the app cannot jump to shows its
+    /// conversation on every page (the one-column detail page included);
+    /// ⌘Enter still runs Branch, or nothing while Branch is disabled. In the
+    /// search field Enter still moves focus to the list.
+    func testEnterOnARowThatCannotJumpShowsTheConversation() {
+        let pages: [(ColumnMode, ListPage)] = [(.one, .list), (.one, .detail), (.two, .list)]
+        for (columns, page) in pages {
+            for branchEnabled in [false, true] {
+                let name = "\(columns), \(page), Branch enabled: \(branchEnabled)"
+                var context = ListKeyContext(
+                    columns: columns, page: page, searchFieldFocused: false, hasRows: true, hasSelection: true,
+                    primaryEnabled: false, primaryShowsConversation: true, branchEnabled: branchEnabled,
+                    conversationPaneVisible: columns == .two || page == .detail, isPopover: false,
+                    hasMarkedText: false)
+                XCTAssertEqual(UnifiedListKeys.decide(key: .returnKey, modifiers: [], context: context),
+                               .perform(.showConversation), name)
+                XCTAssertEqual(UnifiedListKeys.decide(key: .returnKey, modifiers: [.command], context: context),
+                               branchEnabled ? .perform(.branch) : .ignore, name)
+                context.searchFieldFocused = true
+                XCTAssertEqual(UnifiedListKeys.decide(key: .returnKey, modifiers: [], context: context),
+                               .perform(.enterFromSearchField), name)
+                // A disabled primary that is not that Jump (a disabled
+                // Resume, the snapshot awaiting the refetch): nothing.
+                context.searchFieldFocused = false
+                context.primaryShowsConversation = false
+                XCTAssertEqual(UnifiedListKeys.decide(key: .returnKey, modifiers: [], context: context), .ignore, name)
             }
         }
     }

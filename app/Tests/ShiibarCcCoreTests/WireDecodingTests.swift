@@ -85,17 +85,26 @@ final class WireDecodingTests: XCTestCase {
 
     func testAgentRemovedDecodesTargetAndReason() throws {
         let json = #"{"event":"agent_removed","target":"t","reason":"session_end"}"#
-        guard case .agentRemoved(let target, let reason) = try decode(json) else {
+        guard case .agentRemoved(let target, let reason, let to) = try decode(json) else {
             return XCTFail("expected agent_removed")
         }
         XCTAssertEqual(target, "t")
         XCTAssertEqual(reason, .sessionEnd)
+        XCTAssertNil(to, "only a rekey carries `to`")
+    }
+
+    /// §4.2: a `rekey` carries the new target in `to`.
+    func testAgentRemovedRekeyDecodesTheNewTarget() throws {
+        let json = #"{"event":"agent_removed","target":"process:4242","reason":"rekey","to":"ghostty:/dev/ttys004"}"#
+        XCTAssertEqual(
+            try decode(json),
+            .agentRemoved(target: "process:4242", reason: .rekey, to: "ghostty:/dev/ttys004"))
     }
 
     func testAgentRemovedMissingReasonFallsBackToUnknown() throws {
         // Pre-M4 wire compat: a line with no `reason` field at all.
         let json = #"{"event":"agent_removed","target":"t"}"#
-        guard case .agentRemoved(_, let reason) = try decode(json) else {
+        guard case .agentRemoved(_, let reason, _) = try decode(json) else {
             return XCTFail("expected agent_removed")
         }
         XCTAssertEqual(reason, .unknown)
@@ -103,7 +112,7 @@ final class WireDecodingTests: XCTestCase {
 
     func testAgentRemovedUnrecognizedReasonFallsBackToUnknown() throws {
         let json = #"{"event":"agent_removed","target":"t","reason":"some_future_reason"}"#
-        guard case .agentRemoved(_, let reason) = try decode(json) else {
+        guard case .agentRemoved(_, let reason, _) = try decode(json) else {
             return XCTFail("expected agent_removed")
         }
         XCTAssertEqual(reason, .unknown)

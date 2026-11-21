@@ -113,6 +113,24 @@ final class ConversationActionTests: XCTestCase {
         )
     }
 
+    func testLiveMatchOnATargetThatCannotJumpIsADisabledJump() {
+        // §4.5 "action buttons": the matched entry's target decides — a
+        // `process:` or unknown-prefix target is not jumpable.
+        let sel = summary(sessionID: "s", live: true, cwd: "/Users/example/demo")
+        XCTAssertEqual(
+            ConversationAction.derive(for: sel, agents: [agent(sessionID: "s", target: "process:48213")]),
+            .jumpDisabled
+        )
+        XCTAssertEqual(
+            ConversationAction.derive(for: sel, agents: [agent(sessionID: "s", target: "tmux:whatever")]),
+            .jumpDisabled
+        )
+        XCTAssertEqual(
+            ConversationAction.derive(for: sel, agents: [agent(sessionID: "s", target: "ghostty:/dev/ttys005")]),
+            .jump(target: "ghostty:/dev/ttys005")
+        )
+    }
+
     // MARK: - A live row ignores cwd; a past row ignores agents
 
     func testLiveRowWithNoCwdStillDerivesFromAgentsNotResume() {

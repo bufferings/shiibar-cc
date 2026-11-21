@@ -10,9 +10,10 @@
 //   - past + cwd present  -> Resume, enabled
 //   - past + no cwd        -> Resume, disabled (resume needs an absolute cwd, §4.4)
 //   - live + a session_id match in the agent list -> Jump, enabled (carries
-//     the matched entry's target)
-//   - live + no match      -> Jump, disabled (running in a terminal this app
-//     can't drive — §8.11 / §8.48)
+//     the matched entry's target) when the target is jumpable, else Jump,
+//     disabled (§4.5 "action buttons")
+//   - live + no match      -> Jump, disabled (the daemon has no entry for
+//     the session_id — §4.6 "Recent section")
 
 import Foundation
 
@@ -26,8 +27,10 @@ public enum ConversationAction: Equatable {
     /// Running conversation matched to an agent entry: jump (focus) to
     /// `target`, the terminal tab driving it.
     case jump(target: String)
-    /// Running conversation with no matching agent entry: Jump is shown
-    /// disabled — it's running in a terminal this app can't drive (§8.48).
+    /// Running conversation the app cannot jump to — no matching agent entry
+    /// (a live conversation left in History, §4.6), or an entry whose target
+    /// is not jumpable (`process:` or an unknown prefix, §4.5 "action
+    /// buttons"): Jump is shown disabled.
     case jumpDisabled
 
     /// Derive the panel verb for `summary` against the agent list `agents` as
@@ -40,7 +43,7 @@ public enum ConversationAction: Equatable {
             return (summary.cwd?.isEmpty == false) ? .resume : .resumeDisabled
         }
         if let match = agents.first(where: { $0.sessionId == summary.sessionID }) {
-            return .jump(target: match.target)
+            return derive(forRunningAgent: match)
         }
         return .jumpDisabled
     }
@@ -51,11 +54,12 @@ public enum ConversationAction: Equatable {
 
 extension ConversationAction {
     /// The bottom panel's primary button for a selected Running row
-    /// (§4.6): always Jump to the row's target — the daemon
-    /// tracks it, so there is no disabled case and no pre-check (§4.6
-    /// "Jump").
+    /// (§4.6): Jump to the row's target when the target is jumpable;
+    /// otherwise a disabled Jump — a session running in a terminal this app
+    /// can't drive (§4.5 "action buttons", §8.66). Branch stays available
+    /// either way (`branchButton`).
     public static func derive(forRunningAgent agent: Agent) -> ConversationAction {
-        .jump(target: agent.target)
+        TargetJumpability.canJump(agent.target) ? .jump(target: agent.target) : .jumpDisabled
     }
 
     /// The view-facing button for this verb. `sessionID` / `cwd` feed the
@@ -78,7 +82,7 @@ extension ConversationAction {
         case .jump(let target):
             return RowButton(kind: .jump, invocation: .jump(target: target), tooltip: RowButtonKind.jump.title)
         case .jumpDisabled:
-            return RowButton(kind: .jump, invocation: nil, tooltip: RowButton.untrackedRunningTooltip)
+            return .undrivableJump
         }
     }
 
@@ -103,8 +107,8 @@ extension ConversationAction {
 
 extension RowInvocation {
     /// The `shiibar-cc` arguments for this verb. `terminal` is the
-    /// `--terminal` value decided by `ResumeTerminal.decide` (§4.6); Jump
-    /// ignores it.
+    /// `--terminal` value of the Settings `Terminal` row (§4.6 "Resume and
+    /// Branch"); Jump ignores it.
     ///   - Jump:   `focus <target>`
     ///   - Resume: `resume --cwd <cwd> --terminal <t> <session_id>`
     ///   - Branch: `resume --cwd <cwd> --terminal <t> --fork <session_id>`

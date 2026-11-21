@@ -6,7 +6,7 @@
 mod support;
 
 use shiibar_cc_proto::{
-    extract::build_report, AckResponse, HookEvent, ListResponse, RemovalReason, Request, SubscribeEvent,
+    extract::{build_report, ControllingProcess, HookEnv}, AckResponse, HookEvent, ListResponse, RemovalReason, Request, SubscribeEvent,
 };
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
@@ -14,6 +14,17 @@ use support::{load_fixture, TestDaemon};
 
 const TARGET: &str = "iterm2:11111111-1111-1111-1111-111111111111";
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
+
+const ITERM_ENV: HookEnv<'static> = HookEnv {
+    term_program: Some("iTerm.app"),
+    term_program_version: None,
+    iterm_session_id: Some(ITERM_SESSION_ID),
+};
+
+/// The `claude` process the report's ancestor walk is assumed to have found.
+fn hook_process() -> ControllingProcess {
+    ControllingProcess { pid: 4242, tty: "/dev/ttys000".into() }
+}
 
 #[tokio::test]
 async fn manual_remove_deletes_the_entry_and_broadcasts_reason_remove() {
@@ -24,7 +35,7 @@ async fn manual_remove_deletes_the_entry_and_broadcasts_reason_remove() {
 
     // Register an entry via a real hook report.
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, &ITERM_ENV, Some(&hook_process()), 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;
@@ -38,7 +49,7 @@ async fn manual_remove_deletes_the_entry_and_broadcasts_reason_remove() {
         .expect("remove ack");
 
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target, reason } => {
+        SubscribeEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, TARGET);
             assert_eq!(reason, RemovalReason::Remove, "manual remove must report reason=remove (§4.2)");
         }

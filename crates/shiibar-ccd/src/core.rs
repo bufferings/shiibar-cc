@@ -4,6 +4,7 @@
 //! connections process in accept/receive order (§4.2 Protocol contract).
 
 use crate::clock::Clock;
+use crate::merge;
 use crate::state::{self, AgentEntry};
 use crate::transitions::{self, Outcome};
 use crate::{log_debug, log_info};
@@ -32,7 +33,12 @@ pub const BROADCAST_CAPACITY: usize = 1024;
 #[derive(Debug, Clone, PartialEq)]
 pub enum BroadcastEvent {
     StatusChanged(Agent),
-    AgentRemoved { target: String, reason: RemovalReason },
+    /// `to` is the new target, set only for `RemovalReason::Rekey` (§4.2).
+    AgentRemoved {
+        target: String,
+        reason: RemovalReason,
+        to: Option<String>,
+    },
 }
 
 pub struct Core {
@@ -66,7 +72,7 @@ impl Core {
     }
 
     fn find(&self, target: &str) -> Option<usize> {
-        self.agents.iter().position(|a| a.target == target)
+        merge::find_by_target(&self.agents, target)
     }
 
     /// Persist state.json, logging (rather than propagating) on failure.
@@ -83,17 +89,52 @@ impl Core {
     }
 
     /// Handle `{"cmd":"report",...}` (§3.1/§3.2). No response (fire-and-forget).
+    ///
+    /// An invalid report (`ReportPayload::validate`: no target on an event
+    /// other than SessionEnd) changes nothing, not even `last_report_at`;
+    /// `server.rs` rejects it with an error response before it gets here.
     pub fn handle_report(&mut self, payload: ReportPayload) {
+        if let Err(e) = payload.validate() {
+            log_debug!(
+                self.logger,
+                "ignored invalid report event={:?} session_id={}: {e}",
+                payload.event,
+                payload.session_id
+            );
+            return;
+        }
         let now = self.clock.now();
         self.last_report_at = Some(now);
+        let Some(target) = payload.target.clone() else {
+            self.remove_by_session_id(&payload.session_id);
+            return;
+        };
         log_debug!(
             self.logger,
             "report target={} event={:?}",
-            payload.target,
+            target,
             payload.event
         );
 
-        let idx = self.find(&payload.target);
+        // The entry this report applies to: same target, else same pid
+        // (whose target the report never changes), else unregistered
+        // (§3.6 "merging by pid").
+        let idx = merge::resolve_entry(&self.agents, &target, payload.pid);
+        if let Some(i) = idx
+            && merge::is_nested_session_report(&self.agents[i], &payload)
+        {
+            // A nested session's report leaves the entry untouched: no
+            // last_seen / last_report_at bump, no deletion on SessionEnd,
+            // nothing persisted or broadcast (§3.6 "nested sessions").
+            log_debug!(
+                self.logger,
+                "ignored nested-session report target={} entry={} session_id={}",
+                target,
+                self.agents[i].target,
+                payload.session_id
+            );
+            return;
+        }
         let existing = idx.map(|i| &self.agents[i]);
         let outcome = transitions::apply_report(existing, &payload, now);
 
@@ -111,9 +152,13 @@ impl Core {
                 let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                     target: previous.target,
                     reason: RemovalReason::SessionEnd,
+                    to: None,
                 });
             }
-            Outcome::Updated { entry, previous } => {
+            Outcome::Updated { mut entry, previous } => {
+                if payload.pid.is_some() {
+                    entry.pid = payload.pid;
+                }
                 let should_broadcast = match &previous {
                     None => true,
                     Some(prev) => entry.observably_differs_from(prev),
@@ -149,6 +194,45 @@ impl Core {
         }
     }
 
+    /// A SessionEnd report without a target: closing a terminal window
+    /// detaches the `claude` process from its terminal before its SessionEnd
+    /// hook runs, so the hook could derive neither a target nor a pid
+    /// (§4.1). Remove every entry with this `session_id` (normally one,
+    /// whatever its target kind, including one rekeyed by reconcile or
+    /// restored from state.json with an unknown pid), as an ordinary
+    /// SessionEnd would. Matching is by `session_id` only, so the
+    /// nested-session rule (§3.6) is not needed: a nested session's
+    /// SessionEnd carries its own `session_id` and cannot match the parent.
+    /// No match: nothing changes and nothing is broadcast.
+    fn remove_by_session_id(&mut self, session_id: &str) {
+        let (removed, kept): (Vec<AgentEntry>, Vec<AgentEntry>) = std::mem::take(&mut self.agents)
+            .into_iter()
+            .partition(|a| a.session_id == session_id);
+        self.agents = kept;
+        if removed.is_empty() {
+            log_debug!(
+                self.logger,
+                "targetless SessionEnd session_id={session_id} matched no entry"
+            );
+            return;
+        }
+        self.persist_state();
+        for entry in removed {
+            log_info!(
+                self.logger,
+                "removed target={} (SessionEnd without target, session_id={}, was {:?})",
+                entry.target,
+                session_id,
+                entry.status
+            );
+            let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
+                target: entry.target,
+                reason: RemovalReason::SessionEnd,
+                to: None,
+            });
+        }
+    }
+
     /// Handle `{"cmd":"seen","target":...}` (§3.1 last row, §4.2).
     pub fn handle_seen(&mut self, target: &str) {
         let now = self.clock.now();
@@ -180,63 +264,98 @@ impl Core {
             let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                 target: removed.target,
                 reason: RemovalReason::Remove,
+                to: None,
             });
         }
     }
 
     /// Handle `{"cmd":"reconcile","complete":...,"sessions":[...]}` (§3.5).
     /// `sessions` is the client's gathered live list from `claude agents`
-    /// (translated to shiibar's status vocabulary and matched to iTerm2
-    /// targets already, §3.5); `complete` says whether the client's iTerm2
-    /// scan was trustworthy enough to prune from (§7-1: a partial/failed
-    /// scan must never be treated as "this session is gone").
+    /// (already translated to shiibar's status vocabulary and given targets,
+    /// §3.5); `complete` says whether every terminal scan the client
+    /// attempted was trustworthy enough to prune from (§7-1: a partial or
+    /// failed scan must never be treated as "this session is gone").
+    ///
+    /// Application order (§3.6 "merging by pid"), so that the result does not
+    /// depend on the order of `sessions`:
+    /// 1. every session whose target is already registered (known);
+    /// 2. every remaining session: an update-only session updates the entry
+    ///    with the same pid, or nothing; otherwise, in a complete round, the
+    ///    entry with the same pid whose target is not in this round's live
+    ///    set is rekeyed to the session's target and updated as known, and
+    ///    in an incomplete round the entry with the same pid is updated as
+    ///    known without rekeying; with no such entry, the session is added
+    ///    as untracked;
+    /// 3. only in a complete round, prune every entry whose target is not in
+    ///    the live set (judged after all rekeys).
     pub fn handle_reconcile(&mut self, complete: bool, sessions: &[ReconcileSession]) {
         let now = self.clock.now();
         let mut broadcasts = Vec::new();
         let mut changed = false;
+        let live: HashSet<&str> = sessions.iter().map(|s| s.target.as_str()).collect();
 
-        for session in sessions {
+        let (registered, remaining): (Vec<&ReconcileSession>, Vec<&ReconcileSession>) = sessions
+            .iter()
+            .partition(|s| self.find(&s.target).is_some());
+
+        for session in registered {
             let idx = self.find(&session.target);
-            let existing = idx.map(|i| &self.agents[i]);
-            let Outcome::Updated { entry, previous } =
-                transitions::apply_reconcile_session(existing, session, now)
-            else {
-                unreachable!("apply_reconcile_session never returns Ignored/Removed");
-            };
+            self.apply_reconcile_session_at(idx, session, now, false, &mut broadcasts);
             changed = true;
+        }
 
-            match &previous {
-                None => log_info!(
-                    self.logger,
-                    "registered target={} status={:?} (reconcile)",
-                    entry.target,
-                    entry.status
-                ),
-                Some(prev) if prev.status != entry.status => log_info!(
-                    self.logger,
-                    "transition target={} {:?} -> {:?} (reconcile)",
-                    entry.target,
-                    prev.status,
-                    entry.status
-                ),
-                Some(_) => {}
+        for session in remaining {
+            // A duplicate target earlier in this step may have registered it.
+            if let Some(i) = self.find(&session.target) {
+                self.apply_reconcile_session_at(Some(i), session, now, false, &mut broadcasts);
+                changed = true;
+                continue;
             }
-
-            let should_broadcast = match &previous {
-                None => true,
-                Some(prev) => entry.observably_differs_from(prev),
+            if session.update_only {
+                // Update-only: never create or rekey (§3.6).
+                if let Some(i) = merge::find_by_pid(&self.agents, session.pid, |_| true) {
+                    self.apply_reconcile_session_at(Some(i), session, now, false, &mut broadcasts);
+                    changed = true;
+                }
+                continue;
+            }
+            let same_pid = if complete {
+                merge::find_by_pid(&self.agents, session.pid, |e| !live.contains(e.target.as_str()))
+            } else {
+                merge::find_by_pid(&self.agents, session.pid, |_| true)
             };
-            match idx {
-                Some(i) => self.agents[i] = entry.clone(),
-                None => self.agents.push(entry.clone()),
+            match same_pid {
+                Some(i) if complete => {
+                    let old_target =
+                        std::mem::replace(&mut self.agents[i].target, session.target.clone());
+                    log_info!(
+                        self.logger,
+                        "rekeyed target={} -> {} (reconcile, pid={:?})",
+                        old_target,
+                        session.target,
+                        session.pid
+                    );
+                    // The rekey notice and the new target's status_changed
+                    // are always sent, adjacent and in this order, so a
+                    // subscriber never loses the session (§3.6 "rekey").
+                    broadcasts.push(BroadcastEvent::AgentRemoved {
+                        target: old_target,
+                        reason: RemovalReason::Rekey,
+                        to: Some(session.target.clone()),
+                    });
+                    self.apply_reconcile_session_at(Some(i), session, now, true, &mut broadcasts);
+                }
+                Some(i) => {
+                    self.apply_reconcile_session_at(Some(i), session, now, false, &mut broadcasts);
+                }
+                None => {
+                    self.apply_reconcile_session_at(None, session, now, false, &mut broadcasts);
+                }
             }
-            if should_broadcast {
-                broadcasts.push(BroadcastEvent::StatusChanged(entry.to_wire()));
-            }
+            changed = true;
         }
 
         if complete {
-            let live: HashSet<&str> = sessions.iter().map(|s| s.target.as_str()).collect();
             let mut i = 0;
             while i < self.agents.len() {
                 if live.contains(self.agents[i].target.as_str()) {
@@ -253,6 +372,7 @@ impl Core {
                 broadcasts.push(BroadcastEvent::AgentRemoved {
                     target: removed.target,
                     reason: RemovalReason::Prune,
+                    to: None,
                 });
                 changed = true;
             }
@@ -263,6 +383,60 @@ impl Core {
         }
         for event in broadcasts {
             let _ = self.events_tx.send(event);
+        }
+    }
+
+    /// Apply one reconcile session (§3.5 step 3) to the entry at `idx`
+    /// ("known"), or add it as a new entry when `idx` is `None`
+    /// ("untracked"), overwriting the entry's pid when the session carries
+    /// one (§3.6). `force_broadcast` sends `status_changed` even without an
+    /// observable change (the one that follows a rekey, §3.6).
+    fn apply_reconcile_session_at(
+        &mut self,
+        idx: Option<usize>,
+        session: &ReconcileSession,
+        now: i64,
+        force_broadcast: bool,
+        broadcasts: &mut Vec<BroadcastEvent>,
+    ) {
+        let existing = idx.map(|i| &self.agents[i]);
+        let Outcome::Updated { mut entry, previous } =
+            transitions::apply_reconcile_session(existing, session, now)
+        else {
+            unreachable!("apply_reconcile_session never returns Ignored/Removed");
+        };
+        if session.pid.is_some() {
+            entry.pid = session.pid;
+        }
+
+        match &previous {
+            None => log_info!(
+                self.logger,
+                "registered target={} status={:?} (reconcile)",
+                entry.target,
+                entry.status
+            ),
+            Some(prev) if prev.status != entry.status => log_info!(
+                self.logger,
+                "transition target={} {:?} -> {:?} (reconcile)",
+                entry.target,
+                prev.status,
+                entry.status
+            ),
+            Some(_) => {}
+        }
+
+        let should_broadcast = force_broadcast
+            || match &previous {
+                None => true,
+                Some(prev) => entry.observably_differs_from(prev),
+            };
+        match idx {
+            Some(i) => self.agents[i] = entry.clone(),
+            None => self.agents.push(entry.clone()),
+        }
+        if should_broadcast {
+            broadcasts.push(BroadcastEvent::StatusChanged(entry.to_wire()));
         }
     }
 
@@ -285,6 +459,7 @@ impl Core {
                 let _ = self.events_tx.send(BroadcastEvent::AgentRemoved {
                     target: removed.target,
                     reason: RemovalReason::Stale,
+                    to: None,
                 });
                 removed_any = true;
             } else {

@@ -43,6 +43,10 @@ public enum RemovalReason: String, Equatable, Sendable {
     case stale
     case remove
     case prune
+    /// The daemon moved the entry to a new target (§3.6 "merging by pid"):
+    /// not a removal. The event carries the new target in `to`, and a
+    /// `status_changed` for that target follows right after it (§4.2).
+    case rekey
     case unknown
 }
 
@@ -80,6 +84,16 @@ public struct Agent: Equatable, Decodable, Sendable {
     public let lastReportAt: Int64
     public let since: Int64
     public let lastSeen: Int64
+
+    /// The same entry under another target: the app's view of a `rekey`
+    /// (§4.2), where the daemon changes only the entry's target and keeps
+    /// every other attribute.
+    public func withTarget(_ newTarget: String) -> Agent {
+        Agent(
+            target: newTarget, status: status, unreviewed: unreviewed, sessionId: sessionId, cwd: cwd,
+            task: task, message: message, lastAssistantMessage: lastAssistantMessage, createdAt: createdAt,
+            lastReportAt: lastReportAt, since: since, lastSeen: lastSeen)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case target, status, unreviewed
@@ -143,13 +157,15 @@ public struct Agent: Equatable, Decodable, Sendable {
 public enum SubscribeEvent: Equatable {
     case snapshot(agents: [Agent])
     case statusChanged(agent: Agent)
-    case agentRemoved(target: String, reason: RemovalReason)
+    /// `to` is the new target of a `rekey` (§4.2); nil for every other
+    /// reason.
+    case agentRemoved(target: String, reason: RemovalReason, to: String? = nil)
     case unknown
 }
 
 extension SubscribeEvent: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case event, agents, agent, target, reason
+        case event, agents, agent, target, reason, to
     }
 
     public init(from decoder: Decoder) throws {
@@ -163,7 +179,8 @@ extension SubscribeEvent: Decodable {
         case "agent_removed":
             let target = try container.decode(String.self, forKey: .target)
             let reason = try container.decodeIfPresent(RemovalReason.self, forKey: .reason) ?? .unknown
-            self = .agentRemoved(target: target, reason: reason)
+            let to = try container.decodeIfPresent(String.self, forKey: .to)
+            self = .agentRemoved(target: target, reason: reason, to: to)
         default:
             self = .unknown
         }

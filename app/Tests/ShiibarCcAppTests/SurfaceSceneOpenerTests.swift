@@ -43,7 +43,8 @@ final class SurfaceSceneOpenerTests: XCTestCase {
                 index: { _, _, _, _ in ConversationsProcess(process: Process()) }
             ),
             runCommand: { _, _ in },
-            schedule: { _, _ in }
+            schedule: { _, _ in },
+            markReadSchedule: { _, _ in }
         )
     }
 

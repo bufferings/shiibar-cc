@@ -124,7 +124,7 @@ pub fn report_payload(
 ) -> shiibar_cc_proto::ReportPayload {
     shiibar_cc_proto::ReportPayload {
         event,
-        target: target.to_string(),
+        target: Some(target.to_string()),
         session_id: "sess-1".to_string(),
         cwd: cwd.to_string(),
         transcript_path: None,
@@ -135,5 +135,6 @@ pub fn report_payload(
         prompt: None,
         background_tasks: None,
         last_assistant_message: None,
+        pid: None,
     }
 }

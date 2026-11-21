@@ -1,8 +1,4 @@
-//! `shiibar-cc report <event>` (DESIGN.md §4.1/§4.4, implemented in M1).
-//! Moved here unchanged in behavior from the M1 `main.rs` (only the socket
-//! path resolution now goes through `shiibar_cc_client::connection`, removing
-//! the duplicate copy that used to live in this crate — DESIGN.md §4.3 M2
-//! brief: "clean it up if it duplicates the M1 shiibar-cc side").
+//! `shiibar-cc report <event>` (DESIGN.md §4.1/§4.4).
 
 use shiibar_cc_proto::extract::ProcInfo;
 use shiibar_cc_proto::{HookEvent, ReportPayload, Request, codec, extract};
@@ -13,11 +9,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// hooks send timeout (§9).
 const SEND_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// The `$TERM_PROGRAM` value that means "running directly inside
-/// Terminal.app" (§4.1/§7-7). Only then is the ancestor walk worth its cost
-/// (§4.1: don't impose it on iTerm2 users).
-const APPLE_TERMINAL_TERM_PROGRAM: &str = "Apple_Terminal";
 
 /// Always succeeds from the caller's point of view: `report` is the sole
 /// exception to the normal exit-code rules (§4.4) and must exit 0 no
@@ -49,40 +40,36 @@ pub fn run(event_arg: Option<String>, socket_path: &Path) {
         }
     };
 
-    // Target generation rule (§4.1), two branches, both prefixed (§2):
-    //   - iTerm2 detection requires BOTH $TERM_PROGRAM == "iTerm.app" AND
-    //     $ITERM_SESSION_ID (`wNtNpN:UUID`) — $ITERM_SESSION_ID alone isn't
-    //     enough, since iTerm2-launched apps (e.g. VS Code's integrated
-    //     terminal) inherit it while overwriting $TERM_PROGRAM (§7-1).
-    //   - Terminal.app ($TERM_PROGRAM == "Apple_Terminal") needs the
-    //     controlling tty, which the hook process can't read from itself
-    //     (§7-7); it's resolved here by walking the process ancestry, and
-    //     ONLY for Apple_Terminal (§4.1: no new cost for iTerm2 users).
-    // A session matching neither branch (or Apple_Terminal with no
-    // resolvable tty) isn't tracked (§8.11/§8.47) — build_report signals
-    // that with `Ok(None)`, and the report is dropped without ever touching
-    // the socket (still exit 0, per this command's always-succeed contract).
-    // This is the only place these env vars are read; the classification
-    // rule itself lives entirely in build_report.
+    // Target generation (§4.1): every report first walks the process
+    // ancestry for the first process with a controlling terminal (the
+    // `claude` process running the session) — whatever $TERM_PROGRAM says,
+    // iTerm.app included. Its pid goes on every report; its tty keys the
+    // Terminal.app and Ghostty targets. If the walk finds no terminal within
+    // its limit (§9) the session has none and isn't tracked (§8.66):
+    // build_report signals that with `Ok(None)`, and the report is dropped
+    // without touching the socket (still exit 0, per this command's
+    // always-succeed contract). The one exception is SessionEnd: a closed
+    // terminal window leaves the `claude` process without a controlling
+    // terminal by the time its SessionEnd hook runs, so build_report returns
+    // it without a target or pid and it is sent for the daemon to match by
+    // session_id (§4.2). This is the only place these env vars are read; the
+    // classification rule itself lives entirely in build_report.
     let term_program = std::env::var("TERM_PROGRAM").ok();
+    let term_program_version = std::env::var("TERM_PROGRAM_VERSION").ok();
     let iterm_session_id = std::env::var("ITERM_SESSION_ID").ok();
-    let apple_terminal_tty = if term_program.as_deref() == Some(APPLE_TERMINAL_TERM_PROGRAM) {
-        resolve_apple_terminal_tty()
-    } else {
-        None
+    let env = extract::HookEnv {
+        term_program: term_program.as_deref(),
+        term_program_version: term_program_version.as_deref(),
+        iterm_session_id: iterm_session_id.as_deref(),
     };
+    let controlling = resolve_controlling_process();
     let now = now_epoch_secs();
 
-    let payload = match extract::build_report(
-        event,
-        &raw,
-        term_program.as_deref(),
-        iterm_session_id.as_deref(),
-        apple_terminal_tty.as_deref(),
-        now,
-    ) {
+    let payload = match extract::build_report(event, &raw, &env, controlling.as_ref(), now) {
         Ok(Some(p)) => p,
-        Ok(None) => return, // untracked terminal: drop, no fallback target (§8.11/§8.47)
+        // No controlling terminal up the ancestry, on an event other than
+        // SessionEnd: drop (§4.1/§8.66).
+        Ok(None) => return,
         Err(e) => {
             eprintln!("shiibar-cc report: {e}");
             return;
@@ -106,22 +93,23 @@ fn now_epoch_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// Resolve the Terminal.app tab's controlling tty for the current hook
-/// (§4.1/§7-7): walk from this process toward the tree root and take the
-/// first ancestor that has a controlling terminal (the hook process and
-/// `report.sh`'s shell are detached from it — `??` in `ps`). The per-process
-/// lookup is `proc_pidinfo(PROC_PIDTBSDINFO)` (libproc): a single in-process
-/// syscall per hop that yields both the parent pid and the controlling tty
-/// device, so this whole path stays inside the hooks' 1-second budget (§4.1)
-/// with no `ps` subprocess. `None` means no tty was found within the walk's
-/// limit — the report is then dropped (§8.11/§8.47).
-fn resolve_apple_terminal_tty() -> Option<String> {
-    extract::tty_from_ancestor_walk(std::process::id() as i32, proc_info)
+/// Find the process this hook runs under (§4.1): walk from this process
+/// toward the tree root and take the first process that has a controlling
+/// terminal (the hook process and `report.sh`'s shell are detached from it —
+/// `??` in `ps`). The per-process lookup is `proc_pidinfo(PROC_PIDTBSDINFO)`
+/// (libproc): a single in-process syscall per hop that yields both the
+/// parent pid and the controlling tty device, so the walk stays inside the
+/// hooks' 1-second budget (§4.1) with no `ps` subprocess. `None` means no
+/// controlling terminal was found within the walk's limit — the report is
+/// then dropped (§4.1/§8.66), except a SessionEnd, which is sent without a
+/// target or pid.
+fn resolve_controlling_process() -> Option<extract::ControllingProcess> {
+    extract::controlling_process_from_ancestor_walk(std::process::id() as i32, proc_info)
 }
 
 /// One process's parent pid + controlling tty path via
 /// `proc_pidinfo(PROC_PIDTBSDINFO)`. Impure (inspects the live process
-/// table); the pure walk that drives it (`tty_from_ancestor_walk`) is what
+/// table); the pure walk that drives it (`controlling_process_from_ancestor_walk`) is what
 /// the unit tests exercise. Returns `None` if the pid can't be inspected
 /// (exited, or not permitted).
 fn proc_info(pid: i32) -> Option<ProcInfo> {
@@ -231,6 +219,6 @@ mod tests {
         // End-to-end over the real process tree using the real libproc
         // lookup: the walk must terminate (return Some or None) without
         // panicking or looping — it can't exceed the step bound.
-        let _ = resolve_apple_terminal_tty();
+        let _ = resolve_controlling_process();
     }
 }

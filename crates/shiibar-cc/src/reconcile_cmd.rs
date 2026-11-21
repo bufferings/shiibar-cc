@@ -5,7 +5,7 @@
 
 use crate::exitcode;
 use shiibar_cc_client::reconcile::{ClaudeAgentsRunner, gather};
-use shiibar_cc_client::terminal::{AppleScriptRunner, PsRunner, TerminalError};
+use shiibar_cc_client::terminal::{AppleScriptRunner, PsRunner};
 use shiibar_cc_proto::{AckResponse, Request};
 use std::path::Path;
 
@@ -13,42 +13,37 @@ use std::path::Path;
 /// - 0: request sent — including a `complete:false` one after a degraded
 ///   scan (reported on stderr, informational: pruning was skipped).
 /// - 1: daemon unreachable.
-/// - 3: osascript TCC (Automation) permission denied. In this case **no
-///   reconcile request is sent at all**: with TCC denied, zero targets can
-///   be resolved, so the request would be an empty `complete:false` no-op
-///   on the daemon — skipping it keeps "exit 3 = nothing happened, fix the
-///   permission" unambiguous (same mapping as `focus`/`focused`).
+/// - 3: some terminal's osascript Automation (TCC) permission is denied.
+///   The request is **still sent first** (§3.5/§4.4): one terminal's denial
+///   must not stop the other terminals' sessions and the `process:`
+///   sessions from being reconciled. The round is `complete:false`. If
+///   sending also fails, the connection error (exit 1) is reported instead.
 pub fn run_reconcile(
     socket_path: &Path,
     claude_runner: &dyn ClaudeAgentsRunner,
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
 ) -> (i32, Option<String>) {
-    let result = match gather(claude_runner, ps_runner, script_runner) {
-        Ok(r) => r,
-        Err(TerminalError::PermissionDenied) => {
-            return (
-                exitcode::TCC_DENIED,
-                Some(
-                    "shiibar-cc reconcile: osascript automation permission for the terminal is denied \
-                     (System Settings > Privacy & Security > Automation); nothing was sent"
-                        .to_string(),
-                ),
-            );
-        }
-        // gather only errors on TCC today; anything else is defensive.
-        Err(e) => return (exitcode::ERROR, Some(format!("shiibar-cc reconcile: {e}"))),
-    };
+    let result = gather(claude_runner, ps_runner, script_runner);
     let request = Request::Reconcile {
         complete: result.complete,
         sessions: result.sessions,
     };
     match shiibar_cc_client::connection::request::<AckResponse>(socket_path, &request) {
+        Ok(_) if result.permission_denied => (
+            exitcode::TCC_DENIED,
+            Some(
+                "shiibar-cc reconcile: osascript automation permission for a terminal is denied \
+                 (System Settings > Privacy & Security > Automation); sent complete:false with the \
+                 sessions the other scans resolved"
+                    .to_string(),
+            ),
+        ),
         Ok(_) if result.complete => (exitcode::OK, None),
         Ok(_) => (
             exitcode::OK,
             Some(
-                "shiibar-cc reconcile: iTerm2/claude scan was incomplete; sent complete:false \
+                "shiibar-cc reconcile: a terminal or claude scan was incomplete; sent complete:false \
                  (pruning skipped this round, adds/updates still applied)"
                     .to_string(),
             ),
@@ -82,12 +77,22 @@ mod tests {
         }
     }
 
+    /// Answers iTerm2's running query as running, the iTerm2 and
+    /// Terminal.app scans with zero sessions, and Ghostty's version query
+    /// as not running.
     struct FakeScript;
     impl AppleScriptRunner for FakeScript {
-        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            let stdout = if script == shiibar_cc_client::iterm2::build_running_script() {
+                "RUNNING\n"
+            } else if script == shiibar_cc_client::ghostty::build_version_script() {
+                "NOT_RUNNING\n"
+            } else {
+                "DONE\t0\n"
+            };
             Ok(AppleScriptOutput {
                 success: true,
-                stdout: "DONE\t0\n".to_string(),
+                stdout: stdout.to_string(),
                 stderr: String::new(),
             })
         }
@@ -102,30 +107,100 @@ mod tests {
         assert!(err.is_some());
     }
 
-    #[test]
-    fn exits_3_on_tcc_denial_and_sends_nothing() {
-        struct TccScript;
-        impl AppleScriptRunner for TccScript {
-            fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
-                Ok(AppleScriptOutput {
-                    success: false,
-                    stdout: String::new(),
-                    stderr: "Not authorized to send Apple events to iTerm2. (-1743)".to_string(),
-                })
-            }
+    /// A one-shot stand-in for the daemon: accepts one connection, records
+    /// the request line, and answers `{"ok":true}`.
+    fn fake_daemon(socket: &Path) -> std::thread::JoinHandle<String> {
+        use std::io::{BufRead as _, BufReader, Write as _};
+        let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            (&stream).write_all(b"{\"ok\":true}\n").unwrap();
+            line
+        })
+    }
+
+    struct TccScript;
+    impl AppleScriptRunner for TccScript {
+        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+            Ok(AppleScriptOutput {
+                success: false,
+                stdout: String::new(),
+                stderr: "Not authorized to send Apple events to iTerm2. (-1743)".to_string(),
+            })
         }
-        // A live daemon socket exists here (a plain listener would do), but
-        // the point is stronger with none: the TCC branch must return
-        // before any socket I/O, so a dead socket must NOT turn this into
-        // exit 1.
+    }
+
+    struct TtyPs;
+    impl PsRunner for TtyPs {
+        fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+            Ok(PsOutput {
+                success: true,
+                stdout: "111 ttys004\n".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn exits_3_on_tcc_denial_after_sending_the_reconcile() {
+        // §4.4: a TCC denial still sends what the gather resolved (here a
+        // session no scan could match, sent update-only because the round
+        // is incomplete), then exits 3.
         let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("shiibar-ccd.sock");
+        let daemon = fake_daemon(&socket);
         let claude = FakeClaude {
-            // At least one pid, so iterm_targets actually runs the script
-            // (it short-circuits on an empty pid list).
             json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
         };
-        let (code, err) = run_reconcile(&dir.path().join("no-socket"), &claude, &FakePs, &TccScript);
+        let (code, err) = run_reconcile(&socket, &claude, &TtyPs, &TccScript);
         assert_eq!(code, exitcode::TCC_DENIED);
         assert!(err.unwrap().contains("automation permission"));
+
+        let sent: Request = serde_json::from_str(daemon.join().unwrap().trim_end()).unwrap();
+        match sent {
+            Request::Reconcile { complete, sessions } => {
+                assert!(!complete);
+                assert_eq!(sessions.len(), 1);
+                assert_eq!(sessions[0].target, "process:111");
+                assert_eq!(sessions[0].pid, Some(111));
+                assert!(sessions[0].update_only);
+            }
+            other => panic!("expected a reconcile request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exits_1_on_tcc_denial_when_the_daemon_is_absent() {
+        // The send comes first; when it fails, the connection error wins.
+        let dir = tempfile::tempdir().unwrap();
+        let claude = FakeClaude {
+            json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
+        };
+        let (code, _) = run_reconcile(&dir.path().join("no-socket"), &claude, &TtyPs, &TccScript);
+        assert_eq!(code, exitcode::ERROR);
+    }
+
+    #[test]
+    fn exits_0_after_sending_a_complete_round() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("shiibar-ccd.sock");
+        let daemon = fake_daemon(&socket);
+        let claude = FakeClaude {
+            json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
+        };
+        let (code, err) = run_reconcile(&socket, &claude, &TtyPs, &FakeScript);
+        assert_eq!(code, exitcode::OK);
+        assert!(err.is_none());
+        let sent: Request = serde_json::from_str(daemon.join().unwrap().trim_end()).unwrap();
+        match sent {
+            Request::Reconcile { complete, sessions } => {
+                assert!(complete);
+                assert_eq!(sessions[0].target, "process:111");
+                assert!(!sessions[0].update_only);
+            }
+            other => panic!("expected a reconcile request, got {other:?}"),
+        }
     }
 }

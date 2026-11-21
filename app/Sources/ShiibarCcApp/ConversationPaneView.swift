@@ -213,17 +213,39 @@ struct PanelStatusLinesView: View {
 /// the primary button sit at the same position and size everywhere (§4.6). While the
 /// buttons are not shown (no selection, or the search field has focus) they
 /// are replaced by invisible placeholders of the same size: the panel height
-/// and the hints' width do not change. When the width
-/// runs short the buttons keep their size and the hints take what is left
-/// (§4.5 "text size").
+/// and the hints' width do not change. When the width runs short the
+/// buttons keep their size and the hints take what is left (§4.5 "text
+/// size"). When a shown button is disabled, its reason
+/// (`panel.disabledReasons`, one line per distinct reason) sits on its own
+/// line above the button row, right-aligned with the buttons: the button row
+/// cannot fit the text next to the three buttons at the popover width. The
+/// panel grows by those lines while they are shown; the button row and its
+/// distance from the panel's bottom edge stay the same.
 struct BottomPanelView: View {
     @ObservedObject var model: MainSurfaceModel
     let panel: BottomPanelModel
     @Environment(\.surfaceScale) private var scale
 
     var body: some View {
+        let reasons = panel.disabledReasons
         VStack(spacing: 0) {
             Rectangle().fill(SurfaceColors.line).frame(height: 1)
+            if !reasons.isEmpty {
+                VStack(alignment: .trailing, spacing: 0) {
+                    ForEach(reasons, id: \.self) { reason in
+                        // The full panel width is available, so truncation
+                        // is a last resort for a very narrow surface.
+                        Text(reason)
+                            .font(.system(size: scale.keyLabelFont))
+                            .foregroundStyle(SurfaceColors.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 12)
+                .padding(.top, scale.panelTop)
+            }
             HStack(spacing: 10) {
                 if panel.hints.isEmpty {
                     Spacer(minLength: 0)
@@ -244,7 +266,7 @@ struct BottomPanelView: View {
                 .layoutPriority(1)
             }
             .padding(.horizontal, 12)
-            .padding(.top, scale.panelTop)
+            .padding(.top, reasons.isEmpty ? scale.panelTop : scale.panelReasonBottom)
             .padding(.bottom, scale.panelBottom)
         }
     }

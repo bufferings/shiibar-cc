@@ -53,9 +53,10 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     private var heightDrag: PopoverHeightDrag?
     /// Set while a just-opened window's first key event is pending.
     private var skipNextWindowKey = false
-    /// The list focus owed to a window the hotkey opened from closed
-    /// (§4.5 "global hotkey"; `HotKeyListFocusPending`).
-    private var hotKeyListFocus = HotKeyListFocusPending()
+    /// The list focus owed to a window the hotkey or a notification click
+    /// opened from closed (§4.5 "global hotkey", "notification click";
+    /// `PendingListFocus`).
+    private var pendingListFocus = PendingListFocus()
     /// Set while `Open in popover` closes the window: the app stays regular
     /// until the popover it opens closes (`RegularAppHold`).
     private var closingWindowForPopover = false
@@ -135,6 +136,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         state.willOpenAuxiliaryWindow = { [weak self] in self?.closePopover() }
         // Dock click / reopen: a raise, which owes the list no focus.
         state.raiseMainWindow = { [weak self] in self?.raiseWindow() }
+        state.showRowForNotification = { [weak self] target in self?.showRowForNotification(target: target) }
         state.hotKey.onPressed = { [weak self] in self?.hotKeyPressed() }
         // Redraw the tray on every state change (§4.5): agents and
         // connection.
@@ -241,6 +243,49 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         }
     }
 
+    /// A notification click on a session the app cannot jump to (§4.5
+    /// "notification click"): open the surface of the current form (a
+    /// window that is open comes forward), then the list selects the row,
+    /// starts the mark-read timer over and takes focus. The surface opens
+    /// without its own focus request, so nothing replaces the list's focus.
+    /// The same timing as the hotkey's focus: a window opened from closed
+    /// waits until it has become key (`PendingListFocus`); otherwise it is
+    /// deferred a turn, so the shown surface's responder chain settles
+    /// first.
+    private func showRowForNotification(target: String) {
+        switch model.surfaceForm {
+        case .popover:
+            if !popover.isShown { showPopover(focus: nil) }
+        case .window:
+            if !isWindowOpen {
+                openWindow(focus: nil, notificationTarget: target)
+                return
+            }
+            raiseWindow()
+        }
+        selectRowForNotification(target: target)
+    }
+
+    /// The list part of a notification click (`showRowForNotification`),
+    /// deferred a turn.
+    private func selectRowForNotification(target: String) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.model.notificationClicked(target: target) }
+        }
+    }
+
+    /// Runs what `pendingListFocus` handed back.
+    private func runPendingListFocus(_ purpose: PendingListFocus.Purpose?) {
+        switch purpose {
+        case .hotKey:
+            focusAfterHotKey()
+        case .notification(let target):
+            selectRowForNotification(target: target)
+        case nil:
+            break
+        }
+    }
+
     /// The list takes focus (§4.5 "global hotkey"). Deferred a turn, like
     /// the search field's focus request on open: the shown surface's
     /// responder chain settles first.
@@ -334,7 +379,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         }
     }
 
-    func showPopover(focus: SurfaceToggleFocus) {
+    /// `focus` nil: no focus request (the caller moves the focus itself).
+    func showPopover(focus: SurfaceToggleFocus?) {
         guard let button = statusItem?.button else { return }
         // A remembered height above the maximum opens at the maximum; the
         // stored value itself stays (§9).
@@ -361,6 +407,8 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             focusAfterHotKey()
         case .initial:
             model.requestInitialFocus()
+        case nil:
+            break
         }
     }
 
@@ -400,8 +448,11 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// Opens the window (`Open in window`, and the tray click or the hotkey
     /// in the window form — one path: the regular-app switch, the
     /// remembered frame, the History refetch). `focus` is where the focus
-    /// goes once it is open (§4.5 "window" / "global hotkey").
-    func openWindow(focus: SurfaceToggleFocus = .initial) {
+    /// goes once it is open (§4.5 "window" / "global hotkey"); nil = no
+    /// focus request (the caller moves the focus itself).
+    /// `notificationTarget`: a notification click opened it; the row is
+    /// selected once the window has become key (`PendingListFocus`).
+    func openWindow(focus: SurfaceToggleFocus? = .initial, notificationTarget: String? = nil) {
         let opening = !isWindowOpen
         // Before the popover closes: when the popover `Open in popover`
         // opened is shown, the app stays regular for the window instead of
@@ -423,10 +474,22 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
             skipNextWindowKey = true
             model.surfaceDidShow(.window)
         }
-        if focus == .list {
-            hotKeyListFocus.openedByHotKey(at: ProcessInfo.processInfo.systemUptime)
+        let pendingPurpose: PendingListFocus.Purpose?
+        if let notificationTarget {
+            pendingPurpose = .notification(target: notificationTarget)
         } else {
-            hotKeyListFocus.clear()
+            pendingPurpose = focus == .list ? .hotKey : nil
+        }
+        if let pendingPurpose {
+            let id = pendingListFocus.opened(for: pendingPurpose, at: ProcessInfo.processInfo.systemUptime)
+            DispatchQueue.main.asyncAfter(deadline: .now() + PendingListFocus.validSeconds) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.runPendingListFocus(self.pendingListFocus.timeoutDue(id: id))
+                }
+            }
+        } else {
+            pendingListFocus.clear()
         }
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
@@ -466,7 +529,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
 
     func raiseWindow() {
         guard let window, isWindowOpen else { return }
-        hotKeyListFocus.clear()
+        pendingListFocus.clear()
         Self.raise(window)
     }
 
@@ -674,9 +737,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         // After the refetch trigger: a window that was not on screen counts
         // as shown there, so this report is not dropped.
         model.surfaceKeyChanged(surface: .window, isKey: true)
-        if hotKeyListFocus.windowBecameKey(at: ProcessInfo.processInfo.systemUptime) {
-            focusAfterHotKey()
-        }
+        runPendingListFocus(pendingListFocus.windowBecameKey(at: ProcessInfo.processInfo.systemUptime))
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -689,7 +750,7 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// surface form stays as it is (§4.5 "surface form").
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === window else { return }
-        hotKeyListFocus.clear()
+        pendingListFocus.clear()
         fullScreenSettled = false
         model.surfaceDidHide(.window)
         state.noteRegularWindowClosed(forOpenInPopover: closingWindowForPopover)

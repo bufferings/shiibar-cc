@@ -4,6 +4,14 @@
 //! column and the flag column are independent"). This does not touch any
 //! socket or filesystem — `transitions::apply_report` / `apply_seen` are
 //! pure functions.
+//!
+//! The table does not depend on the kind of target (§3.4 preamble): a
+//! session in a terminal shiibar can't drive (`process:<pid>`) and a Ghostty
+//! session (`ghostty:<tty path>`) go through the same cells as any other
+//! target. `assert_row` therefore runs every row once per entry of
+//! `TABLE_TARGETS`, and `every_cell_is_independent_of_the_target_kind`
+//! checks the whole outcome (status, flag, and every attribute) against the
+//! generic target for each of them.
 
 use shiibar_ccd::state::AgentEntry;
 use shiibar_ccd::transitions::{Outcome, apply_report, apply_seen};
@@ -11,10 +19,21 @@ use shiibar_cc_proto::{HookEvent, NotificationType, ReportPayload, SessionStartS
 
 const NOW: i64 = 1_000_000;
 
+/// The targets every table row is exercised with: the generic target the
+/// table's expectations were written against, a session in a terminal
+/// shiibar can't drive, and a Ghostty session (§2). Real hook reports carry
+/// a pid (§4.1/§4.2); the transition functions never read it, so the
+/// generic target keeps the payload without one.
+const TABLE_TARGETS: [(&str, Option<u32>); 3] = [
+    ("t", None),
+    ("process:48213", Some(48213)),
+    ("ghostty:/dev/ttys005", Some(48214)),
+];
+
 fn base_payload(event: HookEvent) -> ReportPayload {
     ReportPayload {
         event,
-        target: "t".into(),
+        target: Some("t".into()),
         session_id: "s-new".into(),
         cwd: "/new".into(),
         transcript_path: None,
@@ -25,6 +44,7 @@ fn base_payload(event: HookEvent) -> ReportPayload {
         prompt: None,
         background_tasks: None,
         last_assistant_message: None,
+        pid: None,
     }
 }
 
@@ -50,6 +70,7 @@ fn existing(status: Status, unreviewed: bool) -> AgentEntry {
         },
         created_at: 100,
         last_report_at: 400,
+        pid: None,
     }
 }
 
@@ -73,8 +94,10 @@ enum Cell {
 
 /// Run one event across the 4 starting points a table row has (unregistered
 /// / working / waiting / idle) and assert the *status* column against
-/// `cells` in that order. Starting `unreviewed` is fixed at `false` here —
-/// the flag column has its own dedicated assertions per row.
+/// `cells` in that order, once for each target in `TABLE_TARGETS` (the
+/// expected cells are the same for every target, §3.4). Starting
+/// `unreviewed` is fixed at `false` here — the flag column has its own
+/// dedicated assertions per row.
 fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 4]) {
     let starts: [Option<Status>; 4] = [
         None,
@@ -83,68 +106,79 @@ fn assert_row(label: &str, build: impl Fn(&mut ReportPayload), cells: [Cell; 4])
         Some(Status::Idle),
     ];
 
-    for (start, cell) in starts.into_iter().zip(cells) {
-        let mut payload = base_payload(HookEvent::SessionStart); // overwritten by `build`
-        build(&mut payload);
-        let existing_entry = start.map(|s| existing(s, false));
-        let outcome = apply_report(existing_entry.as_ref(), &payload, NOW);
-        let case = format!("{label} / start={start:?}");
+    for (target, pid) in TABLE_TARGETS {
+        for (start, cell) in starts.into_iter().zip(cells) {
+            let mut payload = base_payload(HookEvent::SessionStart); // overwritten by `build`
+            build(&mut payload);
+            payload.target = Some(target.into());
+            payload.pid = pid;
+            let existing_entry = start.map(|s| {
+                let mut e = existing(s, false);
+                e.target = target.into();
+                e
+            });
+            let outcome = apply_report(existing_entry.as_ref(), &payload, NOW);
+            let case = format!("{label} / target={target} / start={start:?}");
 
-        match cell {
-            Cell::Ignore => {
-                assert_eq!(outcome, Outcome::Ignored, "{case}: expected ignore (Ignored)");
-            }
-            Cell::Register(expected, expected_flag) => {
-                let Outcome::Updated { entry, previous } = outcome else {
-                    panic!("{case}: expected Updated (register), got {outcome:?}");
-                };
-                assert!(previous.is_none(), "{case}: register must have no previous entry");
-                assert_eq!(entry.status, expected, "{case}: registered status");
-                assert_eq!(
-                    entry.unreviewed, expected_flag,
-                    "{case}: unreviewed flag on fresh registration"
-                );
-                assert_eq!(entry.since, NOW, "{case}: since on fresh registration");
-                assert_eq!(entry.last_seen, NOW, "{case}: last_seen on fresh registration");
-                // §3.6/M5 T9: a hook-report registration sets both new
-                // timestamps to `now`.
-                assert_eq!(entry.created_at, NOW, "{case}: created_at on fresh registration");
-                assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at on fresh registration");
-            }
-            Cell::ToStatus(expected) => {
-                let Outcome::Updated { entry, previous } = outcome else {
-                    panic!("{case}: expected Updated, got {outcome:?}");
-                };
-                let previous = previous.unwrap_or_else(|| panic!("{case}: expected a previous entry"));
-                assert_eq!(entry.status, expected, "{case}: resulting status");
-                // §3.6: session_id / cwd / last_seen always overwrite.
-                assert_eq!(entry.session_id, "s-new", "{case}: session_id must overwrite");
-                assert_eq!(entry.cwd, "/new", "{case}: cwd must overwrite");
-                assert_eq!(entry.last_seen, NOW, "{case}: last_seen always bumped by report");
-                // M5 T9: every hook report reaching a registered entry bumps
-                // `last_report_at`, same as `last_seen` — even a same-value
-                // ("—") cell. `created_at` never moves once set.
-                assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at always bumped by report");
-                assert_eq!(entry.created_at, previous.created_at, "{case}: created_at must never move");
-                // §3.4: since only moves on an actual value change.
-                if previous.status == expected {
-                    assert_eq!(
-                        entry.since, previous.since,
-                        "{case}: same-value transition must preserve `since`"
-                    );
-                } else {
-                    assert_eq!(entry.since, NOW, "{case}: real transition bumps `since`");
+            match cell {
+                Cell::Ignore => {
+                    assert_eq!(outcome, Outcome::Ignored, "{case}: expected ignore (Ignored)");
                 }
-            }
-            Cell::Removed => {
-                let Outcome::Removed { previous } = outcome else {
-                    panic!("{case}: expected Removed (remove), got {outcome:?}");
-                };
-                assert_eq!(
-                    previous.status,
-                    start.expect("Removed only applies to registered starts"),
-                    "{case}: removed entry's last-known status"
-                );
+                Cell::Register(expected, expected_flag) => {
+                    let Outcome::Updated { entry, previous } = outcome else {
+                        panic!("{case}: expected Updated (register), got {outcome:?}");
+                    };
+                    assert!(previous.is_none(), "{case}: register must have no previous entry");
+                    assert_eq!(entry.target, target, "{case}: registered under the report's target");
+                    assert_eq!(entry.status, expected, "{case}: registered status");
+                    assert_eq!(
+                        entry.unreviewed, expected_flag,
+                        "{case}: unreviewed flag on fresh registration"
+                    );
+                    assert_eq!(entry.since, NOW, "{case}: since on fresh registration");
+                    assert_eq!(entry.last_seen, NOW, "{case}: last_seen on fresh registration");
+                    // §3.6/M5 T9: a hook-report registration sets both new
+                    // timestamps to `now`.
+                    assert_eq!(entry.created_at, NOW, "{case}: created_at on fresh registration");
+                    assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at on fresh registration");
+                }
+                Cell::ToStatus(expected) => {
+                    let Outcome::Updated { entry, previous } = outcome else {
+                        panic!("{case}: expected Updated, got {outcome:?}");
+                    };
+                    let previous = previous.unwrap_or_else(|| panic!("{case}: expected a previous entry"));
+                    assert_eq!(entry.status, expected, "{case}: resulting status");
+                    assert_eq!(entry.target, target, "{case}: a report never changes the target");
+                    // §3.6: session_id / cwd / last_seen always overwrite.
+                    assert_eq!(entry.session_id, "s-new", "{case}: session_id must overwrite");
+                    assert_eq!(entry.cwd, "/new", "{case}: cwd must overwrite");
+                    assert_eq!(entry.last_seen, NOW, "{case}: last_seen always bumped by report");
+                    // M5 T9: every hook report reaching a registered entry bumps
+                    // `last_report_at`, same as `last_seen` — even a same-value
+                    // ("—") cell. `created_at` never moves once set.
+                    assert_eq!(entry.last_report_at, NOW, "{case}: last_report_at always bumped by report");
+                    assert_eq!(entry.created_at, previous.created_at, "{case}: created_at must never move");
+                    // §3.4: since only moves on an actual value change.
+                    if previous.status == expected {
+                        assert_eq!(
+                            entry.since, previous.since,
+                            "{case}: same-value transition must preserve `since`"
+                        );
+                    } else {
+                        assert_eq!(entry.since, NOW, "{case}: real transition bumps `since`");
+                    }
+                }
+                Cell::Removed => {
+                    let Outcome::Removed { previous } = outcome else {
+                        panic!("{case}: expected Removed (remove), got {outcome:?}");
+                    };
+                    assert_eq!(
+                        previous.status,
+                        start.expect("Removed only applies to registered starts"),
+                        "{case}: removed entry's last-known status"
+                    );
+                    assert_eq!(previous.target, target, "{case}: removed entry's target");
+                }
             }
         }
     }
@@ -792,4 +826,145 @@ fn last_report_at_bumps_on_every_hook_report_regardless_of_status_change() {
     assert_eq!(entry.status, Status::Idle, "sanity: same-value transition");
     assert_eq!(entry.last_report_at, 7_000, "last_report_at bumps even on a same-value cell");
     assert_eq!(entry.created_at, existing.created_at, "created_at untouched");
+}
+
+// --- Independence from the target kind (§3.4 preamble, §2) ---
+
+/// Every payload variant a §3.4 row distinguishes, labelled for failure
+/// messages.
+fn every_row_variant() -> Vec<(String, ReportPayload)> {
+    let mut variants = Vec::new();
+    for source in [
+        None,
+        Some(SessionStartSource::Startup),
+        Some(SessionStartSource::Clear),
+        Some(SessionStartSource::Resume),
+        Some(SessionStartSource::Compact),
+        Some(SessionStartSource::Other),
+    ] {
+        let mut p = base_payload(HookEvent::SessionStart);
+        p.source = source;
+        variants.push((format!("SessionStart(source={source:?})"), p));
+    }
+    let mut p = base_payload(HookEvent::UserPromptSubmit);
+    p.prompt = Some("do the thing".into());
+    variants.push(("UserPromptSubmit".to_string(), p));
+    for event in [HookEvent::PostToolUse, HookEvent::PostToolUseFailure] {
+        variants.push((format!("{event:?}"), base_payload(event)));
+    }
+    for nt in [
+        None,
+        Some(NotificationType::PermissionPrompt),
+        Some(NotificationType::AgentNeedsInput),
+        Some(NotificationType::ElicitationDialog),
+        Some(NotificationType::Unknown),
+        Some(NotificationType::IdlePrompt),
+        Some(NotificationType::AuthSuccess),
+        Some(NotificationType::ElicitationComplete),
+        Some(NotificationType::ElicitationResponse),
+        Some(NotificationType::AgentCompleted),
+    ] {
+        let mut p = base_payload(HookEvent::Notification);
+        p.notification_type = nt;
+        p.message = Some("please confirm".into());
+        variants.push((format!("Notification({nt:?})"), p));
+    }
+    for background_tasks in [
+        None,
+        Some(vec![]),
+        Some(vec![serde_json::json!({"id": "1", "status": "running"})]),
+    ] {
+        let mut p = base_payload(HookEvent::Stop);
+        p.background_tasks = background_tasks.clone();
+        p.last_assistant_message = Some("Done.".into());
+        variants.push((format!("Stop(background_tasks={background_tasks:?})"), p));
+    }
+    variants.push(("SessionEnd".to_string(), base_payload(HookEvent::SessionEnd)));
+    variants
+}
+
+/// Every starting point a table cell distinguishes: unregistered, and each
+/// status with the flag down and up.
+fn every_start() -> Vec<Option<(Status, bool)>> {
+    let mut starts = vec![None];
+    for status in [Status::Working, Status::Waiting, Status::Idle] {
+        for flag in [false, true] {
+            starts.push(Some((status, flag)));
+        }
+    }
+    starts
+}
+
+/// Rewrite the target in an outcome to the generic one, so outcomes for
+/// different targets can be compared field by field.
+fn with_generic_target(outcome: Outcome) -> Outcome {
+    let generic = |mut e: AgentEntry| {
+        e.target = "t".into();
+        e
+    };
+    match outcome {
+        Outcome::Ignored => Outcome::Ignored,
+        Outcome::Removed { previous } => Outcome::Removed {
+            previous: generic(previous),
+        },
+        Outcome::Updated { entry, previous } => Outcome::Updated {
+            entry: generic(entry),
+            previous: previous.map(generic),
+        },
+    }
+}
+
+#[test]
+fn every_cell_is_independent_of_the_target_kind() {
+    // §3.4 preamble: the table applies regardless of the target kind, so a
+    // `process:` or `ghostty:` target must produce exactly the outcome of
+    // the generic target in every cell — status, flag, and every attribute.
+    for (label, generic_payload) in every_row_variant() {
+        for start in every_start() {
+            let generic_entry = start.map(|(status, flag)| existing(status, flag));
+            let expected = apply_report(generic_entry.as_ref(), &generic_payload, NOW);
+
+            for (target, pid) in TABLE_TARGETS {
+                let mut payload = generic_payload.clone();
+                payload.target = Some(target.into());
+                payload.pid = pid;
+                let entry = start.map(|(status, flag)| {
+                    let mut e = existing(status, flag);
+                    e.target = target.into();
+                    e
+                });
+                let outcome = apply_report(entry.as_ref(), &payload, NOW);
+                match &outcome {
+                    Outcome::Ignored => {}
+                    Outcome::Removed { previous } => assert_eq!(previous.target, target),
+                    Outcome::Updated { entry, .. } => assert_eq!(entry.target, target),
+                }
+                assert_eq!(
+                    with_generic_target(outcome),
+                    expected,
+                    "{label} / target={target} / start={start:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn seen_is_independent_of_the_target_kind() {
+    // §3.4 seen row: the same for every target kind, including a session in
+    // a terminal shiibar can't drive.
+    for (target, _) in TABLE_TARGETS {
+        for status in [Status::Working, Status::Waiting, Status::Idle] {
+            for flag in [false, true] {
+                let generic = existing(status, flag);
+                let mut entry = generic.clone();
+                entry.target = target.into();
+                assert_eq!(
+                    with_generic_target(apply_seen(Some(&entry), NOW)),
+                    apply_seen(Some(&generic), NOW),
+                    "seen / target={target} / start={status:?}(flag={flag})"
+                );
+            }
+        }
+    }
 }

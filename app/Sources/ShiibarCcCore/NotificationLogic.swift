@@ -66,6 +66,14 @@ public final class UnreviewedEdgeTracker {
         return edges
     }
 
+    /// The entry moved from `from` to `to` (a `rekey` — §4.5 "desktop
+    /// notifications"): the fired record moves with it, so the entry is not
+    /// a new rising edge under its new target.
+    public func rekey(from: String, to: String) {
+        guard currentlyUnreviewed.remove(from) != nil else { return }
+        currentlyUnreviewed.insert(to)
+    }
+
     /// Explicitly forget a target (e.g. it was removed) so a later
     /// re-registration under the same target is treated as a fresh edge.
     public func forget(target: String) {
@@ -151,9 +159,10 @@ public enum NotificationSoundPolicy {
 /// Notification cleanup rule (DESIGN.md §4.5, §4.2): delivered notifications
 /// for a target are swept on focus / unreviewed-lowered / agent_removed,
 /// *except* when the removal reason is `sessionEnd` (closing the pane must
-/// not wipe an unread completion toast).
+/// not wipe an unread completion toast) or `rekey` (the entry lives on under
+/// the new target — §4.5 "desktop notifications").
 public enum NotificationCleanupRule {
     public static func shouldSweep(onRemovalReason reason: RemovalReason) -> Bool {
-        reason != .sessionEnd
+        reason != .sessionEnd && reason != .rekey
     }
 }

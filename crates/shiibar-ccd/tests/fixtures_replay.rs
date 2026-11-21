@@ -15,13 +15,31 @@
 
 mod support;
 
-use shiibar_cc_proto::{extract::build_report, HookEvent, RemovalReason, Status, SubscribeEvent};
+use shiibar_cc_proto::{extract::{build_report, ControllingProcess, HookEnv}, HookEvent, RemovalReason, Status, SubscribeEvent};
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
 const TARGET: &str = "iterm2:11111111-1111-1111-1111-111111111111";
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
+
+const ITERM_ENV: HookEnv<'static> = HookEnv {
+    term_program: Some("iTerm.app"),
+    term_program_version: None,
+    iterm_session_id: Some(ITERM_SESSION_ID),
+};
+
+/// The `claude` process the report's ancestor walk is assumed to have found.
+///
+/// The fixtures were captured from several separate sessions, each run by
+/// its own `claude` process, so each distinct `session_id` gets its own pid.
+/// One shared pid would make every report with a different `session_id`
+/// look like a nested session's report, which the daemon ignores (§3.6
+/// "nested sessions").
+fn hook_process(session_id: &str) -> ControllingProcess {
+    let pid = 4000 + session_id.bytes().map(u32::from).sum::<u32>();
+    ControllingProcess { pid, tty: "/dev/ttys000".into() }
+}
 
 #[tokio::test]
 async fn fixtures_replay_matches_expected_subscribe_sequence() {
@@ -107,7 +125,7 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
     //    fresh idle entry with the flag down (§3.4).
     send(&daemon, "session_end_clear.json", HookEvent::SessionEnd).await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target, reason } => {
+        SubscribeEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, TARGET);
             assert_eq!(reason, RemovalReason::SessionEnd);
         }
@@ -128,7 +146,7 @@ async fn fixtures_replay_matches_expected_subscribe_sequence() {
     //    completion toast for this reason).
     send(&daemon, "session_end.json", HookEvent::SessionEnd).await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target, reason } => {
+        SubscribeEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, TARGET);
             assert_eq!(reason, RemovalReason::SessionEnd);
         }
@@ -224,7 +242,7 @@ async fn elicitation_and_prompt_input_exit_fixtures_replay() {
     )
     .await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target, reason } => {
+        SubscribeEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, TARGET);
             assert_eq!(reason, RemovalReason::SessionEnd);
         }
@@ -236,7 +254,8 @@ async fn elicitation_and_prompt_input_exit_fixtures_replay() {
 
 async fn send(daemon: &TestDaemon, fixture: &str, event: HookEvent) {
     let raw = load_fixture(fixture);
-    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1_700_000_000)
+    let session_id = raw["session_id"].as_str().expect("fixture has a session_id");
+    let payload = build_report(event, &raw, &ITERM_ENV, Some(&hook_process(session_id)), 1_700_000_000)
         .expect("fixture should extract cleanly")
         .expect("fixture + ITERM_SESSION_ID should never be dropped");
     daemon.report(payload).await;

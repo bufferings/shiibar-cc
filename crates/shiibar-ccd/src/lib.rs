@@ -11,6 +11,7 @@
 pub mod clock;
 pub mod core;
 pub mod logging;
+pub mod merge;
 pub mod paths;
 pub mod server;
 pub mod state;

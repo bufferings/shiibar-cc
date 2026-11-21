@@ -1,12 +1,14 @@
 //! Client library: socket connection, list / subscribe / wait, selector
 //! resolution, cwd label formatting, and the terminal modules (`iterm2` /
-//! `apple_terminal` — the ONLY places that know about iTerm2 / Terminal.app /
-//! AppleScript) behind the shared `terminal` dispatch.
+//! `apple_terminal` / `ghostty` — the ONLY places that know about iTerm2 /
+//! Terminal.app / Ghostty / AppleScript) behind the shared `terminal`
+//! dispatch.
 //!
 //! Spec: docs/DESIGN.md §4.3.
 
 pub mod apple_terminal;
 pub mod connection;
+pub mod ghostty;
 pub mod iterm2;
 pub mod label;
 pub mod reconcile;

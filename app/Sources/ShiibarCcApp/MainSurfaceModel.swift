@@ -253,7 +253,8 @@ final class MainSurfaceModel: ObservableObject {
     /// for Refresh); the completion receives the exit code on the main
     /// actor.
     var runCommand: (_ arguments: [String], _ completion: @escaping @MainActor (Int32) -> Void) -> Void
-    /// The `--terminal` value for Resume / Branch (§4.6, `ResumeTerminal`).
+    /// The `--terminal` value for Resume / Branch: the Settings `Terminal`
+    /// value (§4.6 "Resume and Branch"); the agent list plays no part.
     var resumeTerminal: () -> String
     /// Exit 3 from a row verb or from Refresh's reconcile (§4.5: the shared
     /// TCC warning row).
@@ -265,6 +266,12 @@ final class MainSurfaceModel: ObservableObject {
     /// refetch after a Running row ended, and the end of a finished
     /// Refresh's transient — §4.6 / §9). Injected for tests.
     private let schedule: (_ seconds: Double, _ action: @escaping @MainActor () -> Void) -> Void
+    /// The mark-read timer (§4.5 "operations that lower the unreviewed
+    /// flag"): runs the action after the §9 time. Separate from `schedule`
+    /// so tests fire it on their own. Injected for tests.
+    private let markReadSchedule: (_ seconds: Double, _ action: @escaping @MainActor () -> Void) -> Void
+    /// The `seen` subprocesses in flight, for the resend after a `rekey`.
+    private var seenRequests = SeenRequestTracker()
     /// The system double-click interval (`NSEvent.doubleClickInterval`) and
     /// the system uptime clock the press times use (`NSEvent.timestamp`):
     /// a single click's deselect of an accent row waits for the interval
@@ -357,9 +364,10 @@ final class MainSurfaceModel: ObservableObject {
         textSize: TextSizeStore,
         launchers: ConversationsLaunchers = .live,
         runCommand: @escaping (_ arguments: [String], _ completion: @escaping @MainActor (Int32) -> Void) -> Void,
-        resumeTerminal: @escaping () -> String = { ResumeTerminal.iterm2 },
+        resumeTerminal: @escaping () -> String = { ResumeTerminal.iterm2.cliValue },
         clock: @escaping () -> Date = Date.init,
         schedule: @escaping (_ seconds: Double, _ action: @escaping @MainActor () -> Void) -> Void = MainSurfaceModel.scheduleOnMain,
+        markReadSchedule: @escaping (_ seconds: Double, _ action: @escaping @MainActor () -> Void) -> Void = MainSurfaceModel.scheduleOnMain,
         doubleClickInterval: @escaping () -> TimeInterval = { NSEvent.doubleClickInterval },
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         webPaneFactory: @escaping @MainActor () -> WebPaneController = { WebPaneController() }
@@ -372,6 +380,7 @@ final class MainSurfaceModel: ObservableObject {
         self.resumeTerminal = resumeTerminal
         self.clock = clock
         self.schedule = schedule
+        self.markReadSchedule = markReadSchedule
         self.doubleClickInterval = doubleClickInterval
         self.uptime = uptime
         self.webPaneFactory = webPaneFactory
@@ -435,6 +444,14 @@ final class MainSurfaceModel: ObservableObject {
            sessionID == paneSessionID {
             requestPaneReload(.statusChange)
         }
+    }
+
+    /// Whether the terminal chosen in Settings can be used was decided
+    /// again: while it cannot, Resume and Branch are disabled with the
+    /// reason as the tooltip (§4.6 "Resume and Branch").
+    func resumeTerminalAvailabilityChanged(_ availability: ResumeTerminalAvailability) {
+        guard availability != list.resumeTerminalAvailability else { return }
+        send(.resumeTerminalAvailabilityChanged(availability))
     }
 
     func setWarnings(_ warnings: [SurfaceWarning]) {
@@ -684,7 +701,7 @@ final class MainSurfaceModel: ObservableObject {
         case .perform(let command):
             keySurface = surface
             defer { keySurface = nil }
-            run(list.perform(command))
+            runTracked { $0.perform(command) }
             return .consumed
         }
     }
@@ -744,6 +761,36 @@ final class MainSurfaceModel: ObservableObject {
         send(.openedByHotKey)
     }
 
+    // MARK: - Unreviewed flag (§4.5 "operations that lower the unreviewed flag")
+
+    /// Run `shiibar-cc seen <target>` (the lasting selection, and `Mark all
+    /// as read`). When the daemon moves the target to another one while it
+    /// runs (`targetRekeyed`), `seen` goes once more to the new target after
+    /// it ends, if that entry is unreviewed then.
+    func markRead(target: String) {
+        let id = seenRequests.started(target: target)
+        runCommand(CLIRunner.seenArguments(target: target)) { [weak self] _ in
+            guard let self, let resend = self.seenRequests.finished(id: id, agents: self.list.agents) else { return }
+            self.runCommand(CLIRunner.seenArguments(target: resend)) { _ in }
+        }
+    }
+
+    /// The daemon moved an entry to a new target (an `agent_removed` with
+    /// reason `rekey` — §4.5 "desktop notifications"). Call before the
+    /// agent table with the new target arrives (`agentsUpdated`): the row,
+    /// its selection and the conversation pane carry over.
+    func targetRekeyed(from: String, to: String) {
+        seenRequests.rekeyed(from: from, to: to)
+        send(.targetRekeyed(from: from, to: to))
+    }
+
+    /// A notification of a session the app cannot jump to was clicked and
+    /// the surface is open (§4.5 "notification click"): Core selects the
+    /// Running row and starts the mark-read timer over.
+    func notificationClicked(target: String) {
+        send(.notificationClicked(target: target, hasSearchText: !query.isEmpty))
+    }
+
     // MARK: - Refresh
 
     /// Refresh (§4.6), from the header row's Refresh button and from ⌘R:
@@ -789,7 +836,7 @@ final class MainSurfaceModel: ObservableObject {
     // MARK: - Events and effects
 
     private func send(_ event: UnifiedListEvent) {
-        run(list.handle(event))
+        runTracked { $0.handle(event) }
         // `No conversation to show` belongs to a Running row. When a Running
         // row that ended hands its selection to the History row with the
         // same session_id, the shown conversation stays the same (no load
@@ -798,6 +845,21 @@ final class MainSurfaceModel: ObservableObject {
            case .conversation = selection.key, !selection.sessionID.isEmpty {
             loadConversation(selection.sessionID)
         }
+    }
+
+    /// Apply one change to the list state and run its effects. When the
+    /// change started (or started over) the mark-read timer, schedule its
+    /// answer after the §9 time (§4.5 "operations that lower the unreviewed
+    /// flag"); a cancelled or replaced timer ignores the answer.
+    private func runTracked(_ change: (inout UnifiedListState) -> [UnifiedListEffect]) {
+        let timerBefore = list.markReadTimerID
+        let effects = change(&list)
+        if let id = list.markReadTimerID, id != timerBefore {
+            markReadSchedule(SelectionMarkRead.delaySeconds) { [weak self] in
+                self?.send(.markReadDue(id: id))
+            }
+        }
+        run(effects)
     }
 
     /// The surface whose key event is being handled (focus effects go
@@ -874,6 +936,17 @@ final class MainSurfaceModel: ObservableObject {
                 }
             case .closePopover:
                 onClosePopover()
+            case .markRead(let target):
+                markRead(target: target)
+            case .clearSearchText:
+                // A notification click cleared the search (§4.5
+                // "notification click"): results of searches started before
+                // it are stale, so an older filtered result arriving before
+                // the debounced browse search cannot hide the clicked row.
+                // The list's Running filter stays suspended until the result
+                // of a search started after the click arrives.
+                invalidateInFlightSearches()
+                query = ""
             case .refresh:
                 refresh()
             case .nextMatch:
@@ -1058,6 +1131,14 @@ final class MainSurfaceModel: ObservableObject {
             surfaceLog.notice("search gen \(generation) result exit=\(result.exitCode) bytes=\(result.stdout.utf8.count)")
             self.handleSearchResult(result, filtered: issue)
         }
+    }
+
+    /// Drops the result of every search started so far: the running one is
+    /// cancelled and its generation is no longer current.
+    private func invalidateInFlightSearches() {
+        searchProcess?.cancel()
+        searchProcess = nil
+        searchGeneration += 1
     }
 
     private func handleSearchResult(_ result: CLIRunResult, filtered: Bool) {

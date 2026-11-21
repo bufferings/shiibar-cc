@@ -9,15 +9,26 @@
 mod support;
 
 use serde_json::json;
-use shiibar_cc_proto::{extract::build_report, HookEvent, Status, SubscribeEvent};
+use shiibar_cc_proto::{extract::{build_report, ControllingProcess, HookEnv}, HookEvent, Status, SubscribeEvent};
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::TestDaemon;
 
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
 
+const ITERM_ENV: HookEnv<'static> = HookEnv {
+    term_program: Some("iTerm.app"),
+    term_program_version: None,
+    iterm_session_id: Some(ITERM_SESSION_ID),
+};
+
+/// The `claude` process the report's ancestor walk is assumed to have found.
+fn hook_process() -> ControllingProcess {
+    ControllingProcess { pid: 4242, tty: "/dev/ttys000".into() }
+}
+
 async fn send(daemon: &TestDaemon, event: HookEvent, raw: serde_json::Value) {
-    let payload = build_report(event, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1)
+    let payload = build_report(event, &raw, &ITERM_ENV, Some(&hook_process()), 1)
         .expect("extraction should succeed")
         .expect("must not be dropped");
     daemon.report(payload).await;

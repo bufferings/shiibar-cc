@@ -1,5 +1,5 @@
-//! `shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] [--fork]
-//! <session-id>` (DESIGN.md §4.3/§4.4): open a new terminal window and resume
+//! `shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal|ghostty]
+//! [--fork] <session-id>` (DESIGN.md §4.3/§4.4): open a new terminal window and resume
 //! a past conversation there. With `--fork`, the command run in the terminal
 //! gets `--fork-session` appended, so the conversation continues as a copy
 //! under a new session ID and the original is left unchanged (§4.4/§7-6);
@@ -8,8 +8,10 @@
 //! `focus`/`seen`/`remove`, this does NOT connect to the daemon and does NOT
 //! resolve a selector — `cwd`, `session_id`, and the terminal are taken as
 //! the caller's explicit, exact values (§4.4: resume makes no decisions of
-//! its own — the app decides which terminal from observation, §4.6/T6, and
-//! passes `--terminal`; the default is `iterm2`).
+//! its own — the app passes the terminal chosen in Settings as
+//! `--terminal`, §4.6; the default is `iterm2`). When a running Ghostty is
+//! older than the minimum version, `--terminal ghostty` is exit 1 with the
+//! ghostty module's message (§4.3/§4.4).
 
 use crate::exitcode;
 use shiibar_cc_client::terminal::{
@@ -51,8 +53,7 @@ pub struct ResumeArgs {
     pub fork: bool,
 }
 
-const USAGE: &str =
-    "usage: shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal] [--fork] <session-id>";
+const USAGE: &str = "usage: shiibar-cc resume --cwd <dir> [--terminal iterm2|apple-terminal|ghostty] [--fork] <session-id>";
 
 pub fn parse_resume_args(args: &[String]) -> Result<ResumeArgs, String> {
     let mut cwd: Option<PathBuf> = None;
@@ -75,7 +76,7 @@ pub fn parse_resume_args(args: &[String]) -> Result<ResumeArgs, String> {
                 };
                 terminal = TerminalKind::parse(v).ok_or_else(|| {
                     format!(
-                        "shiibar-cc resume: unknown --terminal '{v}' (expected iterm2|apple-terminal)"
+                        "shiibar-cc resume: unknown --terminal '{v}' (expected iterm2|apple-terminal|ghostty)"
                     )
                 })?;
             }
@@ -207,10 +208,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_an_explicit_ghostty() {
+        let parsed =
+            parse_resume_args(&args(&["--cwd", "/tmp/proj", "--terminal", "ghostty", "S"]))
+                .unwrap();
+        assert_eq!(parsed.terminal, TerminalKind::Ghostty);
+    }
+
+    #[test]
     fn an_unknown_terminal_value_is_an_error() {
         assert!(
             parse_resume_args(&args(&["--cwd", "/tmp/proj", "--terminal", "tmux", "S"])).is_err()
         );
+    }
+
+    #[test]
+    fn the_unknown_terminal_error_lists_all_three_terminals() {
+        let e = parse_resume_args(&args(&["--cwd", "/tmp/proj", "--terminal", "tmux", "S"]))
+            .unwrap_err();
+        assert!(e.contains("iterm2|apple-terminal|ghostty"), "{e}");
+    }
+
+    #[test]
+    fn the_usage_text_lists_all_three_terminals() {
+        let e = parse_resume_args(&args(&["S"])).unwrap_err();
+        assert_eq!(e, USAGE);
+        assert!(e.contains("[--terminal iterm2|apple-terminal|ghostty]"), "{e}");
     }
 
     #[test]
@@ -492,6 +515,125 @@ mod tests {
             &runner,
         );
         assert_eq!(report.exit_code, exitcode::TCC_DENIED);
+    }
+
+    // ---- run_resume --terminal ghostty (§4.3/§4.4) ----
+
+    /// Answers the ghostty module's version query with `version_stdout` and
+    /// any other script with `OK`, recording every script.
+    struct GhosttyRunner {
+        version_stdout: &'static str,
+        scripts: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl GhosttyRunner {
+        fn new(version_stdout: &'static str) -> Self {
+            GhosttyRunner {
+                version_stdout,
+                scripts: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AppleScriptRunner for GhosttyRunner {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            self.scripts.borrow_mut().push(script.to_string());
+            if script.contains(r#"return "VERSION:""#) {
+                Ok(out(true, self.version_stdout, ""))
+            } else {
+                Ok(out(true, "OK\n", ""))
+            }
+        }
+    }
+
+    #[test]
+    fn ghostty_resume_opens_a_window_and_is_exit_0() {
+        for (version_stdout, fork) in [
+            ("VERSION:1.4.0\n", false),
+            ("VERSION:1.4.0\n", true),
+            // Not running: the resume script itself launches Ghostty.
+            ("NOT_RUNNING\n", false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = GhosttyRunner::new(version_stdout);
+            let report =
+                run_resume(dir.path(), "SESSION-1", TerminalKind::Ghostty, fork, &runner);
+            assert_eq!(
+                report.exit_code,
+                exitcode::OK,
+                "{version_stdout:?}: message={:?}",
+                report.message
+            );
+            let scripts = runner.scripts.borrow();
+            assert_eq!(scripts.len(), 2, "version query, then the resume script");
+            assert!(scripts[1].contains("initial input"));
+            let expected_tail = if fork {
+                "claude --resume 'SESSION-1' --fork-session\""
+            } else {
+                "claude --resume 'SESSION-1'\""
+            };
+            assert!(scripts[1].contains(expected_tail), "{}", scripts[1]);
+        }
+    }
+
+    #[test]
+    fn ghostty_older_than_the_minimum_version_is_exit_1_with_the_update_message() {
+        for fork in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = GhosttyRunner::new("VERSION:1.3.1\n");
+            let report =
+                run_resume(dir.path(), "SESSION-1", TerminalKind::Ghostty, fork, &runner);
+            assert_eq!(report.exit_code, exitcode::ERROR);
+            assert_eq!(
+                report.message.as_deref(),
+                Some(
+                    format!(
+                        "shiibar-cc resume: {}",
+                        shiibar_cc_client::ghostty::UNSUPPORTED_VERSION_MESSAGE
+                    )
+                    .as_str()
+                )
+            );
+            assert_eq!(
+                runner.scripts.borrow().len(),
+                1,
+                "no window is opened for an old Ghostty"
+            );
+        }
+    }
+
+    #[test]
+    fn ghostty_tcc_denied_is_exit_3() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = ScriptedRunner {
+            output: out(
+                false,
+                "",
+                "Not authorized to send Apple events to Ghostty. (-1743)",
+            ),
+        };
+        let report = run_resume(
+            dir.path(),
+            "SESSION-1",
+            TerminalKind::Ghostty,
+            false,
+            &runner,
+        );
+        assert_eq!(report.exit_code, exitcode::TCC_DENIED);
+    }
+
+    #[test]
+    fn ghostty_with_a_relative_cwd_is_exit_1_without_osascript() {
+        let runner = GhosttyRunner::new("VERSION:1.4.0\n");
+        let report = run_resume(
+            Path::new("relative/path"),
+            "SESSION-1",
+            TerminalKind::Ghostty,
+            false,
+            &runner,
+        );
+        assert_eq!(report.exit_code, exitcode::ERROR);
+        assert!(runner.scripts.borrow().is_empty());
     }
 
     #[test]

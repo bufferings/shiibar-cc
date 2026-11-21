@@ -24,8 +24,16 @@ private let delaySeconds: TimeInterval = 3
 @MainActor
 final class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private let edgeTracker = UnreviewedEdgeTracker()
-    /// Called (main actor) when a notification is clicked, to focus that target.
+    /// Old target -> new target of every `rekey` (§4.5 "desktop
+    /// notifications"); kept until the app quits.
+    private var rekeys = TargetRekeyMap()
+    /// Called (main actor) when a notification of a session the app can jump
+    /// to is clicked, to focus that target.
     var onFocusRequested: ((String) -> Void)?
+    /// Called (main actor) when a notification of a session the app cannot
+    /// jump to is clicked: open the surface and select its Running row
+    /// (§4.5 "notification click").
+    var onSelectRowRequested: ((String) -> Void)?
     /// Reflects the current authorization status for the "denied" warning row (§4.5).
     @Published private(set) var permissionDenied = false
 
@@ -34,8 +42,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// task brief) so an existing installation's choice carries over.
     private static let muteKey = "cc.shiibar.muteSound"
     var isMuted: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.muteKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.muteKey) }
+        get { defaults.bool(forKey: Self.muteKey) }
+        set { defaults.set(newValue, forKey: Self.muteKey) }
     }
 
     /// Settings window's "Waiting sound" / "Done sound" pickers (§4.5/§8.26):
@@ -46,12 +54,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     private static let waitingSoundNameKey = "cc.shiibar.waitingSoundName"
     private static let doneSoundNameKey = "cc.shiibar.doneSoundName"
     var waitingSoundName: String {
-        get { UserDefaults.standard.string(forKey: Self.waitingSoundNameKey) ?? SoundCatalog.defaultSoundName }
-        set { UserDefaults.standard.set(newValue, forKey: Self.waitingSoundNameKey) }
+        get { defaults.string(forKey: Self.waitingSoundNameKey) ?? SoundCatalog.defaultSoundName }
+        set { defaults.set(newValue, forKey: Self.waitingSoundNameKey) }
     }
     var doneSoundName: String {
-        get { UserDefaults.standard.string(forKey: Self.doneSoundNameKey) ?? SoundCatalog.defaultSoundName }
-        set { UserDefaults.standard.set(newValue, forKey: Self.doneSoundNameKey) }
+        get { defaults.string(forKey: Self.doneSoundNameKey) ?? SoundCatalog.defaultSoundName }
+        set { defaults.set(newValue, forKey: Self.doneSoundNameKey) }
     }
 
     /// `UNUserNotificationCenter.current()` aborts the process
@@ -68,7 +76,29 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return center
     }()
 
-    override init() {
+    /// Where a delivered notification goes, and how delivered ones are
+    /// removed (by thread identifier = target). Production: the
+    /// notification center; tests inject spies so nothing reaches it.
+    struct Delivery {
+        var post: @MainActor (_ request: UNNotificationRequest) -> Void
+        var removeDelivered: @MainActor (_ threadIdentifier: String) -> Void
+    }
+
+    private let defaults: UserDefaults
+    private let scheduleAfter: (_ seconds: TimeInterval, _ action: @escaping @MainActor () -> Void) -> Void
+    private var delivery: Delivery?
+
+    /// `delivery` nil = the system notification center. `scheduleAfter`
+    /// runs the delayed re-check (§4.5: 3 seconds); injected for tests.
+    init(
+        defaults: UserDefaults = .standard,
+        scheduleAfter: @escaping (_ seconds: TimeInterval, _ action: @escaping @MainActor () -> Void) -> Void
+            = MainSurfaceModel.scheduleOnMain,
+        delivery: Delivery? = nil
+    ) {
+        self.defaults = defaults
+        self.scheduleAfter = scheduleAfter
+        self.delivery = delivery
         super.init()
     }
 
@@ -127,6 +157,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// status_changed, or a post-reconcile refresh, §4.5) to detect rising
     /// edges and schedule their delayed notifications.
     func observe(agents: [Agent]) {
+        noteCurrentTargets(agents)
         for edge in edgeTracker.observe(agents: agents) {
             scheduleDelayedNotification(for: edge)
         }
@@ -139,8 +170,18 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     func observeSnapshot(agents: [Agent]) {
         let isBaseline = !hasConsumedFirstSnapshot
         hasConsumedFirstSnapshot = true
+        noteCurrentTargets(agents)
         for edge in edgeTracker.observe(agents: agents, baseline: isBaseline) {
             scheduleDelayedNotification(for: edge)
+        }
+    }
+
+    /// Every target in the table is a current target: a former target an
+    /// entry is registered or reported under again (a new session reusing
+    /// an old `process:<pid>`) stops being redirected by the `rekey` map.
+    private func noteCurrentTargets(_ agents: [Agent]) {
+        for agent in agents {
+            rekeys.targetIsCurrent(agent.target)
         }
     }
 
@@ -150,10 +191,24 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         edgeTracker.forget(target: target)
     }
 
+    /// The daemon moved an entry from `from` to `to` (`agent_removed` with
+    /// reason `rekey` — §4.5 "desktop notifications"): the fired record
+    /// moves with it (no new notification for the same rise), a pending
+    /// delayed notification re-checks the new target, and a click on a
+    /// notification delivered before reads its target as the new one.
+    /// Delivered notifications are not removed by the rekey itself; a later
+    /// sweep of the entry removes them under the old target too.
+    func rekey(from: String, to: String) {
+        edgeTracker.rekey(from: from, to: to)
+        rekeys.record(from: from, to: to)
+    }
+
     private func scheduleDelayedNotification(for edge: UnreviewedEdge) {
-        let target = edge.target
-        DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
+        scheduleAfter(delaySeconds) { [weak self] in
             guard let self else { return }
+            // The entry may have moved to another target meanwhile (`rekey`):
+            // re-check, and deliver for, its current target.
+            let target = self.rekeys.resolve(edge.target)
             // Re-check at fire time (§4.5): only the "still unreviewed?"
             // condition gates delivery now — foreground suppression was
             // dropped in M5 (§8.16), so there's no subprocess probe here
@@ -163,7 +218,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 currentlyUnreviewed: agents.contains(where: { $0.target == target && $0.unreviewed })
             ) else { return }
             guard let agent = agents.first(where: { $0.target == target }) else { return }
-            self.deliver(edge: edge, agent: agent)
+            self.deliver(edge: UnreviewedEdge(target: target, status: edge.status), agent: agent)
         }
     }
 
@@ -220,7 +275,11 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             content: content,
             trigger: nil
         )
-        center?.add(request)
+        if let delivery {
+            delivery.post(request)
+        } else {
+            center?.add(request)
+        }
     }
 
     /// Sweep delivered notifications for `target`, unless the reason forbids
@@ -231,11 +290,21 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     /// Sweep on focus / unreviewed-lowered (no removal reason involved).
+    /// Notifications delivered under the entry's earlier targets (every
+    /// former target the `rekey` map resolves to `target`) go too.
     func sweepDelivered(target: String) {
+        let threads = [target] + rekeys.sources(resolvingTo: target)
+        if let delivery {
+            for thread in threads {
+                delivery.removeDelivered(thread)
+            }
+            return
+        }
         guard let center else { return }
+        let threadSet = Set(threads)
         center.getDeliveredNotifications { notifications in
             let ids = notifications
-                .filter { $0.request.content.threadIdentifier == target }
+                .filter { threadSet.contains($0.request.content.threadIdentifier) }
                 .map(\.request.identifier)
             guard !ids.isEmpty else { return }
             // `center` is the process-wide singleton; re-fetch it here
@@ -262,8 +331,21 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     ) {
         let target = response.notification.request.content.threadIdentifier
         Task { @MainActor in
-            self.onFocusRequested?(target)
+            self.notificationClicked(threadIdentifier: target)
             completionHandler()
+        }
+    }
+
+    /// A click on a delivered notification (§4.5 "notification click"): its
+    /// target (the thread identifier) is read through the `rekey` map, then
+    /// a target the app can jump to is focused and any other one has its
+    /// Running row selected.
+    func notificationClicked(threadIdentifier: String) {
+        switch NotificationClickAction.decide(target: rekeys.resolve(threadIdentifier)) {
+        case .focus(let target):
+            onFocusRequested?(target)
+        case .selectRow(let target):
+            onSelectRowRequested?(target)
         }
     }
 }

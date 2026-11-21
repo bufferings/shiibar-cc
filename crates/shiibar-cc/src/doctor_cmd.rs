@@ -15,7 +15,7 @@
 use crate::exitcode;
 use serde::{Serialize, Serializer};
 use shiibar_cc_client::terminal::{AppleScriptRunner, ProbeOutcome, TerminalError};
-use shiibar_cc_client::{apple_terminal, iterm2};
+use shiibar_cc_client::{apple_terminal, ghostty, iterm2};
 use shiibar_cc_proto::{InfoResponse, Request};
 use std::ffi::OsStr;
 use std::path::Path;
@@ -26,8 +26,8 @@ pub struct DoctorReport {
 }
 
 /// ok / warn / fail per DESIGN.md §4.4's JSON schema. `Info` is an extra
-/// internal state for the one line that isn't a problem at all (iTerm2
-/// isn't running, so the TCC probe wasn't attempted) — the human text shows
+/// internal state for the lines that aren't a problem at all (a terminal
+/// isn't running, so its TCC probe wasn't attempted) — the human text shows
 /// a distinct `[info]` tag, but since the spec's JSON schema only has three
 /// values it serializes the same as `Ok`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +300,7 @@ pub fn run_doctor_checks(
         "Terminal.app",
         apple_terminal::probe(runner),
     ));
+    checks.push(tcc_check("tcc_ghostty", "Ghostty", ghostty::probe(runner)));
 
     match spaces_reader.read().as_deref() {
         Some("0") => checks.push(CheckRecord::new(
@@ -384,6 +385,22 @@ mod tests {
 
     impl AppleScriptRunner for FakeRunner {
         fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+            Ok(self.output.clone())
+        }
+    }
+
+    /// Answers iTerm2's preliminary running query as running and every
+    /// other script with `output`, so the iTerm2 probe script itself gets
+    /// `output`.
+    struct Iterm2RunningRunner {
+        output: AppleScriptOutput,
+    }
+
+    impl AppleScriptRunner for Iterm2RunningRunner {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            if script == iterm2::build_running_script() {
+                return Ok(out(true, "RUNNING\n", ""));
+            }
             Ok(self.output.clone())
         }
     }
@@ -505,7 +522,7 @@ mod tests {
     #[test]
     fn tcc_denied_probe_is_a_warning_not_a_failing_exit_code() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = FakeRunner {
+        let runner = Iterm2RunningRunner {
             output: out(
                 false,
                 "",
@@ -555,14 +572,171 @@ mod tests {
         assert_eq!(apple.status, CheckStatus::Info);
         assert!(iterm2.line().starts_with("[info]"));
         assert!(apple.line().contains("Terminal.app is not running"));
+        let ghostty = checks.iter().find(|c| c.id == "tcc_ghostty").expect("ghostty tcc check");
+        assert_eq!(ghostty.status, CheckStatus::Info);
+        assert!(ghostty.line().contains("Ghostty is not running"));
 
-        // Both fold to `ok` in JSON (§4.4: the schema has no fourth value).
+        // All fold to `ok` in JSON (§4.4: the schema has no fourth value).
         let value: serde_json::Value = serde_json::from_str(&checks_to_json(&checks)).unwrap();
         let array = value["checks"].as_array().unwrap();
-        for id in ["tcc_iterm2", "tcc_apple_terminal"] {
+        for id in ["tcc_iterm2", "tcc_apple_terminal", "tcc_ghostty"] {
             let c = array.iter().find(|c| c["id"] == id).unwrap();
             assert_eq!(c["status"], "ok", "{id} not-running must fold to ok in JSON");
         }
+    }
+
+    #[test]
+    fn tcc_iterm2_not_running_sends_only_the_running_query_to_iterm2() {
+        // A script that uses iTerm2's terminology does not compile when
+        // iTerm2 is not installed, so the iTerm2 probe script is sent only
+        // after the running query reports a running iTerm2.
+        let runner = GhosttyProbeRunner::new(out(true, "NOT_RUNNING\n", ""));
+        let dir = tempfile::tempdir().unwrap();
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &spaces_on(),
+        );
+        let iterm2_check = checks.iter().find(|c| c.id == "tcc_iterm2").expect("iterm2 tcc check");
+        assert_eq!(iterm2_check.status, CheckStatus::Info);
+        let scripts = runner.scripts.borrow();
+        assert!(scripts.contains(&iterm2::build_running_script()));
+        assert!(!scripts.contains(&iterm2::build_probe_script()));
+    }
+
+    // ---- tcc_ghostty (DESIGN.md §4.3 probe(), §4.4) ----
+
+    /// Answers each terminal's probe by a marker in its script: iTerm2 and
+    /// Terminal.app are not running, and Ghostty's version query gets
+    /// `ghostty` (stdout on success, stderr on failure). Records every
+    /// script so a test can check what was sent to Ghostty.
+    struct GhosttyProbeRunner {
+        ghostty: AppleScriptOutput,
+        scripts: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl GhosttyProbeRunner {
+        fn new(ghostty: AppleScriptOutput) -> Self {
+            GhosttyProbeRunner {
+                ghostty,
+                scripts: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn ghostty_scripts(&self) -> Vec<String> {
+            self.scripts
+                .borrow()
+                .iter()
+                .filter(|s| s.contains(r#"application "Ghostty""#))
+                .cloned()
+                .collect()
+        }
+    }
+
+    impl AppleScriptRunner for GhosttyProbeRunner {
+        fn run(&self, script: &str) -> std::io::Result<AppleScriptOutput> {
+            self.scripts.borrow_mut().push(script.to_string());
+            if script.contains(r#"application "Ghostty""#) {
+                Ok(self.ghostty.clone())
+            } else {
+                Ok(out(true, "NOT_RUNNING\n", ""))
+            }
+        }
+    }
+
+    fn ghostty_check(runner: &GhosttyProbeRunner) -> CheckRecord {
+        let dir = tempfile::tempdir().unwrap();
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            runner,
+            &spaces_on(),
+        );
+        checks
+            .into_iter()
+            .find(|c| c.id == "tcc_ghostty")
+            .expect("tcc_ghostty check present")
+    }
+
+    #[test]
+    fn tcc_ghostty_running_and_answering_is_ok_after_one_guarded_version_query() {
+        let runner = GhosttyProbeRunner::new(out(true, "VERSION:1.4.0\n", ""));
+        let check = ghostty_check(&runner);
+        assert_eq!(check.status, CheckStatus::Ok);
+        assert_eq!(
+            check.line(),
+            "[ok]   osascript can control Ghostty (Automation permission granted)"
+        );
+        // One harmless query, guarded so a Ghostty that isn't running is
+        // never launched (§4.3/§8.47).
+        let scripts = runner.ghostty_scripts();
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].contains(r#"if application "Ghostty" is running"#));
+        assert!(
+            !scripts[0].contains("application id"),
+            "a bundle-id reference fails the whole script when Ghostty is not installed"
+        );
+        assert!(
+            !scripts[0].contains("tty of") && !scripts[0].contains("tty is"),
+            "the probe never references the terminal tty property"
+        );
+    }
+
+    #[test]
+    fn tcc_ghostty_older_than_the_minimum_version_is_still_probed_as_granted() {
+        // The version query is the probe; it answering at all means the
+        // permission is granted, whatever the version.
+        let runner = GhosttyProbeRunner::new(out(true, "VERSION:1.3.1\n", ""));
+        assert_eq!(ghostty_check(&runner).status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn tcc_ghostty_not_running_is_info_and_ok_in_json() {
+        let runner = GhosttyProbeRunner::new(out(true, "NOT_RUNNING\n", ""));
+        let check = ghostty_check(&runner);
+        assert_eq!(check.status, CheckStatus::Info);
+        assert_eq!(
+            check.line(),
+            "[info] Ghostty is not running; Automation permission not checked"
+        );
+        let json = serde_json::to_value(&check).unwrap();
+        assert_eq!(json["status"], "ok");
+    }
+
+    #[test]
+    fn tcc_ghostty_denied_is_a_warning_with_the_settings_hint() {
+        let runner = GhosttyProbeRunner::new(out(
+            false,
+            "",
+            "Not authorized to send Apple events to Ghostty. (-1743)",
+        ));
+        let check = ghostty_check(&runner);
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert_eq!(
+            check.line(),
+            "[warn] osascript Automation permission for Ghostty is denied \
+             (System Settings > Privacy & Security > Automation)"
+        );
+    }
+
+    #[test]
+    fn tcc_ghostty_comes_after_the_other_two_terminal_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = GhosttyProbeRunner::new(out(true, "NOT_RUNNING\n", ""));
+        let checks = run_doctor_checks(
+            &dir.path().join("no-socket"),
+            &dir.path().join("settings.json"),
+            None,
+            &runner,
+            &spaces_on(),
+        );
+        let ids: Vec<&str> = checks.iter().map(|c| c.id).collect();
+        let position = |id: &str| ids.iter().position(|i| *i == id).unwrap();
+        assert!(position("tcc_iterm2") < position("tcc_apple_terminal"));
+        assert!(position("tcc_apple_terminal") < position("tcc_ghostty"));
     }
 
     // ---- structured records / --json (DESIGN.md §4.4) ----

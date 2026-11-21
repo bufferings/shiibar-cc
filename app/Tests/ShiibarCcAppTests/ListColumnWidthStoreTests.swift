@@ -263,7 +263,8 @@ final class ListColumnWidthStoreTests: XCTestCase {
             textSize: TextSizeStore(defaults: defaults),
             launchers: launchers,
             runCommand: { _, _ in },
-            schedule: { _, _ in }
+            schedule: { _, _ in },
+            markReadSchedule: { _, _ in }
         )
     }
 }

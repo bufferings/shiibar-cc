@@ -196,10 +196,28 @@ final class NotificationLogicTests: XCTestCase {
         ))
     }
 
+    /// §4.5 "desktop notifications": an entry that only changed its target
+    /// is not a new rise; a later fall and rise under the new target is.
+    func testRekeyMovesTheFiredRecordToTheNewTarget() {
+        let tracker = UnreviewedEdgeTracker()
+        tracker.observe(agents: [agent(target: "process:1", status: .idle, unreviewed: true)])
+        tracker.rekey(from: "process:1", to: "ghostty:/dev/ttys001")
+        XCTAssertEqual(tracker.observe(agents: [agent(target: "ghostty:/dev/ttys001", status: .idle, unreviewed: true)]), [])
+        XCTAssertEqual(tracker.trackedTargets, ["ghostty:/dev/ttys001"])
+        tracker.observe(agents: [agent(target: "ghostty:/dev/ttys001", status: .idle, unreviewed: false)])
+        XCTAssertEqual(tracker.observe(agents: [agent(target: "ghostty:/dev/ttys001", status: .idle, unreviewed: true)]).map(\.target),
+                       ["ghostty:/dev/ttys001"])
+        // A rekey of a target that is not unreviewed records nothing.
+        tracker.rekey(from: "process:9", to: "process:10")
+        XCTAssertFalse(tracker.trackedTargets.contains("process:10"))
+    }
+
     // ---- Cleanup rule ----
 
-    func testCleanupSweepsForEveryReasonExceptSessionEnd() {
+    func testCleanupSweepsForEveryReasonExceptSessionEndAndRekey() {
         XCTAssertFalse(NotificationCleanupRule.shouldSweep(onRemovalReason: .sessionEnd))
+        XCTAssertFalse(NotificationCleanupRule.shouldSweep(onRemovalReason: .rekey),
+                       "a rekey keeps delivered notifications: the entry lives on (§4.5)")
         XCTAssertTrue(NotificationCleanupRule.shouldSweep(onRemovalReason: .stale))
         XCTAssertTrue(NotificationCleanupRule.shouldSweep(onRemovalReason: .remove))
         XCTAssertTrue(NotificationCleanupRule.shouldSweep(onRemovalReason: .prune))

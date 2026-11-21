@@ -7,13 +7,24 @@ mod support;
 
 use shiibar_cc_proto::{
     AckResponse, HookEvent, ListResponse, ReconcileSession, RemovalReason, Request, Status, SubscribeEvent,
-    extract::build_report,
+    extract::{build_report, ControllingProcess, HookEnv},
 };
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
+
+const ITERM_ENV: HookEnv<'static> = HookEnv {
+    term_program: Some("iTerm.app"),
+    term_program_version: None,
+    iterm_session_id: Some(ITERM_SESSION_ID),
+};
+
+/// The `claude` process the report's ancestor walk is assumed to have found.
+fn hook_process() -> ControllingProcess {
+    ControllingProcess { pid: 4242, tty: "/dev/ttys000".into() }
+}
 
 fn session(target: &str, status: Status, waiting_for: Option<&str>) -> ReconcileSession {
     ReconcileSession {
@@ -22,6 +33,8 @@ fn session(target: &str, status: Status, waiting_for: Option<&str>) -> Reconcile
         cwd: format!("/proj/{target}"),
         status,
         waiting_for: waiting_for.map(str::to_string),
+        pid: None,
+        update_only: false,
     }
 }
 
@@ -134,7 +147,7 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     // Register a session that a hook, not reconcile, put there (a ghost
     // candidate: still tracked by shiibar-ccd, but no longer live).
     let raw = load_fixture("session_start_startup.json");
-    let payload = build_report(HookEvent::SessionStart, &raw, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1)
+    let payload = build_report(HookEvent::SessionStart, &raw, &ITERM_ENV, Some(&hook_process()), 1)
         .unwrap()
         .unwrap();
     daemon.report(payload).await;
@@ -157,7 +170,7 @@ async fn reconcile_prune_removes_only_on_complete_true() {
     // A complete scan without the ghost in the live set prunes it.
     reconcile(&daemon, true, vec![session("t-other", Status::Working, None)]).await;
     match sub.next_event().await {
-        SubscribeEvent::AgentRemoved { target, reason } => {
+        SubscribeEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, "iterm2:11111111-1111-1111-1111-111111111111");
             assert_eq!(reason, RemovalReason::Prune, "reconcile prune must report reason=prune (§4.2)");
         }
@@ -196,6 +209,63 @@ async fn reconcile_can_recover_a_waiting_session_the_daemon_never_saw() {
             assert!(agent.unreviewed);
         }
         other => panic!("expected status_changed, got {other:?}"),
+    }
+
+    daemon.shutdown_and_join().await;
+}
+
+#[tokio::test]
+async fn rekey_reaches_subscribers_with_to_and_the_old_target_then_behaves_as_unregistered() {
+    // §4.2: `agent_removed` with reason `rekey` and `to`, immediately
+    // followed by the new target's `status_changed`; afterwards `seen` and
+    // `remove` on the old target answer ok and change nothing. `pid` never
+    // appears in list or subscribe output.
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = TestDaemon::start(dir.path(), Arc::new(SystemClock)).await;
+    let mut sub = daemon.subscribe().await;
+    assert!(matches!(sub.next_event().await, SubscribeEvent::Snapshot { .. }));
+
+    let mut first = session("process:4242", Status::Idle, None);
+    first.pid = Some(4242);
+    reconcile(&daemon, true, vec![first]).await;
+    assert!(matches!(sub.next_event().await, SubscribeEvent::StatusChanged { .. }));
+
+    let mut moved = session("iterm2:A", Status::Idle, None);
+    moved.pid = Some(4242);
+    moved.session_id = "sess-process:4242".into();
+    moved.cwd = "/proj/process:4242".into();
+    reconcile(&daemon, true, vec![moved]).await;
+    match sub.next_event().await {
+        SubscribeEvent::AgentRemoved { target, reason, to } => {
+            assert_eq!(target, "process:4242");
+            assert_eq!(reason, RemovalReason::Rekey);
+            assert_eq!(to.as_deref(), Some("iterm2:A"));
+        }
+        other => panic!("expected agent_removed(rekey), got {other:?}"),
+    }
+    match sub.next_event().await {
+        SubscribeEvent::StatusChanged { agent } => {
+            assert_eq!(agent.target, "iterm2:A");
+            assert!(agent.unreviewed, "carried over from the new discovery, not raised again");
+        }
+        other => panic!("expected status_changed(iterm2:A), got {other:?}"),
+    }
+
+    let ack: AckResponse = daemon.request(&Request::Seen { target: "process:4242".into() }).await.unwrap();
+    assert!(ack.ok);
+    let ack: AckResponse = daemon.request(&Request::Remove { target: "process:4242".into() }).await.unwrap();
+    assert!(ack.ok);
+    let list: serde_json::Value = daemon.request(&Request::List).await.unwrap();
+    let agents = list["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0]["target"], "iterm2:A");
+    assert_eq!(agents[0]["unreviewed"], true, "seen on the old target must not touch the entry");
+    assert!(!list.to_string().contains("pid"), "list must not carry pid: {list}");
+
+    let mut late = daemon.subscribe().await;
+    match late.next_event().await {
+        SubscribeEvent::Snapshot { agents } => assert_eq!(agents.len(), 1),
+        other => panic!("expected snapshot, got {other:?}"),
     }
 
     daemon.shutdown_and_join().await;

@@ -17,7 +17,7 @@ cask "shiibar-cc" do
 
   url "https://github.com/bufferings/shiibar-cc/releases/download/v#{version}/shiibar-cc-#{version}-arm64.zip"
   name "Shiibar CC"
-  desc "Menu bar app that tracks Claude Code status and jumps to its iTerm2 tab"
+  desc "Menu bar Claude Code tracker that jumps to its iTerm2, Terminal or Ghostty tab"
   homepage "https://github.com/bufferings/shiibar-cc"
 
   depends_on arch:  :arm64
@@ -178,10 +178,12 @@ cask "shiibar-cc" do
         claude plugin marketplace add bufferings/shiibar-cc
         claude plugin install shiibar-cc@shiibar-cc
 
-      Open Shiibar CC once to grant the notification and iTerm2 Automation
-      permissions it needs (it registers itself as a Login Item on that
-      first launch too). Then verify everything end to end from the Setup
-      Check tab of the ⌄ menu's Settings…, or from a terminal:
+      Open Shiibar CC once to grant the notification permission it needs
+      (it registers itself as a Login Item on that first launch too). It
+      asks for the Automation permission of iTerm2, Terminal.app or Ghostty
+      only when it first needs to control that terminal. Then verify
+      everything end to end from the Setup Check tab of the ⌄ menu's
+      Settings…, or from a terminal:
 
         shiibar-cc doctor
 

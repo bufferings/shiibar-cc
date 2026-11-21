@@ -122,7 +122,15 @@ pub enum NotificationType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReportPayload {
     pub event: HookEvent,
-    pub target: String,
+    /// The session's prefixed target (§2/§4.1). Always present, except on a
+    /// `SessionEnd` whose hook found no process with a controlling terminal:
+    /// closing a terminal window detaches the `claude` process from its
+    /// terminal before its SessionEnd hook runs, so no target can be
+    /// derived. Such a report is omitted from the JSON entirely (never
+    /// `null`), and the daemon matches it by `session_id` alone. A report of
+    /// any other event without a target is invalid (`validate`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub target: Option<String>,
     pub session_id: String,
     pub cwd: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -144,6 +152,27 @@ pub struct ReportPayload {
     /// chars by the extraction. Only ever populated on a `Stop` report.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_assistant_message: Option<String>,
+    /// pid of the `claude` process running this session: the first ancestor
+    /// of the hook process with a controlling terminal (§4.1). Optional on
+    /// the wire; a report without it means "pid unknown" (§4.2/§3.6).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub pid: Option<u32>,
+}
+
+/// Why `ReportPayload::validate` rejected a report.
+pub const TARGETLESS_REPORT_ERROR: &str = "report without target is only valid for SessionEnd";
+
+impl ReportPayload {
+    /// Checks the one rule deserialization does not: only a `SessionEnd`
+    /// report may omit `target` (a closed terminal window leaves the process
+    /// without a controlling terminal when SessionEnd runs, so no target can
+    /// be derived; every other event is dropped by the hook in that case).
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.target.is_none() && self.event != HookEvent::SessionEnd {
+            return Err(TARGETLESS_REPORT_ERROR);
+        }
+        Ok(())
+    }
 }
 
 /// One live session as gathered by the client from `claude agents --json` +
@@ -161,6 +190,18 @@ pub struct ReconcileSession {
     /// `waiting` (§3.5/§3.6).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub waiting_for: Option<String>,
+    /// pid from the `claude agents` list (§3.5/§4.2). Optional on the wire;
+    /// a session without it is matched by target only (§3.6 "merging by
+    /// pid").
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub pid: Option<u32>,
+    /// Update-only session (§3.5/§4.2): sent for a session that matched no
+    /// terminal scan in a round where some scan was failed or incomplete.
+    /// The daemon only updates an already-registered entry (same target, or
+    /// else same pid) with it, and never creates an entry or rekeys one
+    /// from it. Absent on the wire means `false`.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub update_only: bool,
 }
 
 /// Requests a client may send, tagged by `cmd` (§4.2).
@@ -260,6 +301,11 @@ pub enum RemovalReason {
     Remove,
     /// reconcile prune: target absent from a complete `claude agents` scan.
     Prune,
+    /// Not a deletion: a complete reconcile moved the entry to a new target
+    /// (§3.6 "merging by pid"). The `agent_removed` event carries the new
+    /// target in `to`, and the new target's `status_changed` follows
+    /// immediately (§4.2).
+    Rekey,
     #[serde(other)]
     #[default]
     Unknown,
@@ -276,6 +322,9 @@ pub enum SubscribeEvent {
         target: String,
         #[serde(default)]
         reason: RemovalReason,
+        /// The new target; present only when `reason` is `rekey` (§4.2).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        to: Option<String>,
     },
     #[serde(other)]
     Unknown,
@@ -294,7 +343,7 @@ mod tests {
                 assert_eq!(p.event, HookEvent::Notification);
                 assert_eq!(p.notification_type, Some(NotificationType::PermissionPrompt));
                 assert_eq!(p.message.as_deref(), Some("Bash: cargo test"));
-                assert_eq!(p.target, "w0t0p0:D2DA6A1F");
+                assert_eq!(p.target.as_deref(), Some("w0t0p0:D2DA6A1F"));
             }
             other => panic!("expected Report, got {other:?}"),
         }
@@ -342,6 +391,7 @@ mod tests {
             SubscribeEvent::AgentRemoved {
                 target: "…".to_string(),
                 reason: RemovalReason::SessionEnd,
+                to: None,
             }
         );
     }
@@ -357,6 +407,7 @@ mod tests {
             SubscribeEvent::AgentRemoved {
                 target: "t".to_string(),
                 reason: RemovalReason::Unknown,
+                to: None,
             }
         );
     }
@@ -382,6 +433,7 @@ mod tests {
             let event = SubscribeEvent::AgentRemoved {
                 target: "t".to_string(),
                 reason,
+                to: None,
             };
             let s = serde_json::to_string(&event).unwrap();
             assert!(s.contains(&format!(r#""reason":"{wire}""#)), "got {s}");
@@ -517,6 +569,123 @@ mod tests {
     }
 
     #[test]
+    fn report_payload_round_trips_the_pid() {
+        // §4.2: every report carries the claude process's pid.
+        let line = r#"{"cmd":"report","event":"Stop","target":"process:48213","session_id":"s","cwd":"/c","ts":1,"pid":48213}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Report(p) = &req else { panic!("expected Report") };
+        assert_eq!(p.pid, Some(48213));
+        let s = serde_json::to_string(&req).unwrap();
+        assert!(s.contains(r#""pid":48213"#), "got {s}");
+        let back: Request = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn report_payload_without_pid_deserializes_as_unknown_and_omits_it_on_the_wire() {
+        // §4.2: `pid` is optional; a report without it means "pid unknown".
+        let line = r#"{"cmd":"report","event":"Stop","target":"t","session_id":"s","cwd":"/c","ts":1}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Report(p) = &req else { panic!("expected Report") };
+        assert_eq!(p.pid, None);
+        let s = serde_json::to_string(&req).unwrap();
+        assert!(!s.contains("pid"), "got {s}");
+    }
+
+    #[test]
+    fn report_with_a_target_serializes_exactly_as_before() {
+        // Making `target` optional must not change the wire form of a report
+        // that has one: same key order, same fields, no `null`s.
+        let req = Request::Report(ReportPayload {
+            event: HookEvent::Stop,
+            target: Some("iterm2:D2DA6A1F".into()),
+            session_id: "s1".into(),
+            cwd: "/path".into(),
+            transcript_path: Some("t".into()),
+            ts: 1751600000,
+            source: None,
+            notification_type: None,
+            message: None,
+            prompt: None,
+            background_tasks: Some(vec![]),
+            last_assistant_message: Some("Done.".into()),
+            pid: Some(48213),
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"cmd":"report","event":"Stop","target":"iterm2:D2DA6A1F","session_id":"s1","cwd":"/path","transcript_path":"t","ts":1751600000,"background_tasks":[],"last_assistant_message":"Done.","pid":48213}"#
+        );
+    }
+
+    /// A SessionEnd whose hook found no controlling terminal (the terminal
+    /// window was closed): no target, no pid.
+    fn targetless_session_end() -> Request {
+        Request::Report(ReportPayload {
+            event: HookEvent::SessionEnd,
+            target: None,
+            session_id: "s1".into(),
+            cwd: "/path".into(),
+            transcript_path: Some("t".into()),
+            ts: 1751600000,
+            source: None,
+            notification_type: None,
+            message: None,
+            prompt: None,
+            background_tasks: None,
+            last_assistant_message: None,
+            pid: None,
+        })
+    }
+
+    #[test]
+    fn targetless_session_end_omits_target_and_pid_and_round_trips() {
+        let req = targetless_session_end();
+        let s = serde_json::to_string(&req).unwrap();
+        assert_eq!(
+            s,
+            r#"{"cmd":"report","event":"SessionEnd","session_id":"s1","cwd":"/path","transcript_path":"t","ts":1751600000}"#
+        );
+        let back: Request = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn explicit_null_target_reads_as_absent() {
+        let line = r#"{"cmd":"report","event":"SessionEnd","target":null,"session_id":"s1","cwd":"/c","ts":1}"#;
+        let Request::Report(p) = serde_json::from_str(line).unwrap() else { panic!("expected Report") };
+        assert_eq!(p.target, None);
+    }
+
+    #[test]
+    fn validate_accepts_a_targetless_session_end_and_any_report_with_a_target() {
+        let Request::Report(p) = targetless_session_end() else { unreachable!() };
+        assert_eq!(p.validate(), Ok(()));
+        for event in ALL_EVENTS {
+            let with_target = ReportPayload { event, target: Some("process:1".into()), ..p.clone() };
+            assert_eq!(with_target.validate(), Ok(()), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_a_targetless_report_of_every_event_but_session_end() {
+        let Request::Report(p) = targetless_session_end() else { unreachable!() };
+        for event in ALL_EVENTS.into_iter().filter(|e| *e != HookEvent::SessionEnd) {
+            let r = ReportPayload { event, ..p.clone() };
+            assert_eq!(r.validate(), Err(TARGETLESS_REPORT_ERROR), "{event:?}");
+        }
+    }
+
+    const ALL_EVENTS: [HookEvent; 7] = [
+        HookEvent::SessionStart,
+        HookEvent::UserPromptSubmit,
+        HookEvent::PostToolUse,
+        HookEvent::PostToolUseFailure,
+        HookEvent::Notification,
+        HookEvent::Stop,
+        HookEvent::SessionEnd,
+    ];
+
+    #[test]
     fn reconcile_request_round_trips_and_matches_wire_example() {
         let line = r#"{"cmd":"reconcile","complete":true,"sessions":[{"target":"D2DA6A1F","session_id":"s1","cwd":"/path","status":"waiting","waiting_for":"permission prompt"}]}"#;
         let req: Request = serde_json::from_str(line).unwrap();
@@ -530,5 +699,67 @@ mod tests {
             }
             other => panic!("expected Reconcile, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn agent_removed_rekey_round_trips_with_to() {
+        // §4.2: a `rekey` agent_removed carries the new target in `to`.
+        let line = r#"{"event":"agent_removed","target":"process:48213","reason":"rekey","to":"iterm2:D2DA6A1F"}"#;
+        let v: SubscribeEvent = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            v,
+            SubscribeEvent::AgentRemoved {
+                target: "process:48213".to_string(),
+                reason: RemovalReason::Rekey,
+                to: Some("iterm2:D2DA6A1F".to_string()),
+            }
+        );
+        let s = serde_json::to_string(&v).unwrap();
+        assert!(s.contains(r#""reason":"rekey""#), "got {s}");
+        assert!(s.contains(r#""to":"iterm2:D2DA6A1F""#), "got {s}");
+        let back: SubscribeEvent = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, v);
+    }
+
+    #[test]
+    fn agent_removed_without_to_omits_it_on_the_wire() {
+        // §4.2: only `rekey` carries `to`; the other reasons leave it out.
+        let event = SubscribeEvent::AgentRemoved {
+            target: "t".to_string(),
+            reason: RemovalReason::Prune,
+            to: None,
+        };
+        let s = serde_json::to_string(&event).unwrap();
+        assert!(!s.contains(r#""to""#), "got {s}");
+    }
+
+    #[test]
+    fn reconcile_session_round_trips_pid_and_update_only() {
+        // §4.2: reconcile sessions carry the `claude agents` pid and the
+        // update-only marker.
+        let line = r#"{"cmd":"reconcile","complete":false,"sessions":[{"target":"process:48213","session_id":"s1","cwd":"/path","status":"idle","pid":48213,"update_only":true}]}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Reconcile { complete, sessions } = &req else { panic!("expected Reconcile") };
+        assert!(!complete);
+        assert_eq!(sessions[0].pid, Some(48213));
+        assert!(sessions[0].update_only);
+        let s = serde_json::to_string(&req).unwrap();
+        assert!(s.contains(r#""pid":48213"#), "got {s}");
+        assert!(s.contains(r#""update_only":true"#), "got {s}");
+        let back: Request = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn reconcile_session_without_pid_or_update_only_reads_as_unknown_pid_and_not_update_only() {
+        // §4.2: both fields are optional; a missing `update_only` is false.
+        let line = r#"{"cmd":"reconcile","complete":true,"sessions":[{"target":"iterm2:A","session_id":"s1","cwd":"/path","status":"idle"}]}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        let Request::Reconcile { sessions, .. } = &req else { panic!("expected Reconcile") };
+        assert_eq!(sessions[0].pid, None);
+        assert!(!sessions[0].update_only);
+        let s = serde_json::to_string(&req).unwrap();
+        assert!(!s.contains("pid"), "got {s}");
+        assert!(!s.contains("update_only"), "got {s}");
     }
 }

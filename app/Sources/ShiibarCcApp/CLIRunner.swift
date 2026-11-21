@@ -152,18 +152,13 @@ enum CLIRunner {
 
     static let reconcileArguments = ["reconcile"]
 
-    /// `shiibar-cc seen <target>` (⌄ menu "Mark all as read", §4.4/§4.5/§8.24):
-    /// clears one target's unreviewed flag. Exit 2 ("no match") is an
-    /// expected outcome, same reasoning as `focus` above — the target can
-    /// disappear (session ends) between the click capturing the unreviewed
-    /// target list and this call running for it. `@discardableResult`: its
-    /// only caller (`AppState.markAllAsRead`) doesn't need the outcome — the
-    /// unreviewed dot disappearing via the subscribe stream IS the feedback
-    /// (§4.5).
-    @discardableResult
-    static func seen(target: String, helpersDirectory: URL?) -> CLIRunResult {
-        run(["seen", target], helpersDirectory: helpersDirectory, expectedExitCodes: [0, 2])
-    }
+    /// The arguments of `shiibar-cc seen <target>` (§4.4): clears one
+    /// target's unreviewed flag (the lasting selection and `Mark all as
+    /// read` — §4.5). Run through `MainSurfaceModel.markRead`, whose runner
+    /// treats exit 2 ("no match") as expected — the target can disappear
+    /// (session ends) before the call runs. No feedback UI: the unreviewed
+    /// dot disappearing via the subscribe stream IS the feedback (§4.5).
+    static func seenArguments(target: String) -> [String] { ["seen", target] }
 
     /// `shiibar-cc doctor --json` (Settings' Setup Check tab, §4.4/§4.5). Exit 1
     /// (a check failed, e.g. the daemon isn't reachable) is an EXPECTED

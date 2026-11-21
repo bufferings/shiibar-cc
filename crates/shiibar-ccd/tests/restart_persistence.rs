@@ -8,13 +8,24 @@
 
 mod support;
 
-use shiibar_cc_proto::{extract::build_report, HookEvent, ListResponse, Request, Status, SubscribeEvent};
+use shiibar_cc_proto::{extract::{build_report, ControllingProcess, HookEnv}, HookEvent, ListResponse, Request, Status, SubscribeEvent};
 use shiibar_ccd::clock::SystemClock;
 use std::sync::Arc;
 use support::{load_fixture, TestDaemon};
 
 const TARGET: &str = "iterm2:11111111-1111-1111-1111-111111111111";
 const ITERM_SESSION_ID: &str = "w0t0p0:11111111-1111-1111-1111-111111111111";
+
+const ITERM_ENV: HookEnv<'static> = HookEnv {
+    term_program: Some("iTerm.app"),
+    term_program_version: None,
+    iterm_session_id: Some(ITERM_SESSION_ID),
+};
+
+/// The `claude` process the report's ancestor walk is assumed to have found.
+fn hook_process() -> ControllingProcess {
+    ControllingProcess { pid: 4242, tty: "/dev/ttys000".into() }
+}
 
 #[tokio::test]
 async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
@@ -26,7 +37,7 @@ async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
         assert!(matches!(sub.next_event().await, SubscribeEvent::Snapshot { .. }));
 
         let prompt = load_fixture("user_prompt_submit.json");
-        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1_700_000_000)
+        let payload = build_report(HookEvent::UserPromptSubmit, &prompt, &ITERM_ENV, Some(&hook_process()), 1_700_000_000)
             .unwrap()
             .unwrap();
         daemon.report(payload).await;
@@ -36,7 +47,7 @@ async fn waiting_entry_and_its_unreviewed_flag_survive_a_restart() {
         }
 
         let notif = load_fixture("notification_permission_prompt.json");
-        let payload = build_report(HookEvent::Notification, &notif, Some("iTerm.app"), Some(ITERM_SESSION_ID), None, 1_700_000_100)
+        let payload = build_report(HookEvent::Notification, &notif, &ITERM_ENV, Some(&hook_process()), 1_700_000_100)
             .unwrap()
             .unwrap();
         daemon.report(payload).await;

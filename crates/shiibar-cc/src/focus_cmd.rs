@@ -1,16 +1,29 @@
 //! `shiibar-cc focus <selector>` / `focused` (DESIGN.md §4.4).
 //!
 //! `run_focus` funnels through `jump_to`, which is the part that actually
-//! talks to iTerm2 and the daemon; this is what `focus`'s exit 2 (no
-//! matching session) and exit 3 (TCC denied) tests exercise by injecting a
-//! fake `AppleScriptRunner` — no real `osascript` is ever invoked in this
-//! crate's automated tests either.
+//! talks to the terminal and the daemon; this is what `focus`'s exit 2 (no
+//! matching session, or a `process:` target that has no tab) and exit 3
+//! (TCC denied) tests exercise by injecting a fake `AppleScriptRunner` — no
+//! real `osascript` is ever invoked in this crate's automated tests either.
 
 use crate::exitcode;
 use shiibar_cc_client::selector::{SelectError, Selector, resolve_selector};
-use shiibar_cc_client::terminal::{AppleScriptRunner, TerminalError, focus, focused};
+use shiibar_cc_client::terminal::{
+    AppleScriptRunner, TerminalError, focus, focused, is_process_target,
+};
 use shiibar_cc_proto::{AckResponse, ListResponse, Request};
 use std::path::{Path, PathBuf};
+
+/// stderr for a `process:` target (§4.4): the session runs in a terminal
+/// shiibar can't drive, so there is no tab to jump to. Kept distinct from
+/// `NO_MATCHING_SESSION_MESSAGE` (a tab that is gone) so a caller can tell
+/// the two exit-2 cases apart.
+pub const PROCESS_TARGET_MESSAGE: &str =
+    "shiibar-cc focus: the session is running in a terminal Shiibar CC can't drive; there is no tab to jump to";
+
+/// stderr when the terminal scan finds no session for the target (§4.4).
+pub const NO_MATCHING_SESSION_MESSAGE: &str =
+    "shiibar-cc focus: no matching terminal session (tab may be closed)";
 
 pub struct FocusReport {
     pub exit_code: i32,
@@ -119,13 +132,17 @@ pub fn run_focused(runner: &dyn AppleScriptRunner) -> FocusedReport {
 /// Shared jump logic (§4.4): do the jump, and on success notify the daemon
 /// via `seen` (best-effort — a successful jump is the primary outcome, and
 /// a daemon that's down must not turn it into a reported failure).
+///
+/// A `process:` target — given exactly, or resolved from `.` — is exit 2
+/// with its own message and runs no osascript: the session is in a terminal
+/// shiibar can't drive, so there is nothing to jump to (§4.4).
 fn jump_to(socket_path: &Path, dest_target: &str, runner: &dyn AppleScriptRunner) -> FocusReport {
+    if is_process_target(dest_target) {
+        return err(exitcode::NOT_FOUND, PROCESS_TARGET_MESSAGE);
+    }
     if let Err(e) = focus(dest_target, runner) {
         return match e {
-            TerminalError::NoMatch => err(
-                exitcode::NOT_FOUND,
-                "shiibar-cc focus: no matching terminal session (tab may be closed)",
-            ),
+            TerminalError::NoMatch => err(exitcode::NOT_FOUND, NO_MATCHING_SESSION_MESSAGE),
             TerminalError::PermissionDenied => err(
                 exitcode::TCC_DENIED,
                 "shiibar-cc focus: osascript automation permission for the terminal is denied",
@@ -185,6 +202,12 @@ mod tests {
         }
     }
 
+    /// The iterm2 module's answer to its preliminary running query, sent
+    /// before every iTerm2 script other than resume.
+    fn iterm2_running() -> AppleScriptOutput {
+        out(true, "RUNNING\n", "")
+    }
+
     /// No daemon at `socket_path` in any of these tests: `jump_to`'s
     /// iTerm2 interaction is what's under test, and a `seen` failure must
     /// not change the exit code (best-effort, per the doc comment above).
@@ -195,15 +218,25 @@ mod tests {
     #[test]
     fn focus_no_matching_session_is_exit_2() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![out(true, "NOTFOUND\n", "")]);
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "NOTFOUND\n", "")]);
         let report = jump_to(&dead_socket(dir.path()), "w0t0p0:UUID", &runner);
         assert_eq!(report.exit_code, exitcode::NOT_FOUND);
     }
 
     #[test]
+    fn focus_when_iterm2_is_not_running_is_exit_2_after_only_the_running_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = ScriptedRunner::new(vec![out(true, "NOT_RUNNING\n", "")]);
+        let report = jump_to(&dead_socket(dir.path()), "w0t0p0:UUID", &runner);
+        assert_eq!(report.exit_code, exitcode::NOT_FOUND);
+        assert_eq!(report.message.as_deref(), Some(NO_MATCHING_SESSION_MESSAGE));
+        assert!(runner.outputs.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn focus_tcc_denied_is_exit_3() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![out(
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(
             false,
             "",
             "Not authorized to send Apple events to iTerm2. (-1743)",
@@ -217,7 +250,7 @@ mod tests {
         // The daemon is dead, so the post-jump `seen` fails — the jump
         // still reports success (§4.4: seen is best-effort).
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![out(true, "FOUND\n", "")]);
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "FOUND\n", "")]);
         let report = jump_to(&dead_socket(dir.path()), "w0t0p0:DEST-UUID", &runner);
         assert_eq!(report.exit_code, exitcode::OK);
     }
@@ -231,7 +264,7 @@ mod tests {
         // exact-match target is the destination itself, so `run_focus`
         // must never try to reach the daemon's `list` before jumping.
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![out(true, "FOUND\n", "")]);
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "FOUND\n", "")]);
         let report = run_focus(
             &dead_socket(dir.path()),
             "w0t0p0:UUID",
@@ -246,7 +279,7 @@ mod tests {
         // Still no daemon involved: "no match" here is iTerm2's scan
         // coming up empty, not a selector-resolution failure.
         let dir = tempfile::tempdir().unwrap();
-        let runner = ScriptedRunner::new(vec![out(true, "NOTFOUND\n", "")]);
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "NOTFOUND\n", "")]);
         let report = run_focus(
             &dead_socket(dir.path()),
             "w0t0p0:UUID",
@@ -262,12 +295,6 @@ mod tests {
         // matches mine?), so this must still hit `list` — and with a dead
         // socket that fails before osascript is ever touched.
         let dir = tempfile::tempdir().unwrap();
-        struct PanicRunner;
-        impl AppleScriptRunner for PanicRunner {
-            fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
-                panic!("must not touch osascript before the daemon `list` resolves `.`");
-            }
-        }
         let report = run_focus(
             &dead_socket(dir.path()),
             ".",
@@ -277,14 +304,57 @@ mod tests {
         assert_eq!(report.exit_code, exitcode::ERROR);
     }
 
+    // ---- process: targets (DESIGN.md §4.4): exit 2, no osascript, and a
+    // message distinct from the closed-tab one ----
+
+    struct PanicRunner;
+    impl AppleScriptRunner for PanicRunner {
+        fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+            panic!("osascript must not run for a process: target");
+        }
+    }
+
+    #[test]
+    fn run_focus_with_an_exact_process_target_is_exit_2_without_osascript() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = run_focus(
+            &dead_socket(dir.path()),
+            "process:48213",
+            dir.path().to_path_buf(),
+            &PanicRunner,
+        );
+        assert_eq!(report.exit_code, exitcode::NOT_FOUND);
+        assert_eq!(report.message.as_deref(), Some(PROCESS_TARGET_MESSAGE));
+    }
+
+    #[test]
+    fn jump_to_a_process_target_resolved_from_dot_is_exit_2_without_osascript() {
+        // `.` resolves to an entry's target before `jump_to`; a `process:`
+        // entry takes the same path as the exact target.
+        let dir = tempfile::tempdir().unwrap();
+        let report = jump_to(&dead_socket(dir.path()), "process:48213", &PanicRunner);
+        assert_eq!(report.exit_code, exitcode::NOT_FOUND);
+        assert_eq!(report.message.as_deref(), Some(PROCESS_TARGET_MESSAGE));
+    }
+
+    #[test]
+    fn process_target_message_differs_from_the_closed_tab_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "NOTFOUND\n", "")]);
+        let closed_tab = jump_to(&dead_socket(dir.path()), "w0t0p0:UUID", &runner);
+        assert_eq!(closed_tab.exit_code, exitcode::NOT_FOUND);
+        assert_eq!(closed_tab.message.as_deref(), Some(NO_MATCHING_SESSION_MESSAGE));
+        assert_ne!(PROCESS_TARGET_MESSAGE, NO_MATCHING_SESSION_MESSAGE);
+    }
+
     // ---- run_focused: exit-code mapping (§4.4) ----
 
     #[test]
     fn run_focused_with_a_frontmost_iterm2_session_is_exit_0_with_its_prefixed_target() {
-        // `terminal::focused` asks iTerm2 first; a hit there returns the
-        // prefixed target and Terminal.app is never queried (one canned
-        // output is enough).
-        let runner = ScriptedRunner::new(vec![out(true, "FOCUSED:UUID-1\n", "")]);
+        // `terminal::focused` asks iTerm2 first (its running query, then
+        // its focused script); a hit there returns the prefixed target and
+        // Terminal.app is never queried (two canned outputs are enough).
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(true, "FOCUSED:UUID-1\n", "")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::OK);
         assert_eq!(report.target, Some("iterm2:UUID-1".to_string()));
@@ -293,9 +363,16 @@ mod tests {
 
     #[test]
     fn run_focused_with_neither_terminal_frontmost_is_exit_2() {
-        // Neither iTerm2 nor Terminal.app is frontmost: both `focused`
-        // scripts answer NONE, so two canned outputs are consumed.
-        let runner = ScriptedRunner::new(vec![out(true, "NONE\n", ""), out(true, "NONE\n", "")]);
+        // No supported terminal is frontmost: iTerm2 answers its running
+        // query as running, the iTerm2 and Terminal.app `focused` scripts
+        // answer NONE, and Ghostty's version query answers not running, so
+        // four canned outputs are consumed.
+        let runner = ScriptedRunner::new(vec![
+            iterm2_running(),
+            out(true, "NONE\n", ""),
+            out(true, "NONE\n", ""),
+            out(true, "NOT_RUNNING\n", ""),
+        ]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::NOT_FOUND);
         assert_eq!(report.target, None);
@@ -303,7 +380,7 @@ mod tests {
 
     #[test]
     fn run_focused_with_tcc_denied_is_exit_3() {
-        let runner = ScriptedRunner::new(vec![out(
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(
             false,
             "",
             "Not authorized to send Apple events to System Events. (-1743)",
@@ -315,7 +392,7 @@ mod tests {
 
     #[test]
     fn run_focused_with_other_osascript_error_is_exit_1() {
-        let runner = ScriptedRunner::new(vec![out(false, "", "some other osascript error")]);
+        let runner = ScriptedRunner::new(vec![iterm2_running(), out(false, "", "some other osascript error")]);
         let report = run_focused(&runner);
         assert_eq!(report.exit_code, exitcode::ERROR);
         assert!(report.message.is_some());

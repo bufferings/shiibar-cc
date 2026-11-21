@@ -329,6 +329,9 @@ struct SurfaceScale: Equatable {
 
     var panelTop: CGFloat { scaled(9) }
     var panelBottom: CGFloat { scaled(10) }
+    /// Between the disabled-button reason lines and the button row below
+    /// them; the lines take `panelTop` above them in place of the row.
+    var panelReasonBottom: CGFloat { scaled(4) }
     var panelButtonFont: CGFloat { scaled(13) }
     /// `.btn`: minimum width 84 including its 14pt horizontal paddings.
     var primaryButtonMinWidth: CGFloat { scaled(84) }

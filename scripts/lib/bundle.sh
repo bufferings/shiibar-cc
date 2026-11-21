@@ -74,6 +74,8 @@ assemble_app_bundle() {
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac</key>
+	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Mitsuyuki Shiiba — MIT OR Apache-2.0</string>
 </dict>

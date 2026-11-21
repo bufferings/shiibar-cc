@@ -19,7 +19,7 @@ use std::sync::Arc;
 fn session_start(target: &str, session_id: &str, ts: i64) -> ReportPayload {
     ReportPayload {
         event: HookEvent::SessionStart,
-        target: target.to_string(),
+        target: Some(target.to_string()),
         session_id: session_id.to_string(),
         cwd: "/repo".to_string(),
         transcript_path: None,
@@ -30,6 +30,7 @@ fn session_start(target: &str, session_id: &str, ts: i64) -> ReportPayload {
         prompt: None,
         background_tasks: None,
         last_assistant_message: None,
+        pid: None,
     }
 }
 
@@ -62,7 +63,7 @@ fn stale_entry_is_removed_and_broadcast_fresh_entry_is_kept() {
     assert_eq!(core.agents[0].status, Status::Idle);
 
     match rx.try_recv().expect("expected an agent_removed broadcast") {
-        BroadcastEvent::AgentRemoved { target, reason } => {
+        BroadcastEvent::AgentRemoved { target, reason, .. } => {
             assert_eq!(target, "iterm2:a");
             assert_eq!(reason, RemovalReason::Stale, "stale sweep must report reason=stale (§4.2)");
         }

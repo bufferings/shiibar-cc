@@ -57,7 +57,8 @@ final class ArchiveModelTests: XCTestCase {
             textSize: TextSizeStore(defaults: defaults),
             launchers: launchers,
             runCommand: { arguments, completion in spy.commands.append((arguments, completion)) },
-            schedule: { _, _ in }
+            schedule: { _, _ in },
+            markReadSchedule: { _, _ in }
         )
         model.onPresentRowMenu = { items, _, _, completion in spy.rowMenus.append((items, completion)) }
         return model

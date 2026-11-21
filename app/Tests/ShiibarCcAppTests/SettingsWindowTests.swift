@@ -23,6 +23,8 @@ final class SettingsWindowTests: XCTestCase {
     private var defaults = InMemoryDefaults()
     private var center = NotificationCenter()
     private var checkRuns = 0
+    /// The installed apps the Terminal row's lookup sees, by bundle id.
+    private var installedApps: [String: InstalledTerminalApp] = [:]
 
     override func setUp() {
         super.setUp()
@@ -30,6 +32,7 @@ final class SettingsWindowTests: XCTestCase {
         defaults = InMemoryDefaults()
         center = NotificationCenter()
         checkRuns = 0
+        installedApps = ["com.googlecode.iterm2": InstalledTerminalApp(shortVersion: "3.7.6")]
     }
 
     private func makeModel() -> SettingsWindowModel {
@@ -46,6 +49,8 @@ final class SettingsWindowTests: XCTestCase {
             textSizeField: TextSizeFieldModel(store: TextSizeStore(defaults: defaults)),
             hotKey: hotKey,
             setupCheck: SetupCheckViewModel(performChecks: { [weak self] _ in self?.checkRuns += 1 }),
+            resumeTerminal: ResumeTerminalSetting(
+                defaults: defaults, lookup: { [weak self] in self?.installedApps[$0] }, center: center),
             center: center)
     }
 
@@ -75,7 +80,7 @@ final class SettingsWindowTests: XCTestCase {
     func testGeneralTabBoxesRowsAndControls() {
         XCTAssertEqual(SettingsGeneralLayout.boxes.map(\.title), ["General", "Sounds"])
         XCTAssertEqual(SettingsGeneralLayout.boxes.map(\.rows), [
-            [.startAtLogin, .appearance, .textSize, .globalShortcut],
+            [.startAtLogin, .appearance, .textSize, .globalShortcut, .terminal],
             [.muteSound, .waitingSound, .doneSound],
         ])
         let expected: [(SettingsRow, String, String, SettingsControlKind)] = [
@@ -83,6 +88,7 @@ final class SettingsWindowTests: XCTestCase {
             (.appearance, "Appearance", "System follows the appearance setting of your Mac", .segmented),
             (.textSize, "Text size", "Text in the popover and the window", .numberFieldAndStepper),
             (.globalShortcut, "Global shortcut", "Shows the list from any app", .shortcutField),
+            (.terminal, "Terminal", "Resume and Branch open in this terminal", .segmented),
             (.muteSound, "Mute sound", "Notifications arrive silently", .toggleSwitch),
             (.waitingSound, "Waiting sound", "Plays when a session needs your input", .popup),
             (.doneSound, "Done sound", "Plays when a session finishes responding", .popup),
@@ -160,6 +166,59 @@ final class SettingsWindowTests: XCTestCase {
         model.hotKey.recordingAbandoned()
         XCTAssertNil(model.hotKey.recorder.hint)
         XCTAssertEqual(fittingSize(model).height, plain.height, accuracy: 0.5)
+    }
+
+    // MARK: - Terminal row (§4.5 "Settings window" > Terminal)
+
+    /// A pick is stored at once and comes back on the next launch; every
+    /// choice can be picked whether or not it is installed.
+    func testTerminalPickIsStoredAndRestored() {
+        let model = makeModel()
+        XCTAssertEqual(model.resumeTerminal.terminal, .iterm2, "first value: iTerm2 is installed")
+        for terminal in [ResumeTerminal.ghostty, .appleTerminal, .iterm2, .ghostty] {
+            model.resumeTerminal.select(terminal)
+            XCTAssertEqual(model.resumeTerminal.terminal, terminal)
+            XCTAssertEqual(defaults.string(forKey: "cc.shiibar.resumeTerminal"), terminal.rawValue)
+        }
+        let relaunched = ResumeTerminalSetting(defaults: defaults, lookup: { _ in nil }, center: NotificationCenter())
+        XCTAssertEqual(relaunched.terminal, .ghostty, "a stored value is not decided again")
+    }
+
+    /// The reason line under the description while the chosen terminal
+    /// cannot be used: it makes the window taller and goes away with a
+    /// usable choice. Terminal never shows one.
+    func testTerminalReasonLineFollowsTheChoice() {
+        let model = makeModel()
+        let plain = fittingSize(model)
+        XCTAssertNil(model.resumeTerminal.availability.settingsMessage)
+
+        model.resumeTerminal.select(.ghostty)
+        XCTAssertEqual(model.resumeTerminal.availability.settingsMessage, "Ghostty is not installed")
+        XCTAssertGreaterThan(fittingSize(model).height, plain.height)
+
+        model.resumeTerminal.select(.appleTerminal)
+        XCTAssertNil(model.resumeTerminal.availability.settingsMessage)
+        XCTAssertEqual(fittingSize(model).height, plain.height, accuracy: 0.5)
+
+        installedApps = [:]
+        model.resumeTerminal.select(.iterm2)
+        XCTAssertEqual(model.resumeTerminal.availability.settingsMessage, "iTerm2 is not installed")
+
+        installedApps = ["com.mitchellh.ghostty": InstalledTerminalApp(shortVersion: "1.3.1")]
+        model.resumeTerminal.select(.ghostty)
+        XCTAssertEqual(model.resumeTerminal.availability.settingsMessage, "Ghostty 1.4.0 or later is required")
+    }
+
+    /// Showing the Settings window decides availability again (a terminal
+    /// installed while the app runs shows at once).
+    func testShowingTheWindowDecidesTerminalAvailabilityAgain() {
+        let model = makeModel()
+        model.resumeTerminal.select(.ghostty)
+        XCTAssertEqual(model.resumeTerminal.availability, .notInstalled(.ghostty))
+        installedApps["com.mitchellh.ghostty"] = InstalledTerminalApp(shortVersion: "1.4.0")
+        XCTAssertEqual(model.resumeTerminal.availability, .notInstalled(.ghostty), "nothing decides until a trigger")
+        model.windowShown()
+        XCTAssertEqual(model.resumeTerminal.availability, .available)
     }
 
     // MARK: - Tabs

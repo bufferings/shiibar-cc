@@ -73,7 +73,8 @@ final class ConversationPaneReloadModelTests: XCTestCase {
             launchers: launchers,
             runCommand: { _, _ in },
             clock: { Date(timeIntervalSince1970: fixedNow) },
-            schedule: { seconds, action in spy.scheduled.append((seconds: seconds, action: action)) }
+            schedule: { seconds, action in spy.scheduled.append((seconds: seconds, action: action)) },
+            markReadSchedule: { _, _ in }
         )
     }
 

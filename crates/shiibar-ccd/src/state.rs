@@ -51,6 +51,14 @@ pub struct AgentEntry {
     /// mode (§4.5). Same `#[serde(default)]` rationale as `created_at`.
     #[serde(default)]
     pub last_report_at: i64,
+    /// pid of the `claude` process running this session (§3.6), used only
+    /// to merge by pid. Overwritten by every report / reconcile session that
+    /// carries one; left as-is by those that don't. Never written to
+    /// `state.json`: a pid saved before a daemon restart may have been
+    /// reused by another process since, so every entry starts with an
+    /// unknown pid after a load. Not part of the wire `Agent` (§4.2).
+    #[serde(skip)]
+    pub pid: Option<u32>,
 }
 
 impl AgentEntry {
@@ -188,6 +196,7 @@ mod tests {
             last_assistant_message: None,
             created_at: 1,
             last_report_at: 1,
+            pid: None,
         }
     }
 
@@ -229,6 +238,22 @@ mod tests {
             loaded[2].target, "apple-terminal:/dev/ttys006",
             "an apple-terminal target is untouched"
         );
+    }
+
+    #[test]
+    fn pid_is_not_written_to_state_json_and_is_unknown_after_load() {
+        // §3.6: a saved pid could belong to another process after a restart,
+        // so state.json never holds it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let mut a = entry("process:48213", Status::Working);
+        a.pid = Some(48213);
+        save(&path, &[a]).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("\"pid\""), "state.json must not contain pid: {raw}");
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded[0].target, "process:48213", "a process: target survives the round trip");
+        assert_eq!(loaded[0].pid, None);
     }
 
     #[test]

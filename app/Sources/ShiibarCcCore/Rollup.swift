@@ -80,4 +80,15 @@ public enum Rollup {
         }
         return TrayIconState(glyph: .idle, dim: idleDim, dot: dot)
     }
+
+    /// The tray icon for the daemon's agent table: every entry counts,
+    /// whatever its target's terminal (a `process:` entry included — the
+    /// spec does not split the display by target kind, §4.5).
+    public static func icon(agents: [Agent], daemonConnected: Bool) -> TrayIconState {
+        icon(
+            statuses: agents.map(\.status),
+            hasUnreviewed: agents.contains { $0.unreviewed },
+            daemonConnected: daemonConnected
+        )
+    }
 }
