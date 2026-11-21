@@ -1,7 +1,8 @@
 # Cask template for the bufferings/homebrew-tap release of Shiibar CC.
 #
-# This file is a template, not a valid cask: {{VERSION}} and {{SHA256}} are
-# placeholders substituted by .github/workflows/bump-cask.yml when it renders
+# This file is a template, not a valid cask: the version and sha256 values
+# below are double-braced placeholders (VERSION and SHA256) that
+# .github/workflows/bump-cask.yml substitutes when it renders
 # this file into Casks/shiibar-cc.rb in the bufferings/homebrew-tap repository
 # on every published (non-prerelease) GitHub Release. ci.yml renders it with
 # dummy values and runs `brew style` on the result so a syntax error
