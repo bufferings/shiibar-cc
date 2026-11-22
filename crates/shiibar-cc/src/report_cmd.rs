@@ -32,6 +32,17 @@ pub fn run(event_arg: Option<String>, socket_path: &Path) {
         eprintln!("shiibar-cc report: failed to read stdin: {e}");
         return;
     }
+
+    // A session started non-interactively (`claude -p`) is not tracked
+    // (§4.1/§8.67): every one of its reports is dropped here, before the
+    // ancestor walk and without touching the socket. SessionEnd is dropped
+    // too, because no entry was ever registered for it. Stdin is read first
+    // so the hook's writer never meets a closed pipe.
+    let entrypoint = std::env::var("CLAUDE_CODE_ENTRYPOINT").ok();
+    if extract::is_non_interactive_entrypoint(entrypoint.as_deref()) {
+        return;
+    }
+
     let raw: serde_json::Value = match serde_json::from_str(&raw_stdin) {
         Ok(v) => v,
         Err(e) => {
@@ -53,7 +64,8 @@ pub fn run(event_arg: Option<String>, socket_path: &Path) {
     // terminal by the time its SessionEnd hook runs, so build_report returns
     // it without a target or pid and it is sent for the daemon to match by
     // session_id (§4.2). This is the only place these env vars are read; the
-    // classification rule itself lives entirely in build_report.
+    // classification rule itself lives entirely in build_report (and the
+    // non-interactive rule above in is_non_interactive_entrypoint).
     let term_program = std::env::var("TERM_PROGRAM").ok();
     let term_program_version = std::env::var("TERM_PROGRAM_VERSION").ok();
     let iterm_session_id = std::env::var("ITERM_SESSION_ID").ok();

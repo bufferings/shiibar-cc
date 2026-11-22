@@ -51,6 +51,20 @@ fn print_usage() {
     eprintln!("see docs/DESIGN.md §4.4 for each subcommand's arguments");
 }
 
+/// `$HOME`, or `.` when it is unset.
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Claude Code's pid registry, `$HOME/.claude/sessions` (DESIGN.md §4.6,
+/// §3.5): the live/past flag of `conversations` and the reconcile gather's
+/// `entrypoint` lookup read the same directory.
+fn claude_sessions_dir() -> PathBuf {
+    home_dir().join(".claude/sessions")
+}
+
 fn current_dir_or_dot() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
@@ -150,11 +164,15 @@ fn cmd_focused(_args: &[String]) -> i32 {
 
 fn cmd_reconcile(_args: &[String]) -> i32 {
     let claude_runner = shiibar_cc_client::RealClaudeAgents;
+    let entrypoints = shiibar_cc::conversations::live::SessionFileEntrypoints {
+        sessions_dir: claude_sessions_dir(),
+    };
     let ps_runner = shiibar_cc_client::terminal::RealPs;
     let script_runner = Osascript;
     let (code, err) = shiibar_cc::reconcile_cmd::run_reconcile(
         &shiibar_cc_client::resolve_socket_path(),
         &claude_runner,
+        &entrypoints,
         &ps_runner,
         &script_runner,
     );
@@ -236,12 +254,9 @@ fn cmd_conversations(args: &[String]) -> i32 {
     // Real wiring (DESIGN.md §4.6): transcripts and the pid-file registry
     // under $HOME/.claude, the DB inside the state dir, the real
     // process-liveness probe. Tests inject all four via the library.
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
     let deps = shiibar_cc::conversations::Deps {
-        projects_dir: home.join(".claude/projects"),
-        sessions_dir: home.join(".claude/sessions"),
+        projects_dir: home_dir().join(".claude/projects"),
+        sessions_dir: claude_sessions_dir(),
         db_path: shiibar_cc_client::resolve_state_dir().join("conversations-index.db"),
         probe: Box::new(shiibar_cc::conversations::live::RealLiveness),
     };

@@ -19,6 +19,7 @@
 //!   (assistant text blocks), in appearance order.
 
 use serde_json::Value;
+use shiibar_cc_proto::extract::NON_INTERACTIVE_ENTRYPOINT;
 use std::collections::{HashMap, HashSet};
 
 /// One kept utterance, in appearance order along the active path.
@@ -57,6 +58,13 @@ pub struct Extracted {
     /// conversation has no human utterance (DESIGN.md §4.6; search's
     /// `last_prompt`, §4.4).
     pub last_prompt: Option<String>,
+    /// Whether the file was only ever driven non-interactively: at least
+    /// one line carries `entrypoint`, and every such line, on any branch,
+    /// has `sdk-cli` (`claude -p` — DESIGN.md §4.6 "index contents", §7-13,
+    /// §8.67). A file with no `entrypoint` line, or with any line holding
+    /// another value (a `claude -p` conversation resumed interactively
+    /// included), is false.
+    pub non_interactive: bool,
 }
 
 impl Extracted {
@@ -65,6 +73,14 @@ impl Extracted {
     /// the index (DESIGN.md §4.6 "index contents", §8.64).
     pub fn has_user_utterance(&self) -> bool {
         self.messages.iter().any(|m| m.role == Role::User)
+    }
+
+    /// Whether the file is registered in the index as a conversation: it
+    /// was not only driven non-interactively (§8.67) and it holds a human
+    /// utterance (§8.64). A file that is not is recorded in
+    /// `unregistered_files` instead (DESIGN.md §4.6).
+    pub fn is_conversation(&self) -> bool {
+        !self.non_interactive && self.has_user_utterance()
     }
 }
 
@@ -104,6 +120,11 @@ pub fn extract(content: &str) -> Extracted {
     let mut leaf: Option<String> = None;
     let mut last_ai_title: Option<String> = None;
     let mut last_custom_title: Option<String> = None;
+    // `entrypoint` on any line, of any type (§4.6): whether one was seen,
+    // and whether one held a value other than `sdk-cli`. A value that is
+    // not a string counts as another value, so the file stays listed.
+    let mut saw_entrypoint = false;
+    let mut saw_other_entrypoint = false;
 
     for line in content.lines() {
         // Broken lines and the in-progress tail of a live session fail to
@@ -115,6 +136,13 @@ pub fn extract(content: &str) -> Extracted {
             continue;
         };
         let line_type = obj.get("type").and_then(Value::as_str);
+
+        if let Some(entrypoint) = obj.get("entrypoint") {
+            saw_entrypoint = true;
+            if entrypoint.as_str() != Some(NON_INTERACTIVE_ENTRYPOINT) {
+                saw_other_entrypoint = true;
+            }
+        }
 
         // Record the tree edge for every uuid-bearing line regardless of
         // type (the active path passes through system/attachment nodes).
@@ -223,6 +251,7 @@ pub fn extract(content: &str) -> Extracted {
         cwd,
         messages,
         last_prompt,
+        non_interactive: saw_entrypoint && !saw_other_entrypoint,
     }
 }
 
@@ -751,5 +780,114 @@ mod tests {
             extract(&content).last_prompt.as_deref(),
             Some("kept prompt")
         );
+    }
+    // ---- sessions started non-interactively (DESIGN.md §4.6, §8.67) ----
+
+    /// A user line carrying `entrypoint`, as utterance lines do (§7-13).
+    fn user_line_from(uuid: &str, parent: Option<&str>, text: &str, entrypoint: &str) -> String {
+        format!(
+            r#"{{"type":"user","uuid":"{uuid}","parentUuid":{},"isSidechain":false,"entrypoint":"{entrypoint}","cwd":"/Users/example/project","message":{{"role":"user","content":{}}}}}"#,
+            json_opt(parent),
+            serde_json::to_string(text).unwrap()
+        )
+    }
+
+    fn assistant_line_from(uuid: &str, parent: Option<&str>, text: &str, entrypoint: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","uuid":"{uuid}","parentUuid":{},"isSidechain":false,"entrypoint":"{entrypoint}","cwd":"/Users/example/project","message":{{"role":"assistant","content":[{{"type":"text","text":{}}}]}}}}"#,
+            json_opt(parent),
+            serde_json::to_string(text).unwrap()
+        )
+    }
+
+    /// Leading bookkeeping lines carry no `entrypoint` (§7-13).
+    const HEADER_LINE: &str = r#"{"type":"queue-operation","operation":"enqueue","sessionId":"s"}"#;
+
+    #[test]
+    fn a_file_whose_every_entrypoint_line_is_sdk_cli_is_not_a_conversation() {
+        let content = [
+            HEADER_LINE.to_string(),
+            user_line_from("u1", None, "summarize this file", "sdk-cli"),
+            assistant_line_from("a1", Some("u1"), "a summary", "sdk-cli"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert!(e.non_interactive);
+        assert!(e.has_user_utterance());
+        assert!(!e.is_conversation());
+    }
+
+    #[test]
+    fn a_file_without_any_entrypoint_line_follows_the_utterance_rule() {
+        let content = [
+            HEADER_LINE.to_string(),
+            user_line("u1", None, "a question"),
+            assistant_text_line("a1", Some("u1"), "an answer"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert!(!e.non_interactive);
+        assert!(e.is_conversation());
+        // Without a human utterance it is still not a conversation (§8.64).
+        assert!(!extract(HEADER_LINE).is_conversation());
+    }
+
+    #[test]
+    fn a_file_with_only_cli_entrypoints_is_a_conversation() {
+        let content = [
+            user_line_from("u1", None, "a question", "cli"),
+            assistant_line_from("a1", Some("u1"), "an answer", "cli"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert!(!e.non_interactive);
+        assert!(e.is_conversation());
+    }
+
+    #[test]
+    fn a_file_with_both_sdk_cli_and_cli_lines_is_a_conversation() {
+        // A `claude -p` conversation resumed interactively (§8.67).
+        let content = [
+            user_line_from("u1", None, "started by a script", "sdk-cli"),
+            assistant_line_from("a1", Some("u1"), "ok", "sdk-cli"),
+            user_line_from("u2", Some("a1"), "continued by hand", "cli"),
+        ]
+        .join("\n");
+        let e = extract(&content);
+        assert!(!e.non_interactive);
+        assert!(e.is_conversation());
+    }
+
+    #[test]
+    fn an_entrypoint_off_the_active_path_still_counts() {
+        // The rule covers every line carrying `entrypoint`, not only the
+        // active path: a `cli` line on a rewound branch keeps the file.
+        let content = [
+            user_line_from("u1", None, "root", "sdk-cli"),
+            assistant_line_from("a1", Some("u1"), "answer", "sdk-cli"),
+            user_line_from("old", Some("a1"), "rewound", "cli"),
+            user_line_from("new", Some("a1"), "kept", "sdk-cli"),
+        ]
+        .join("\n");
+        assert!(extract(&content).is_conversation());
+    }
+
+    #[test]
+    fn other_entrypoint_values_keep_the_file() {
+        for value in ["claude-vscode", "some-future-entrypoint", ""] {
+            let content = [
+                user_line_from("u1", None, "a question", "sdk-cli"),
+                user_line_from("u2", Some("u1"), "more", value),
+            ]
+            .join("\n");
+            assert!(extract(&content).is_conversation(), "{value:?}");
+        }
+        // A non-string value counts as another value.
+        let content = [
+            user_line_from("u1", None, "a question", "sdk-cli"),
+            r#"{"type":"attachment","uuid":"at","parentUuid":"u1","entrypoint":null}"#.to_string(),
+        ]
+        .join("\n");
+        assert!(extract(&content).is_conversation());
     }
 }

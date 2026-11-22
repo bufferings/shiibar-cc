@@ -9,6 +9,7 @@ Claude Code のエージェント状態(working / waiting / idle と、未確認
 対応ターミナル(iTerm2 / Terminal.app / Ghostty)のタブへジャンプできるようにする。
 対応ターミナル以外のターミナルで実行しているセッションも、状態の表示と通知の対象にする(ジャンプだけができない。§8.66)。
 ターミナルを持たないセッション(制御端末を持つ祖先のプロセスが無いセッション。エディタの拡張機能、常駐プロセスが起動する実行など)は追跡しない(§4.1)。
+対話でない方法で起動したセッション(`claude -p`)は、追跡せず、会話の一覧にも表示しない(§4.1・§4.6・§8.67)。
 同じ一覧で過去の会話を検索して読み、再開・分岐できる(§4.6)。
 CLI(`shiibar-cc`)は hooks とアプリをつなぐ**裏方**(report / focus / reconcile / resume / conversations / doctor)であり、
 利用者向けの表面はメニューバーと通知に集約する(`wait` / `watch` などのスクリプト利用も可能だが主役ではない)。
@@ -193,6 +194,10 @@ gather は client 側(ターミナルモジュール。§4.3)、適用は daemon
    (§3.6「pid による統合」)、その後の SessionEnd が、`session_id` の一致で削除する(§3.6「`target` を持たない SessionEnd」)。
    `ps` の出力に無い pid(`claude agents` の実行の後に終了したプロセス)と、tty を持たない pid(ターミナルを持たないセッション。
    実行中のセッションの Bash ツールが起動した `claude -p` のプロセスも、tty を持たない — §7-9)は、送らない。
+   **対話でない方法で起動したセッションの pid も、送らない**: `claude agents` の一覧は、`claude -p` のプロセスも `kind` が `interactive` のセッションとして返す(§7-13)。
+   pid ごとに、Claude Code の `~/.claude/sessions/<pid>.json` の `entrypoint` を読み取り、値が `sdk-cli` の pid を除外する(§8.67。
+   このファイルを読み取る処理は、live/past の判定と同じく、`crates/shiibar-cc` の会話のモジュールに配置し、client には、pid から値を返す処理として渡す — §4.6)。
+   ファイルが無い、読み取れない、JSON として解釈できない、`entrypoint` が無い、値が `sdk-cli` 以外の場合は、除外しない。
    どのセッションにも、`claude agents` の一覧の pid を付けて送る(§4.2 の `pid`)。
    ただし、**試みた走査のいずれかが失敗/不完全なときは、どの走査にも一致しないセッションを、更新専用(§4.2 の `update_only`)として送る**
    (target は、完全な回と同じ `process:<pid>` である)
@@ -302,7 +307,9 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
     登録されている場合も、統合しない。走査に無い側は、完全な回の prune が削除する
   - `pid` が不明のエントリ(daemon の起動の後、最初の report または reconcile を受け取る前)は、target だけで突き合わせる
 - **入れ子のセッション**(実行中のセッションが起動した、別の `claude` のプロセスの report を、親のエントリに適用しない。§8.66):
-  実行中のセッションの Bash ツールから `claude -p` を実行すると、子のプロセスは制御端末を持たないので、子の hook の祖先 walk は、親の `claude` のプロセスに到達する。
+  `claude -p` の report は、hook が送らない(§4.1・§8.67)ので、下記の判定の対象になるのは、hook が drop しない report だけである
+  (`CLAUDE_CODE_ENTRYPOINT` が `sdk-cli` 以外の値である子のプロセス)。この規則は、その report に適用する。
+  実行中のセッションが、制御端末を持たない子の `claude` のプロセスを起動すると、子の hook の祖先 walk は、親の `claude` のプロセスに到達する。
   子の report(SessionStart / UserPromptSubmit / Stop / SessionEnd など)は、親と同じ pid、同じ tty、同じ環境変数(`ITERM_SESSION_ID` を含む)から導出した、
   親と同じ target を持ち、`session_id` だけが親と異なる(§7-9 の実測)。そのまま適用すると、子の Stop が親のエントリを idle と未確認にし、子の SessionEnd が親のエントリを削除する。
   hook の report は、上記「pid による統合」の「hook の report」の (a) または (b) で決めたエントリについて、次の順で判定する。target の種類に関係なく、同じ規則である
@@ -320,7 +327,7 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
   この規則で扱えない場合は、次のとおりである(どれも、次の reconcile が、`claude agents` の一覧の `session_id` と status でエントリを上書きして回復する — §3.5 の 3 の「既知」)
   - エントリの `pid` が不明の間(daemon の起動の後)に受信した子の report は、2 で適用する(親のエントリを上書きする)
   - 親のエントリが無い間に受信した子の report は、未登録として登録する(親の report と区別できない)。その後の親の report は、3 で無視する
-  - 子が `claude -p --resume` などで起動され、SessionStart の `source` が `resume` の場合は、3 で適用する(親のエントリの `session_id` を上書きする)
+  - 子が `--resume` を指定して起動され、SessionStart の `source` が `resume` の場合は、3 で適用する(親のエントリの `session_id` を上書きする)
   - `source` が `fork` の SessionStart(セッションの中での分岐など)と、上記以外の `source` は、3 で無視する。セッションの中での切り替えで、
     Claude Code が送信する report の `source` と `reason` は、`/clear` 以外は実測していない(§7-9)
 - **`target` を持たない SessionEnd**(制御端末が無くなった後の SessionEnd で、エントリを削除する。§8.66): ターミナルのウィンドウを閉じて終了したセッションでは、
@@ -365,7 +372,10 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
   取り切れない記法が残るのは許容 — 誤って壊すより残す方を選ぶ)
 - **target の生成規則**(§2 の対応ターミナルの 3 種のどれかを導出し、どれも導出できなければ **`process:<pid>` にする** —
   ジャンプはできないが、状態と通知の対象にする。§8.66):
-  - **すべての report で、最初に祖先 walk を実行する**: hook のプロセスは端末から切り離されて起動される(`ps` で `??`。§7-7)ので、
+  - **対話でない方法で起動したセッションの report は、すべて drop する**(§8.67): hook の環境変数 `CLAUDE_CODE_ENTRYPOINT` の値が `sdk-cli` の場合は、
+    祖先 walk を実行せず、何も送らずに exit 0 で終了する(SessionEnd も送らない。エントリを登録していないため)。
+    `claude -p` のセッションの hook は、どのイベントでも、この値を持つ(§7-13)。変数が無い場合、空の場合、値が `sdk-cli` 以外の場合は、下記の処理に進む
+  - **上記に該当しない report では、最初に祖先 walk を実行する**: hook のプロセスは端末から切り離されて起動される(`ps` で `??`。§7-7)ので、
     **親方向に、最初に制御端末を持つプロセスまで辿り、そのプロセスの pid と tty を取る**(Terminal.app、iTerm2、Ghostty の実測では、hook の `sh` の親の `claude` 本体が持つ —
     §7-7・§7-8・§7-9。上限は §9)。**上限まで見つからなければ、report を drop する**(ターミナルを持たないセッション —
     エディタの拡張機能、常駐プロセスが起動する実行など — は追跡しない。§8.66)。
@@ -376,8 +386,8 @@ reconcile は Claude 自身の権威ある登録簿を正とするので、「�
     取った pid は、target の種類に関係なく、report の `pid` として送る(§4.2)。
     walk は、`shiibar-cc report` のプロセス自身から開始する。**この規則は、hook のプロセスと、その親のシェルが、制御端末を持たないことに依存する**
     (持つ場合は、`claude` ではなく、hook のプロセスの pid を取る。ターミナルの種類ごとの確認は §7-9)。
-    実行中のセッションの Bash ツールが起動した `claude -p` の hook は、子の `claude` も制御端末を持たないので、親の `claude` の pid と tty を取る
-    (daemon が、`session_id` の違いで無視する — §3.6「入れ子のセッション」)
+    実行中のセッションが起動した、制御端末を持たない子の `claude` の hook は、親の `claude` の pid と tty を取る
+    (daemon が、`session_id` の違いで無視する — §3.6「入れ子のセッション」。子が `claude -p` の場合は、上記のとおり、hook が report を送らない)
   - `TERM_PROGRAM` が `iTerm.app` で、**かつ** `$ITERM_SESSION_ID`(形式 `wNtNpN:UUID`。§7-1)があれば
     `iterm2:<UUID>`(`:` 以降の UUID。reconcile が AppleScript から導出する target と一致させるため。
     `wNtNpN` は含めない。§2)。`ITERM_SESSION_ID` の有無だけでは判定しない —
@@ -707,13 +717,13 @@ shiibar-cc doctor             # 診断(下記)
 - **conversations 系も daemon に接続しない**(データ源は transcript と `~/.claude/sessions/` の
   pid ファイル。§4.6)。exit code: `index` / `search` は 0 成功(検索 0 件も成功)/ 1 内部エラー
   (索引構築不能・有効な検索語が無いクエリを含む — 黙って 0 件を返さない)。`show` は 0 / 1 / 2
-  (session-id が索引に無い。人の発話が 1 つも無い transcript の session-id を含む — §4.6「索引の内容」)。出力は既定が人間向けテキスト、`--json` で機械可読(doctor と同じ 2 面性)
+  (session-id が索引に無い。人の発話が 1 つも無い transcript と、対話でない方法で起動した会話の transcript の session-id を含む — §4.6「索引の内容」)。出力は既定が人間向けテキスト、`--json` で機械可読(doctor と同じ 2 面性)
 - **conversations の出力 JSON(スクリプトが依存してよい公開契約)**。命名は NDJSON プロトコルと同じ
   snake_case、時刻は epoch 秒、消費者は未知フィールドを無視する(§4.2 と同じ前方互換):
   - `search`: `{"conversations":[{"session_id","cwd","title","updated_at","live","last_prompt"}]}` —
     新しい順。`title` は null 許容(フォールバックは表示側の責任 — §4.6)。`last_prompt` は、
     その会話で最後の人の発話の先頭 1 行・80 文字(80 文字は §9 の task と同値)。型は null 許容である(消費者は null を空として扱う)。
-    人の発話が 1 つも無い transcript は、会話として扱わないので、結果に含まれない(§4.6「索引の内容」)
+    人の発話が 1 つも無い transcript と、対話でない方法で起動した会話の transcript は、会話として扱わないので、結果に含まれない(§4.6「索引の内容」)
   - `show`: `{"session_id","cwd","title","updated_at","messages":[{"seq","role"("user"|"assistant"),"text"}]}` —
     `text` は全文(切り詰めは表示側)。`updated_at` は、`search` の同じ会話の `updated_at` と同じ値である
     (会話ペインが、search を再実行せずに、終端マーカーの経過時間を求めるために使用する — §4.6「会話ペインの再読み込み」)
@@ -1679,6 +1689,10 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   `conversations show`。**外部との境界は各コマンドの出力 JSON だけ**で、DB スキーマは Rust の私有
   (自由に変更できる。NDJSON プロトコルが daemon の安定境界であるのと同じ関係)
 - **索引の内容**: **全会話**(実行中も含む)+ **live/past フラグ**。絞り込みは消費者の責任。
+  **対話でない方法で起動した会話の transcript は、会話として扱わない**(§8.67): transcript の行のうち、`entrypoint` の項目を持つ行のすべてで、
+  値が `sdk-cli` であるファイルは、索引に会話として登録しない(`search` の結果に含まれず、`show` は exit 2 になる。人の発話が無い transcript と同じ扱いで、
+  ファイルの `(パス, mtime, サイズ)` を記録して、追いつきで読み直さない)。`entrypoint` を持つ行が 1 つも無いファイルと、`sdk-cli` 以外の値を持つ行が
+  1 つでもあるファイル(`claude -p` で開始した会話を、対話で再開した場合を含む)は、会話として扱う。
   **人の発話が 1 つも無い transcript は、会話として扱わない**(§8.64): 発話列(下記)に人の発話が無いファイルは、索引に会話として登録しない。
   `search` の結果に含まれず、`show` は、索引に無い session-id と同じ結果(exit 2 — §4.4)を返す。
   Claude Code を起動して、発話を送らずに終了したセッション(スラッシュコマンドだけを実行したセッション、起動時の指定の誤りで終了したセッションなど)が該当する。
@@ -1708,7 +1722,7 @@ SwiftUI(macOS 14+(§8.34))。メニューバーの**トレイアイコン**(全�
   起きない。DB パスの注入 — テスト分離 — に自動で追従する)→ (1) `~/.claude/projects` を stat 掃引し、`(パス, mtime, サイズ)` が変わった
   ファイルだけ**全体を読み直してアクティブ経路を計算し直し、その会話の行を丸ごと入れ替える**
   (ファイル内の追記差分管理はしない — 全読み直しでも平均数 ms・最大 0.1 秒 <§7-6 の実測> で、
-  rewind を機構なしで吸収できる)。読み直した結果、人の発話が 1 つも無いファイルは、会話として登録せず(登録済みの会話は索引から消す)、
+  rewind を機構なしで吸収できる)。読み直した結果、人の発話が 1 つも無いファイルと、対話でない方法で起動した会話のファイル(上記「索引の内容」)は、会話として登録せず(登録済みの会話は索引から消す)、
   そのファイルの `(パス, mtime, サイズ)` だけを記録する(変化するまで読み直さない。変化したときは、ほかのファイルと同じく読み直して、
   人の発話があれば会話として登録する)。消えたファイルは索引からも消す (2) pid ファイルから live/past
   フラグを更新する。**search はこのロックを待って必ず追いつく** — 全構築(初回・スキーマ更新後・
@@ -2515,14 +2529,13 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
      walk は親の `claude` に到達し、子の SessionStart(`source` は `startup`)/ UserPromptSubmit / Stop / SessionEnd(`reason` は `other`)は、
      すべて、親と同じ pid と tty を取る。`ITERM_SESSION_ID` と `TERM_PROGRAM` も相続する。`session_id` は、親と異なる。
      hook の内容の項目は、対話のセッションのものと同じで、入れ子であることを示す項目は無い。
-     → 子の report は、pid と `session_id` の組で判別して無視する(§3.6「入れ子のセッション」)。
-     子のプロセスは tty を持たないので、`claude agents` の一覧に含まれる場合も、reconcile は送らない(§3.5)
+     → hook は、`entrypoint` の値で、子の report を送らない(§4.1・§7-13)。送られた場合も、daemon が、pid と `session_id` の組で判別して無視する(§3.6「入れ子のセッション」)。
+     子のプロセスは tty を持たず、`entrypoint` でも除外するので、`claude agents` の一覧に含まれる場合も、reconcile は送らない(§3.5)
    - **切り離して起動した `claude -p`**(親が pid 1 のプロセス): 制御端末を持つ祖先が無いので、report は drop される(§4.1)。
-     `claude agents --json` の一覧には、`kind` が `interactive` で含まれる(tty を持たないので、reconcile は送らない)
+     `claude agents --json` の一覧には、`kind` が `interactive` で含まれる(tty を持たず、`entrypoint` でも除外するので、reconcile は送らない)
    - **ターミナルのシェルから実行した `claude -p`**(Ghostty のタブで確認): hook は実行され、`claude -p` のプロセス自身が、そのタブの制御端末を持つ。
      実行している間は、`claude agents --json` の一覧に、`kind` が `interactive` で含まれる。**一覧の `kind` では、`claude -p` と対話のセッションを判別できない**。
-     そのため、ターミナルのシェルから実行した `claude -p` は、実行している間だけ、Running の行になる(hook の report と reconcile のどちらでも登録され、
-     完了の Stop で未確認になり、SessionEnd で削除される。対応ターミナルでも同じ扱いである)
+     hook と reconcile は、`entrypoint` の値で、このセッションを対象外にする(§4.1・§3.5・§7-13)
    - **Stop が 2 回送信される場合**: 上の `claude -p` の実行では、1 回の応答で Stop が 2 回送信された(2 回目は、項目 `stop_hook_active` が true)。
      2 回とも §3.4 の同じ行を適用する(結果は同じである)
    - **hook の実行時間**(2026-11-21。リリースビルドの `shiibar-cc report PostToolUse` を、条件ごとに 60 回実行して計測。開始から終了までの時間。
@@ -2634,6 +2647,20 @@ M5 以降のマイルストーンはこの表には足さない — 各回の範
       エントリは、`target` を持たない SessionEnd で無くなった。`close window` で閉じた確認では、この動作は発生していない。原因は確認していない
     - **未検証**: Terminal.app と Ghostty の、タブだけを閉じる操作 / 分割のペインだけを閉じる操作(上記 3 の「ペイン閉じで発火」は、制御端末の有無を記録していない)/
       画面の操作(閉じるボタン、キーの操作)でウィンドウを閉じた場合 / Terminal.app の、実行中のプロセスがあるウィンドウを閉じる前に確認のダイアログを表示する設定での動作
+13. **対話でない方法で起動したセッションの判別** — 実機で検証済み(2026-11-23。Claude Code 2.1.330 / macOS 27.2.1。`claude -p` を、一時的な hook の設定
+    (`--settings`)で実行し、hook の環境変数、標準入力の項目、親のプロセスを記録して確認):
+    - **hook の環境変数**: `claude -p` のセッションの hook は、SessionStart / UserPromptSubmit / Stop / SessionEnd のどれでも、`CLAUDE_CODE_ENTRYPOINT` が `sdk-cli` である。
+      対話のセッションの中の Bash ツールから起動した場合も、子のセッションの hook の値は `sdk-cli` である(親の値の `cli` を引き継がない)。対話のセッションでは `cli` である
+    - **hook の標準入力**: SessionStart の項目は `cwd`、`hook_event_name`、`session_id`、`source`、`transcript_path` で、起動の方法を示す項目は無い
+    - **`claude agents --json`**: 実行中の `claude -p` のプロセスも一覧に含まれ、`kind` は `interactive` である。項目は `cwd`、`kind`、`name`、`pid`、`sessionId`、`startedAt`、`status` で、
+      `entrypoint` は無い
+    - **`~/.claude/sessions/<pid>.json`**: `claude -p` のプロセスにも作成され、`kind` は `interactive`、`entrypoint` は `sdk-cli` である
+    - **transcript**: 発話と添付の行(`type` が `user`、`attachment` など)が `entrypoint` を持ち、`claude -p` の会話では `sdk-cli` である。
+      先頭の行(`session-owner`、`queue-operation` など)は、`entrypoint` を持たない
+    - **確認できた値**: `cli`(対話)、`sdk-cli`(`claude -p`)、`claude-vscode`(transcript で確認)
+    - **`claude -p` で開始した会話を、対話の `claude --resume` で再開した場合**: 再開しただけでは、transcript に `entrypoint` を持つ行は追加されない(`derived-from` の行が 1 つ追加される)。
+      発話を送ると、同じ transcript(同じ `sessionId`)に、`entrypoint` が `cli` の行が追記される。新しい transcript は作成されない
+    - **未検証**: Agent SDK から起動したセッションの `entrypoint` の値 / 対話の会話を `claude -p --resume` で続けた場合に、同じ transcript に追記されるかどうか
 
 ## 8. 決定の記録
 
@@ -4407,6 +4434,33 @@ Conversations ウィンドウの追加でメニューの文法が崩れていた
   `NSAutoFillHeuristicControllerEnabled` を false にした後も、検索欄の位置に、アプリが作成していないウィンドウが表示されると判明したとき(§7-11。ウィンドウの種類を特定して、対応を検討する)/
   §7-9 の「既知の制限」のいずれかが、利用の妨げになったとき(iTerm2 のタブの中の、独自の端末を持つプロセスから起動したセッションでは、
   target が一致するエントリの pid が report の pid と異なり、report の pid を持つエントリが別にある場合に、pid の一致を優先する規則を検討する)。
+### 8.67 対話でない方法で起動したセッションを、対象外にする(M57)
+
+- **決定**: `claude -p` で起動したセッション(`entrypoint` が `sdk-cli`)は、追跡せず、会話の一覧にも表示しない。hook は report を送らず(§4.1)、
+  reconcile は pid を送らず(§3.5)、索引は transcript を会話として登録しない(§4.6「索引の内容」)。Running、History、検索、`conversations` の CLI のどれにも現れない。
+- **理由**: `claude -p` のセッションは、スクリプトや別のセッションが起動する実行で、このアプリの操作の対象にならない。移動する先のタブが無いので Jump はできず、
+  通知と状態の表示は、起動した側のセッションの行が担う。一方で、会話の一覧では、スクリプトが繰り返し実行すると、件数の多くを占める場合があり、
+  同じ依頼文の行が並んで、対話の会話を探す妨げになる。Recent は先頭の件数だけを表示する(§9)ので、対話の会話が表示の範囲の外に出る。
+- **Running も対象外にする理由**: 変更の前は、別のセッションから起動された `claude -p` は Running に表示されず(入れ子のセッションの規則 — §8.66)、
+  ターミナルで直接実行した `claude -p` は、実行中だけ Running に表示された。History だけを対象外にすると、実行中は表示され、終了するとどこにも残らない動作になる。
+  起動の方法が同じセッションを、場所によらず同じ扱いにする。
+- **History に、実行中の会話が表示されていた事象**: 別のセッションから起動された `claude -p` の会話は、daemon にエントリが無く、transcript はあるので、
+  プロセスが動作している間、History に `· running` の印で表示されていた。`claude -p` で開始した会話では、この表示は発生しなくなる
+  (対話の会話を `claude -p --resume` で続けている間は、その会話が一覧にあり、プロセスは追跡しないので、同じ表示になる場合がある — §7-13 の未検証の点)。
+- **判別に使用する値を `sdk-cli` だけにする理由**: 実機で確認できた値だけを対象にする(§7-13)。値が不明の会話を隠すと、表示されない理由が画面から分からない。
+  対象外にする値が増えた場合は、表示されている会話から気付いて追加できる。
+- **transcript の判定を「`entrypoint` を持つ行のすべて」にする理由**: `claude -p` で開始した会話を、対話で再開して発話を送った場合は、利用者が操作している会話なので、表示する。
+  この場合、同じ transcript に `cli` の行が追記される(§7-13)ので、`claude -p` の発話を含む会話の全体を表示する。再開しただけで、発話を送っていない会話は、表示しない。
+- **reconcile で `~/.claude/sessions/<pid>.json` を読み取る理由**: `claude agents --json` は、`claude -p` のプロセスを `kind` が `interactive` のセッションとして返し、
+  起動の方法を示す項目を持たない(§7-13)。除外しないと、hook が送らなかったセッションを、reconcile が登録する。
+- **入れ子のセッションの規則(§8.66)との関係**: `claude -p` の report は hook が送らないので、規則の主な対象は無くなる。規則は、hook が drop しない子のプロセスのために残す。
+- **この決定で解除されるスターと Archive**: 対話でない方法で起動した会話に付けたスターと Archive は、その会話が一覧から無くなった時点で、解除される(§4.6 の、一覧に無い会話の整理)。
+- **棄却した案**: (1) 現在のまま(History にだけ表示する): 実行中の会話が History に表示され、一覧の件数を占める。
+  (2) 表示と非表示を切り替える: 行に `· non-interactive` の印を付け、既定では表示せず、検索の行の下の Filter の行(選択肢は `Hide` / `Show` / `Only`)で切り替え、
+  表示する場合は、実行中の会話を Running に 1 つの行として表示する(通知、未確認、メニューバーのアイコンの状態には含めず、主ボタンは disabled の Jump にする)。
+  daemon が、子のセッションを、起動した側とは別のエントリとして追跡する必要がある。表示する場面が確認できていないので、採用しない。
+- **再検討の条件**: `claude -p` の会話を、アプリで読む、または Resume する必要が生じたとき(棄却した案の (2) を検討する)/ Agent SDK から起動したセッションなど、
+  `sdk-cli` 以外の値を持つ、対話でないセッションが、一覧に表示されると判明したとき(§7-13 の未検証の点)。
 
 ## 9. 定数表
 

@@ -281,10 +281,11 @@ struct CatchUpOutcome {
 /// vanished files -> live/past flag update. Caller must hold the flock.
 /// `full_build` is what `db::open_rw` reported for this open.
 ///
-/// A re-read file without a human utterance is not a conversation (§4.6,
-/// §8.64): it is not registered (a conversation registered under its
-/// session id is dropped), and only its stat is recorded, so the diff
-/// skips it until it changes like any other file.
+/// A re-read file without a human utterance (§8.64), or one only driven
+/// non-interactively — every `entrypoint` line holds `sdk-cli` (§8.67) — is
+/// not a conversation (§4.6): it is not registered (a conversation
+/// registered under its session id is dropped), and only its stat is
+/// recorded, so the diff skips it until it changes like any other file.
 fn catch_up(
     deps: &Deps,
     db: &mut db::Db,
@@ -334,7 +335,7 @@ fn catch_up(
         if let Ok(content) = std::fs::read_to_string(&file.path) {
             let extracted = transcript::extract(&content);
             let path = file.path.to_string_lossy();
-            if extracted.has_user_utterance() {
+            if extracted.is_conversation() {
                 db.replace_conversation(
                     &file.session_id,
                     &path,

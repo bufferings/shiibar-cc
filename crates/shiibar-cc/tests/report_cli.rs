@@ -30,10 +30,17 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// The terminal environment variables `shiibar-cc report` classifies on
-/// (§4.1). The child never inherits the developer's own values: the test's
-/// outcome must not depend on which terminal it happens to run in.
-const TERMINAL_ENV_VARS: [&str; 3] = ["TERM_PROGRAM", "TERM_PROGRAM_VERSION", "ITERM_SESSION_ID"];
+/// The environment variables `shiibar-cc report` classifies on (§4.1): the
+/// terminal ones and `CLAUDE_CODE_ENTRYPOINT`. The child never inherits the
+/// developer's own values: the test's outcome must not depend on which
+/// terminal it happens to run in, or on whether it runs inside a Claude Code
+/// session.
+const HOOK_ENV_VARS: [&str; 4] = [
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "ITERM_SESSION_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+];
 
 /// A pseudo-terminal whose slave becomes the child's controlling terminal,
 /// so the report's ancestor walk (§4.1) finds a terminal at the report
@@ -87,7 +94,7 @@ struct ReportRun {
 }
 
 /// Run `shiibar-cc report <event>` with `stdin_bytes` on stdin, the given
-/// terminal environment variables (all others of `TERMINAL_ENV_VARS`
+/// environment variables (all others of `HOOK_ENV_VARS`
 /// removed), and, when `pty` is given, that pty as the child's controlling
 /// terminal (a new session acquiring it).
 fn run_report(
@@ -104,7 +111,7 @@ fn run_report(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    for name in TERMINAL_ENV_VARS {
+    for name in HOOK_ENV_VARS {
         cmd.env_remove(name);
     }
     for (name, value) in env {
@@ -372,7 +379,7 @@ fn capture_detached_report(event: &str, fixture: &str, env: &[(&str, &str)]) -> 
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    for name in TERMINAL_ENV_VARS {
+    for name in HOOK_ENV_VARS {
         cmd.env_remove(name);
     }
     for (name, value) in env {
@@ -452,6 +459,87 @@ fn other_events_with_no_controlling_terminal_anywhere_are_dropped() {
         for env in DETACHED_ENVS {
             let written = capture_detached_report(event, fixture, env);
             assert_eq!(written, "", "{event} env {env:?} must be dropped");
+        }
+    }
+}
+
+/// Run `report` under a controlling terminal with a mock daemon listening
+/// and return everything the child wrote to the socket, or an empty string
+/// when it never connected (the child has exited, so a connection it made
+/// is already queued).
+fn written_under_terminal(event: &str, fixture: &str, env: &[(&str, &str)]) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let sock_path = dir.path().join("shiibar-ccd.sock");
+    let listener = UnixListener::bind(&sock_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let pty = Pty::open();
+    let stdin = std::fs::read(fixture_path(fixture)).unwrap();
+    let run = run_report(event, &stdin, dir.path(), env, Some(&pty));
+    assert_eq!(run.code, 0, "{event} env {env:?}");
+    drop(pty.master);
+    match listener.accept() {
+        Ok((mut stream, _)) => {
+            stream.set_nonblocking(false).unwrap();
+            let mut written = String::new();
+            stream.read_to_string(&mut written).expect("read what the report wrote");
+            written
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => String::new(),
+        Err(e) => panic!("accept failed: {e}"),
+    }
+}
+
+/// One fixture per event the non-interactive rule is checked on.
+const EVENTS_FOR_ENTRYPOINT: [(&str, &str); 5] = [
+    ("SessionStart", "session_start_startup.json"),
+    ("UserPromptSubmit", "user_prompt_submit.json"),
+    ("Stop", "stop_no_background_tasks.json"),
+    ("Notification", "notification_idle_prompt.json"),
+    ("SessionEnd", "session_end.json"),
+];
+
+/// §4.1/§8.67: a session started non-interactively (`claude -p`) is not
+/// tracked. Its hooks carry `CLAUDE_CODE_ENTRYPOINT=sdk-cli` on every event,
+/// so every report, SessionEnd included, exits 0 without touching the
+/// socket, even with a controlling terminal and a supported terminal's
+/// environment.
+#[test]
+fn sdk_cli_entrypoint_sends_nothing_for_every_event() {
+    for (event, fixture) in EVENTS_FOR_ENTRYPOINT {
+        for env in [
+            &[("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")][..],
+            &[
+                ("CLAUDE_CODE_ENTRYPOINT", "sdk-cli"),
+                ("TERM_PROGRAM", "iTerm.app"),
+                ("ITERM_SESSION_ID", "w0t0p0:D2DA6A1F-TEST"),
+            ][..],
+        ] {
+            let written = written_under_terminal(event, fixture, env);
+            assert_eq!(written, "", "{event} env {env:?} must send nothing");
+        }
+    }
+}
+
+/// §4.1: a missing, empty or any other `CLAUDE_CODE_ENTRYPOINT` value goes
+/// on to the usual processing — here one `process:` report line per event.
+#[test]
+fn other_entrypoint_values_send_the_usual_report() {
+    for (event, fixture) in EVENTS_FOR_ENTRYPOINT {
+        for env in [
+            &[][..],
+            &[("CLAUDE_CODE_ENTRYPOINT", "")][..],
+            &[("CLAUDE_CODE_ENTRYPOINT", "cli")][..],
+            &[("CLAUDE_CODE_ENTRYPOINT", "claude-vscode")][..],
+            &[("CLAUDE_CODE_ENTRYPOINT", "some-future-entrypoint")][..],
+        ] {
+            let written = written_under_terminal(event, fixture, env);
+            let payload = decode_single_report(&written);
+            assert_eq!(serde_json::to_value(payload.event).unwrap(), event, "env {env:?}");
+            assert!(
+                payload.target.as_deref().is_some_and(|t| t.starts_with("process:")),
+                "{event} env {env:?}: {:?}",
+                payload.target
+            );
         }
     }
 }

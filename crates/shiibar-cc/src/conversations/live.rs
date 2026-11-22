@@ -1,5 +1,6 @@
 //! live/past flag source: `~/.claude/sessions/<pid>.json` (DESIGN.md §4.6,
-//! §7-6). The registry's key is the file NAME (= pid); a reused pid is
+//! §7-6). The same registry also gives the reconcile gather each pid's
+//! `entrypoint` (§3.5 step 1). The registry's key is the file NAME (= pid); a reused pid is
 //! self-resolving because the new claude process overwrites the file, so
 //! the content always belongs to the current occupant.
 //!
@@ -57,6 +58,32 @@ pub fn live_session_ids(sessions_dir: &Path, probe: &dyn LivenessProbe) -> HashS
         }
     }
     out
+}
+
+/// The `entrypoint` recorded in `<sessions_dir>/<pid>.json` (§3.5 step 1,
+/// §7-13): `None` when the file is missing or unreadable, is not JSON, or
+/// has no string `entrypoint`. A `claude -p` process records `sdk-cli`
+/// there, which the reconcile gather uses to leave it out (§8.67).
+pub fn entrypoint_for_pid(sessions_dir: &Path, pid: u32) -> Option<String> {
+    let content = std::fs::read_to_string(sessions_dir.join(format!("{pid}.json"))).ok()?;
+    let value = serde_json::from_str::<Value>(&content).ok()?;
+    value
+        .get("entrypoint")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// The reconcile gather's sessions-registry reader (§3.5 step 1), over the
+/// same sessions directory the live/past flag reads (`main.rs` resolves
+/// both from `$HOME`).
+pub struct SessionFileEntrypoints {
+    pub sessions_dir: std::path::PathBuf,
+}
+
+impl shiibar_cc_client::reconcile::SessionEntrypoints for SessionFileEntrypoints {
+    fn entrypoint(&self, pid: u32) -> Option<String> {
+        entrypoint_for_pid(&self.sessions_dir, pid)
+    }
 }
 
 /// The real probe: `kill(pid, 0)` + the process name — both plain
@@ -234,6 +261,40 @@ mod tests {
         let missing = dir.path().join("no-such-dir");
         let probe = FakeProbe::new(&[1]);
         assert!(live_session_ids(&missing, &probe).is_empty());
+    }
+
+    #[test]
+    fn entrypoint_for_pid_reads_the_recorded_value() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("4242.json"),
+            r#"{"pid":4242,"sessionId":"s","cwd":"/Users/example/project","kind":"interactive","entrypoint":"sdk-cli"}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("4243.json"),
+            r#"{"pid":4243,"sessionId":"t","cwd":"/Users/example/project","kind":"interactive","entrypoint":"cli"}"#,
+        )
+        .unwrap();
+        assert_eq!(entrypoint_for_pid(dir.path(), 4242).as_deref(), Some("sdk-cli"));
+        assert_eq!(entrypoint_for_pid(dir.path(), 4243).as_deref(), Some("cli"));
+    }
+
+    #[test]
+    fn entrypoint_for_pid_is_none_without_a_readable_value() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("1.json"), "{broken").unwrap();
+        fs::write(
+            dir.path().join("2.json"),
+            r#"{"pid":2,"sessionId":"s","cwd":"/Users/example/project"}"#,
+        )
+        .unwrap();
+        fs::write(dir.path().join("3.json"), r#"{"entrypoint":7}"#).unwrap();
+        fs::create_dir(dir.path().join("4.json")).unwrap();
+        for pid in [1, 2, 3, 4, 5] {
+            assert_eq!(entrypoint_for_pid(dir.path(), pid), None, "pid {pid}");
+        }
+        assert_eq!(entrypoint_for_pid(&dir.path().join("no-such-dir"), 1), None);
     }
 
     #[test]

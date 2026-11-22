@@ -4,7 +4,7 @@
 //! `{"cmd":"reconcile",...}`.
 
 use crate::exitcode;
-use shiibar_cc_client::reconcile::{ClaudeAgentsRunner, gather};
+use shiibar_cc_client::reconcile::{ClaudeAgentsRunner, SessionEntrypoints, gather};
 use shiibar_cc_client::terminal::{AppleScriptRunner, PsRunner};
 use shiibar_cc_proto::{AckResponse, Request};
 use std::path::Path;
@@ -21,10 +21,11 @@ use std::path::Path;
 pub fn run_reconcile(
     socket_path: &Path,
     claude_runner: &dyn ClaudeAgentsRunner,
+    entrypoints: &dyn SessionEntrypoints,
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
 ) -> (i32, Option<String>) {
-    let result = gather(claude_runner, ps_runner, script_runner);
+    let result = gather(claude_runner, entrypoints, ps_runner, script_runner);
     let request = Request::Reconcile {
         complete: result.complete,
         sessions: result.sessions,
@@ -55,7 +56,16 @@ pub fn run_reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversations::live::SessionFileEntrypoints;
     use shiibar_cc_client::terminal::{AppleScriptOutput, PsOutput};
+
+    /// The real sessions-registry reader over an empty directory inside the
+    /// test's temp dir (never the real `~/.claude`).
+    fn no_session_files(dir: &tempfile::TempDir) -> SessionFileEntrypoints {
+        let sessions_dir = dir.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        SessionFileEntrypoints { sessions_dir }
+    }
 
     struct FakeClaude {
         json: String,
@@ -102,7 +112,9 @@ mod tests {
     fn exits_1_when_the_daemon_is_absent() {
         let dir = tempfile::tempdir().unwrap();
         let claude = FakeClaude { json: "[]".to_string() };
-        let (code, err) = run_reconcile(&dir.path().join("no-socket"), &claude, &FakePs, &FakeScript);
+        let entrypoints = no_session_files(&dir);
+        let (code, err) =
+            run_reconcile(&dir.path().join("no-socket"), &claude, &entrypoints, &FakePs, &FakeScript);
         assert_eq!(code, exitcode::ERROR);
         assert!(err.is_some());
     }
@@ -154,7 +166,7 @@ mod tests {
         let claude = FakeClaude {
             json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
         };
-        let (code, err) = run_reconcile(&socket, &claude, &TtyPs, &TccScript);
+        let (code, err) = run_reconcile(&socket, &claude, &no_session_files(&dir), &TtyPs, &TccScript);
         assert_eq!(code, exitcode::TCC_DENIED);
         assert!(err.unwrap().contains("automation permission"));
 
@@ -178,7 +190,9 @@ mod tests {
         let claude = FakeClaude {
             json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
         };
-        let (code, _) = run_reconcile(&dir.path().join("no-socket"), &claude, &TtyPs, &TccScript);
+        let entrypoints = no_session_files(&dir);
+        let (code, _) =
+            run_reconcile(&dir.path().join("no-socket"), &claude, &entrypoints, &TtyPs, &TccScript);
         assert_eq!(code, exitcode::ERROR);
     }
 
@@ -190,7 +204,7 @@ mod tests {
         let claude = FakeClaude {
             json: r#"[{"sessionId":"s","cwd":"/c","pid":111,"status":"busy"}]"#.to_string(),
         };
-        let (code, err) = run_reconcile(&socket, &claude, &TtyPs, &FakeScript);
+        let (code, err) = run_reconcile(&socket, &claude, &no_session_files(&dir), &TtyPs, &FakeScript);
         assert_eq!(code, exitcode::OK);
         assert!(err.is_none());
         let sent: Request = serde_json::from_str(daemon.join().unwrap().trim_end()).unwrap();
@@ -199,6 +213,58 @@ mod tests {
                 assert!(complete);
                 assert_eq!(sessions[0].target, "process:111");
                 assert!(!sessions[0].update_only);
+            }
+            other => panic!("expected a reconcile request, got {other:?}"),
+        }
+    }
+    /// Answers every pid with its own tty: 111 on ttys001, 222 on ttys002,
+    /// and so on, so each session is sent as `process:<pid>`.
+    struct FourTtyPs;
+    impl PsRunner for FourTtyPs {
+        fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+            Ok(PsOutput {
+                success: true,
+                stdout: "111 ttys001\n222 ttys002\n333 ttys003\n444 ttys004\n555 ttys005\n".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn leaves_out_only_the_pids_whose_session_file_records_sdk_cli() {
+        // §3.5 step 1: 111 records sdk-cli and is left out; 222 has no
+        // file, 333 is not JSON, 444 has no entrypoint, 555 records cli,
+        // and all four are sent.
+        let dir = tempfile::tempdir().unwrap();
+        let entrypoints = no_session_files(&dir);
+        let write = |pid: u32, content: &str| {
+            std::fs::write(entrypoints.sessions_dir.join(format!("{pid}.json")), content).unwrap();
+        };
+        write(111, r#"{"pid":111,"sessionId":"s-1","cwd":"/Users/example/a","kind":"interactive","entrypoint":"sdk-cli"}"#);
+        write(333, "{not json");
+        write(444, r#"{"pid":444,"sessionId":"s-4","cwd":"/Users/example/d","kind":"interactive"}"#);
+        write(555, r#"{"pid":555,"sessionId":"s-5","cwd":"/Users/example/e","kind":"interactive","entrypoint":"cli"}"#);
+
+        let socket = dir.path().join("shiibar-ccd.sock");
+        let daemon = fake_daemon(&socket);
+        let claude = FakeClaude {
+            json: r#"[
+                {"sessionId":"s-1","cwd":"/Users/example/a","pid":111,"status":"busy"},
+                {"sessionId":"s-2","cwd":"/Users/example/b","pid":222,"status":"busy"},
+                {"sessionId":"s-3","cwd":"/Users/example/c","pid":333,"status":"busy"},
+                {"sessionId":"s-4","cwd":"/Users/example/d","pid":444,"status":"busy"},
+                {"sessionId":"s-5","cwd":"/Users/example/e","pid":555,"status":"busy"}
+            ]"#
+            .to_string(),
+        };
+        let (code, err) = run_reconcile(&socket, &claude, &entrypoints, &FourTtyPs, &FakeScript);
+        assert_eq!(code, exitcode::OK);
+        assert!(err.is_none());
+        let sent: Request = serde_json::from_str(daemon.join().unwrap().trim_end()).unwrap();
+        match sent {
+            Request::Reconcile { complete, sessions } => {
+                assert!(complete);
+                let targets: Vec<&str> = sessions.iter().map(|s| s.target.as_str()).collect();
+                assert_eq!(targets, vec!["process:222", "process:333", "process:444", "process:555"]);
             }
             other => panic!("expected a reconcile request, got {other:?}"),
         }
