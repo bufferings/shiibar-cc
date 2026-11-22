@@ -90,6 +90,8 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 - **shiibar-cc の `protect-main` は、プルリクエストと CI の成功も必須にする**: main への変更は、プルリクエストの
   マージだけで反映する(直接の push は拒否される)。必要な承認の数は 0 である(メンテナーが 1 人で、作成者は自分のプルリクエストを承認できないため)。
   必須のステータスチェックは、CI の 2 つのジョブ(`test` と `deny`)である。どちらも、すべてのプルリクエストで実行される。
+  この 2 つは、GitHub Actions が報告した結果だけを対象にする(ruleset で、報告元を GitHub Actions に指定している)。
+  CI を別の仕組みに移す場合は、報告元の指定も変更する。
   CI が失敗している間は、マージできない(偶発的に失敗したテストは、再実行するか、テストを修正する)。
   Dependabot のプルリクエストにも、同じ条件を適用する。
   homebrew-tap の `protect-main` には、この条件を入れない(`bump-cask.yml` が、tap の main に直接 push するため)
