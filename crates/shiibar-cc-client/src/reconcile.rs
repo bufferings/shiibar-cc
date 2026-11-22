@@ -12,7 +12,7 @@ use crate::terminal::{
     parse_ps_tty_output,
 };
 use crate::{apple_terminal, ghostty, iterm2};
-use shiibar_cc_proto::extract::process_target_for_pid;
+use shiibar_cc_proto::extract::{is_non_interactive_entrypoint, process_target_for_pid};
 use shiibar_cc_proto::{ReconcileSession, Status};
 use std::collections::HashMap;
 use std::process::Command;
@@ -31,6 +31,18 @@ impl ClaudeAgentsRunner for RealClaudeAgents {
         let output = Command::new("claude").args(["agents", "--json"]).output()?;
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
+}
+
+/// Reads the `entrypoint` Claude Code recorded for a running session's pid
+/// in `<sessions dir>/<pid>.json` (§3.5 step 1). `claude agents --json`
+/// lists a `claude -p` process as an `interactive` session and carries no
+/// field telling how it was started (§7-13), so this file is the only
+/// source. Injected so tests never read the real `~/.claude`; the real
+/// reader lives with the rest of the sessions-registry knowledge in
+/// `shiibar-cc`'s conversations module. `None` when the file is missing,
+/// unreadable, not JSON, or has no string `entrypoint`.
+pub trait SessionEntrypoints {
+    fn entrypoint(&self, pid: u32) -> Option<String>;
 }
 
 /// One entry from `claude agents --json`, already translated to shiibar's
@@ -161,7 +173,9 @@ impl PsRunner for ReplayPs {
 }
 
 /// Gather the live session list for a `reconcile` request (§3.5): run
-/// `claude agents --json`, map statuses, run `ps` once for every pid, scan
+/// `claude agents --json`, map statuses, drop the sessions started
+/// non-interactively (`without_non_interactive`), run `ps` once for every
+/// remaining pid, scan
 /// each supported terminal (`iterm2_targets`, `apple_terminal_targets`,
 /// and `ghostty_targets`), and assemble the sessions with
 /// `assemble_sessions`.
@@ -171,6 +185,7 @@ impl PsRunner for ReplayPs {
 /// (§3.5/§4.4: the caller sends them, then exits 3).
 pub fn gather(
     claude_runner: &dyn ClaudeAgentsRunner,
+    entrypoints: &dyn SessionEntrypoints,
     ps_runner: &dyn PsRunner,
     script_runner: &dyn AppleScriptRunner,
 ) -> GatherResult {
@@ -185,6 +200,9 @@ pub fn gather(
     let Ok(agents) = parse_claude_agents_json(&raw) else {
         return incomplete_and_empty;
     };
+    // Excluded before `ps` and the terminal scans, so an excluded pid is
+    // never matched and never affects `complete`.
+    let agents = without_non_interactive(agents, entrypoints);
     if agents.is_empty() {
         // Nothing to resolve: every scan would be empty and complete
         // without running anything.
@@ -223,6 +241,22 @@ pub fn gather(
     ];
 
     assemble_sessions(agents, pid_tty.as_ref(), &scans)
+}
+
+/// Drop the sessions started non-interactively (`claude -p`): those whose
+/// `<sessions dir>/<pid>.json` records `entrypoint` = `sdk-cli` (§3.5 step 1,
+/// §8.67). The hook never reports such a session (§4.1), and without this
+/// the reconcile would register it. A pid whose file is missing,
+/// unreadable, not JSON, without `entrypoint`, or with any other value is
+/// kept.
+pub fn without_non_interactive(
+    agents: Vec<ClaudeAgent>,
+    entrypoints: &dyn SessionEntrypoints,
+) -> Vec<ClaudeAgent> {
+    agents
+        .into_iter()
+        .filter(|a| !is_non_interactive_entrypoint(entrypoints.entrypoint(a.pid).as_deref()))
+        .collect()
 }
 
 /// Pure assembly of the reconcile sessions from `claude agents`, the `ps`
@@ -341,6 +375,15 @@ mod tests {
             self.output
                 .clone()
                 .map_err(|_| std::io::Error::other("claude not found"))
+        }
+    }
+
+    /// A sessions registry with no file for any pid: every session is kept.
+    struct NoSessionFiles;
+
+    impl SessionEntrypoints for NoSessionFiles {
+        fn entrypoint(&self, _pid: u32) -> Option<String> {
+            None
         }
     }
 
@@ -466,7 +509,7 @@ mod tests {
             stdout: "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys001\tUUID-B\nDONE\t0\n".to_string(),
         };
 
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert!(!result.permission_denied);
         assert_eq!(result.sessions.len(), 2, "pid 333 (not in the ps output) must not be sent");
@@ -494,7 +537,7 @@ mod tests {
         let ps = FakePs {
             stdout: "111 ttys000\n222 ttys006\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         let by_target = by_target(&result);
         assert_eq!(by_target["iterm2:UUID-A"].status, Status::Working);
@@ -525,7 +568,7 @@ mod tests {
         let script = FakeScript {
             stdout: "SESSION\t/dev/ttys000\tUUID-A\nDONE\t0\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         let by_target = by_target(&result);
         assert_eq!(by_target["iterm2:UUID-A"].pid, Some(111));
         assert_eq!(by_target["process:222"].pid, Some(222));
@@ -543,7 +586,7 @@ mod tests {
             stdout: "48213 ttys012\n".to_string(),
         };
         let script = FakeScript { stdout: "DONE\t0\n".to_string() };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert_eq!(
             result.sessions,
@@ -571,7 +614,7 @@ mod tests {
             stdout: "  777 ??      \n".to_string(),
         };
         let script = FakeScript { stdout: "DONE\t0\n".to_string() };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert!(result.sessions.is_empty());
     }
@@ -594,7 +637,7 @@ mod tests {
         let script = FakeScript {
             stdout: "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(!result.complete);
         let by_target = by_target(&result);
         assert!(!by_target["iterm2:UUID-A"].update_only);
@@ -607,7 +650,7 @@ mod tests {
         let claude = FakeClaude { output: Err(()) };
         let ps = FakePs { stdout: String::new() };
         let script = FakeScript { stdout: "DONE\t0\n".to_string() };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(!result.complete);
         assert!(result.sessions.is_empty());
     }
@@ -623,7 +666,7 @@ mod tests {
         let script = FakeScript {
             stdout: "SESSION\t/dev/ttys000\tUUID-A\nDONE\t1\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(!result.complete);
         assert_eq!(result.sessions.len(), 1, "still adds/updates from a partial scan");
     }
@@ -669,7 +712,7 @@ mod tests {
         };
         for apple_terminal in ["TAB\t/dev/ttys009\nDONE\t0\n", "DONE\t0\n"] {
             for ps in [FailingPs { output: None }, FailingPs { output: Some("111 ttys000\n") }] {
-                let result = gather(&claude, &ps, &OnlyAppleTerminal { apple_terminal });
+                let result = gather(&claude, &NoSessionFiles, &ps, &OnlyAppleTerminal { apple_terminal });
                 let name = format!("Terminal.app {apple_terminal:?}, ps output {:?}", ps.output);
                 assert!(!result.complete, "{name}");
                 assert!(result.sessions.is_empty(), "{name}");
@@ -699,7 +742,7 @@ mod tests {
             calls: std::cell::Cell::new(0),
         };
         let script = FakeScript { stdout: "DONE\t0\n".to_string() };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert_eq!(ps.calls.get(), 1);
         assert_eq!(result.sessions[0].target, "process:111");
     }
@@ -724,7 +767,7 @@ mod tests {
         let ps = FakePs {
             stdout: "111 ttys000\n222 ttys006\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.permission_denied);
         assert!(!result.complete);
         let by_target = by_target(&result);
@@ -745,7 +788,7 @@ mod tests {
         let ps = FakePs {
             stdout: "111 ttys000\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.permission_denied);
         assert!(!result.complete);
         assert_eq!(result.sessions.len(), 1);
@@ -787,7 +830,7 @@ mod tests {
         let script = RecordingScript {
             scripts: std::cell::RefCell::new(Vec::new()),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         let scripts = script.scripts.borrow();
         assert_eq!(
@@ -828,7 +871,7 @@ mod tests {
         let ps = FakePs {
             stdout: "111 ttys000\n222 ttys006\n333 ttys005\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert!(!result.permission_denied);
         let by_target = by_target(&result);
@@ -869,7 +912,7 @@ mod tests {
         let script = RecordingScript {
             scripts: std::cell::RefCell::new(Vec::new()),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert_eq!(result.sessions[0].target, "process:111");
         let scripts = script.scripts.borrow();
@@ -903,7 +946,7 @@ mod tests {
         let script = RecordingScript {
             scripts: std::cell::RefCell::new(Vec::new()),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.complete);
         assert_eq!(result.sessions[0].target, "process:111");
         let scripts = script.scripts.borrow();
@@ -931,7 +974,7 @@ mod tests {
         let ps = FakePs {
             stdout: "333 ttys005\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(!result.complete);
         assert!(!result.permission_denied);
         assert_eq!(result.sessions[0].target, "process:333");
@@ -955,7 +998,7 @@ mod tests {
         let ps = FakePs {
             stdout: "111 ttys000\n".to_string(),
         };
-        let result = gather(&claude, &ps, &script);
+        let result = gather(&claude, &NoSessionFiles, &ps, &script);
         assert!(result.permission_denied);
         assert!(!result.complete);
         assert_eq!(result.sessions.len(), 1);
@@ -977,7 +1020,136 @@ mod tests {
             }
         }
         let claude = FakeClaude { output: Ok("[]".to_string()) };
-        let result = gather(&claude, &PanicPs, &PanicScript);
+        let result = gather(&claude, &NoSessionFiles, &PanicPs, &PanicScript);
+        assert!(result.complete);
+        assert!(result.sessions.is_empty());
+    }
+
+    // ---- sessions started non-interactively (§3.5 step 1, §8.67) ----
+
+    /// A sessions registry answering a fixed `entrypoint` per pid; a pid
+    /// absent from the map has no file.
+    struct FakeEntrypoints(HashMap<u32, &'static str>);
+
+    impl SessionEntrypoints for FakeEntrypoints {
+        fn entrypoint(&self, pid: u32) -> Option<String> {
+            self.0.get(&pid).map(|v| v.to_string())
+        }
+    }
+
+    /// Records the pids `ps` was asked about, answering every pid with its
+    /// own tty.
+    struct RecordingPs {
+        asked: std::cell::RefCell<Vec<u32>>,
+        stdout: String,
+    }
+
+    impl PsRunner for RecordingPs {
+        fn run(&self, pids: &[u32]) -> std::io::Result<PsOutput> {
+            self.asked.borrow_mut().extend_from_slice(pids);
+            Ok(PsOutput {
+                success: true,
+                stdout: self.stdout.clone(),
+            })
+        }
+    }
+
+    /// Four sessions with a tty: 111 in iTerm2 (UUID-A), 222 and 333 matched
+    /// by no scan, 444 in iTerm2 (UUID-D).
+    fn four_agents_json() -> &'static str {
+        r#"[
+            {"sessionId":"s-1","cwd":"/proj/a","pid":111,"status":"busy"},
+            {"sessionId":"s-2","cwd":"/proj/b","pid":222,"status":"idle"},
+            {"sessionId":"s-3","cwd":"/proj/c","pid":333,"status":"idle"},
+            {"sessionId":"s-4","cwd":"/proj/d","pid":444,"status":"waiting","waitingFor":"permission prompt"}
+        ]"#
+    }
+
+    fn four_agents_ps() -> RecordingPs {
+        RecordingPs {
+            asked: std::cell::RefCell::new(Vec::new()),
+            stdout: "111 ttys000\n222 ttys002\n333 ttys003\n444 ttys004\n".to_string(),
+        }
+    }
+
+    fn four_agents_script() -> FakeScript {
+        FakeScript {
+            stdout: "SESSION\t/dev/ttys000\tUUID-A\nSESSION\t/dev/ttys004\tUUID-D\nDONE\t0\n".to_string(),
+        }
+    }
+
+    #[test]
+    fn gather_excludes_a_pid_whose_session_file_records_sdk_cli() {
+        let claude = FakeClaude {
+            output: Ok(four_agents_json().to_string()),
+        };
+        let entrypoints = FakeEntrypoints(HashMap::from([(111, "cli"), (222, "sdk-cli"), (444, "sdk-cli")]));
+        let ps = four_agents_ps();
+        let result = gather(&claude, &entrypoints, &ps, &four_agents_script());
+
+        let targets: Vec<&str> = result.sessions.iter().map(|s| s.target.as_str()).collect();
+        assert_eq!(targets, vec!["iterm2:UUID-A", "process:333"]);
+        // Excluded before the scans: `ps` is never asked about them.
+        assert_eq!(*ps.asked.borrow(), vec![111, 333]);
+    }
+
+    #[test]
+    fn gather_exclusion_leaves_the_other_sessions_and_complete_unchanged() {
+        let claude = FakeClaude {
+            output: Ok(four_agents_json().to_string()),
+        };
+        let baseline = gather(&claude, &NoSessionFiles, &four_agents_ps(), &four_agents_script());
+        assert_eq!(baseline.sessions.len(), 4);
+
+        let entrypoints = FakeEntrypoints(HashMap::from([(222, "sdk-cli")]));
+        let result = gather(&claude, &entrypoints, &four_agents_ps(), &four_agents_script());
+        assert_eq!(result.complete, baseline.complete);
+        assert!(result.complete);
+        assert_eq!(result.permission_denied, baseline.permission_denied);
+        let expected: Vec<ReconcileSession> = baseline
+            .sessions
+            .into_iter()
+            .filter(|s| s.pid != Some(222))
+            .collect();
+        assert_eq!(result.sessions, expected);
+    }
+
+    #[test]
+    fn gather_keeps_a_pid_whose_entrypoint_is_missing_or_another_value() {
+        let claude = FakeClaude {
+            output: Ok(four_agents_json().to_string()),
+        };
+        // 111 has no file (absent from the map).
+        let entrypoints = FakeEntrypoints(HashMap::from([
+            (222, "cli"),
+            (333, "claude-vscode"),
+            (444, ""),
+        ]));
+        let result = gather(&claude, &entrypoints, &four_agents_ps(), &four_agents_script());
+        let baseline = gather(&claude, &NoSessionFiles, &four_agents_ps(), &four_agents_script());
+        assert_eq!(result, baseline);
+        assert_eq!(result.sessions.len(), 4);
+    }
+
+    #[test]
+    fn gather_with_only_excluded_pids_is_complete_and_runs_nothing() {
+        struct PanicPs;
+        impl PsRunner for PanicPs {
+            fn run(&self, _pids: &[u32]) -> std::io::Result<PsOutput> {
+                panic!("ps must not run for excluded pids");
+            }
+        }
+        struct PanicScript;
+        impl AppleScriptRunner for PanicScript {
+            fn run(&self, _script: &str) -> std::io::Result<AppleScriptOutput> {
+                panic!("osascript must not run for excluded pids");
+            }
+        }
+        let claude = FakeClaude {
+            output: Ok(r#"[{"sessionId":"s-9","cwd":"/c","pid":999,"status":"busy"}]"#.to_string()),
+        };
+        let entrypoints = FakeEntrypoints(HashMap::from([(999, "sdk-cli")]));
+        let result = gather(&claude, &entrypoints, &PanicPs, &PanicScript);
         assert!(result.complete);
         assert!(result.sessions.is_empty());
     }

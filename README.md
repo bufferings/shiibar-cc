@@ -33,8 +33,8 @@ Ghostty, which needs version 1.4.0 or later. A session in any other
 terminal on this Mac (VS Code's integrated terminal, a Ghostty older than
 1.4.0) still appears under Running with its status and notifications; its
 main button is a disabled **Jump**, and you can read or branch its
-conversation. Sessions without a terminal and sessions on a remote host
-over SSH aren't tracked.
+conversation. Sessions without a terminal, sessions on a remote host over
+SSH, and non-interactive runs (`claude -p`) aren't tracked.
 
 ## What it does
 
@@ -167,6 +167,8 @@ anything.
 
 A Claude Code session that ended before you sent a prompt (for example one
 where you only ran a slash command) is not listed as a conversation.
+Conversations from non-interactive runs (`claude -p`) are not listed
+either.
 
 <img src="docs/assets/conversations-window.png" width="700"
      alt="The Shiibar CC window, wide enough for two columns: a search

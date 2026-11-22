@@ -47,6 +47,24 @@ pub struct HookEnv<'a> {
     pub iterm_session_id: Option<&'a str>,
 }
 
+/// The `entrypoint` value Claude Code records for a session started
+/// non-interactively (`claude -p`): in the hook's `$CLAUDE_CODE_ENTRYPOINT`,
+/// in `~/.claude/sessions/<pid>.json`, and on transcript lines (§7-13).
+/// Such sessions are neither tracked nor listed as conversations (§8.67).
+/// It is the only value treated this way: hiding a session whose value is
+/// unknown would leave no visible reason why it is missing (§8.67).
+pub const NON_INTERACTIVE_ENTRYPOINT: &str = "sdk-cli";
+
+/// Whether an `entrypoint` value marks a session started non-interactively.
+/// A missing, empty or any other value does not. For the hook this is
+/// `$CLAUDE_CODE_ENTRYPOINT`, and a match drops every report before the
+/// ancestor walk, SessionEnd included (§4.1); the reconcile gather applies
+/// it to the sessions registry's value (§3.5). Takes the value rather than
+/// reading the environment so the rule stays a pure function.
+pub fn is_non_interactive_entrypoint(entrypoint: Option<&str>) -> bool {
+    entrypoint == Some(NON_INTERACTIVE_ENTRYPOINT)
+}
+
 /// The first ancestor of the hook process that has a controlling terminal
 /// (§4.1): in practice the `claude` process running the session. Its pid is
 /// carried on every report as `pid` (§4.2) and keys `process:` targets; its
@@ -440,6 +458,28 @@ mod tests {
             .expect("a report with a controlling process must not be dropped")
             .target
             .expect("a report with a controlling process has a target")
+    }
+
+    // Non-interactive sessions (§4.1/§8.67).
+
+    #[test]
+    fn sdk_cli_entrypoint_is_non_interactive() {
+        assert!(is_non_interactive_entrypoint(Some("sdk-cli")));
+    }
+
+    #[test]
+    fn missing_empty_and_other_entrypoints_are_not_non_interactive() {
+        for value in [
+            None,
+            Some(""),
+            Some("cli"),
+            Some("claude-vscode"),
+            Some("some-future-entrypoint"),
+            Some("SDK-CLI"),
+            Some(" sdk-cli"),
+        ] {
+            assert!(!is_non_interactive_entrypoint(value), "{value:?}");
+        }
     }
 
     // Target generation (§4.1/§2).

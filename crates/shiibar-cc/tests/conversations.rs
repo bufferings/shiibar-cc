@@ -425,6 +425,171 @@ fn a_deleted_unregistered_file_loses_its_record_without_counting_as_removed() {
     assert_eq!(search_ids(&deps, None), vec!["real"]);
 }
 
+// ---------- sessions started non-interactively (§4.6 "index contents", §8.67) ----------
+
+/// An utterance line carrying `entrypoint` (§7-13).
+fn line_from(kind: &str, uuid: &str, parent: Option<&str>, text: &str, entrypoint: &str) -> String {
+    let line = match kind {
+        "user" => user_line(uuid, parent, text),
+        _ => assistant_line(uuid, parent, text),
+    };
+    let mut value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    value["entrypoint"] = serde_json::Value::String(entrypoint.to_string());
+    value.to_string()
+}
+
+/// A `claude -p` transcript: a leading bookkeeping line without
+/// `entrypoint`, then utterance lines that all carry `sdk-cli`.
+fn sdk_cli_conversation(question: &str) -> Vec<String> {
+    vec![
+        r#"{"type":"queue-operation","operation":"enqueue","sessionId":"x"}"#.to_string(),
+        line_from("user", "u1", None, question, "sdk-cli"),
+        line_from("assistant", "a1", Some("u1"), "scripted answer", "sdk-cli"),
+    ]
+}
+
+#[test]
+fn transcripts_whose_every_entrypoint_is_sdk_cli_are_not_conversations() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "scripted", &sdk_cli_conversation("scripted request"), 2_000);
+    fx.write_transcript("slug", "plain", &simple_conversation("plain request", "ok"), 1_000);
+    fx.write_transcript(
+        "slug",
+        "cli",
+        &[
+            line_from("user", "u1", None, "typed request", "cli"),
+            line_from("assistant", "a1", Some("u1"), "ok", "cli"),
+        ],
+        1_100,
+    );
+    fx.write_transcript(
+        "slug",
+        "resumed",
+        &[
+            line_from("user", "u1", None, "scripted start", "sdk-cli"),
+            line_from("assistant", "a1", Some("u1"), "ok", "sdk-cli"),
+            line_from("user", "u2", Some("a1"), "resumed by hand", "cli"),
+        ],
+        1_200,
+    );
+    let deps = fx.deps();
+
+    assert_eq!(search_ids(&deps, None), vec!["resumed", "cli", "plain"]);
+    assert!(search_ids(&deps, Some("scripted request")).is_empty());
+    assert!(search_ids(&deps, Some("scripted answer")).is_empty());
+    assert_eq!(search_ids(&deps, Some("request")), vec!["cli", "plain"]);
+    // show answers as for an id that is not in the index (exit 2).
+    assert!(run_show(&deps, "scripted").unwrap().is_none());
+    for id in ["plain", "cli", "resumed"] {
+        assert!(run_show(&deps, id).unwrap().is_some(), "{id}");
+    }
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["scripted"]);
+}
+
+#[test]
+fn an_unchanged_sdk_cli_file_is_not_re_read() {
+    let fx = Fixture::new();
+    let original = vec![line_from("user", "u1", None, "scripted run", "sdk-cli")];
+    fx.write_transcript("slug", "s1", &original, 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["s1"]);
+
+    let mut events = Vec::new();
+    run_index(&deps, &mut |e| events.push(e)).unwrap();
+    assert_eq!(
+        events.first(),
+        Some(&ProgressEvent::Start {
+            total: 0,
+            full_build: false
+        })
+    );
+
+    // Same byte length, same pinned mtime, now an interactive line: the
+    // file is still not re-read (proof that the recorded stat skips it).
+    let swapped = vec![line_from("user", "u1", None, "typed by hand...", "cli")];
+    assert_eq!(swapped[0].len(), original[0].len());
+    fx.write_transcript("slug", "s1", &swapped, 1_000);
+    assert!(search_ids(&deps, None).is_empty());
+}
+
+#[test]
+fn an_sdk_cli_file_that_gains_a_cli_line_is_registered_on_the_next_catch_up() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &sdk_cli_conversation("scripted start"), 1_000);
+    let deps = fx.deps();
+    assert!(search_ids(&deps, None).is_empty());
+
+    let mut lines = sdk_cli_conversation("scripted start");
+    lines.push(line_from("user", "u2", Some("a1"), "continued by hand", "cli"));
+    fx.write_transcript("slug", "s1", &lines, 2_000);
+    assert_eq!(search_ids(&deps, None), vec!["s1"]);
+    assert_eq!(search_ids(&deps, Some("continued")), vec!["s1"]);
+    let shown = run_show(&deps, "s1").unwrap().expect("registered");
+    assert_eq!(shown.messages.last().unwrap().text, "continued by hand");
+    assert!(unregistered_ids(&fx.db_path).is_empty());
+}
+
+#[test]
+fn a_registered_conversation_rewritten_to_only_sdk_cli_is_removed_and_counted() {
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "s1", &simple_conversation("soon scripted", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+    assert_eq!(search_ids(&deps, None), vec!["s1"]);
+
+    fx.write_transcript("slug", "s1", &sdk_cli_conversation("soon scripted"), 2_000);
+    assert_eq!(
+        done_event(&deps),
+        ProgressEvent::Done {
+            indexed: 1,
+            removed: 1
+        }
+    );
+    assert!(search_ids(&deps, None).is_empty());
+    assert!(run_show(&deps, "s1").unwrap().is_none());
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["s1"]);
+}
+
+#[test]
+fn a_previous_schema_index_holding_an_sdk_cli_conversation_drops_it_on_the_full_rebuild() {
+    // An index written by the previous schema (version 4) registered a
+    // `claude -p` transcript as a conversation. The version mismatch
+    // rebuilds it in full, and the rebuild leaves the file out (§4.6).
+    let fx = Fixture::new();
+    fx.write_transcript("slug", "scripted", &sdk_cli_conversation("scripted request"), 2_000);
+    fx.write_transcript("slug", "real", &simple_conversation("kept", "ok"), 1_000);
+    let deps = fx.deps();
+    run_index(&deps, &mut |_| {}).unwrap();
+
+    let conn = rusqlite::Connection::open(&fx.db_path).unwrap();
+    conn.execute_batch(
+        "DELETE FROM unregistered_files;
+         INSERT INTO conversations(session_id, path, mtime_ns, size, cwd, title, live, updated_at, last_prompt)
+             VALUES('scripted', '/Users/example/scripted.jsonl', 0, 0, '/Users/example/project', 'scripted request', 0, 2000, 'scripted request');
+         INSERT INTO messages(text, session_id, seq, role) VALUES('scripted request', 'scripted', '0', 'user');
+         UPDATE meta SET value='4' WHERE key='schema_version';",
+    )
+    .unwrap();
+    drop(conn);
+    assert!(run_show(&deps, "scripted").unwrap().is_some());
+
+    let mut full_build_seen = false;
+    let ids: Vec<String> = run_search(&deps, None, &mut || full_build_seen = true)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.session_id)
+        .collect();
+    assert!(
+        full_build_seen,
+        "an older schema version must be a full build"
+    );
+    assert_eq!(ids, vec!["real"]);
+    assert!(search_ids(&deps, Some("scripted")).is_empty());
+    assert!(run_show(&deps, "scripted").unwrap().is_none());
+    assert_eq!(unregistered_ids(&fx.db_path), vec!["scripted"]);
+}
+
 // ---------- live/past ----------
 
 #[test]
@@ -1179,6 +1344,38 @@ fn binary_search_and_show_leave_out_a_transcript_without_a_human_utterance() {
     let missing = run_binary(home.path(), &["show", "no-prompt", "--json"]);
     assert_eq!(missing.code, 2);
     assert!(!missing.stderr.is_empty());
+}
+
+#[test]
+fn binary_search_and_show_leave_out_a_transcript_driven_only_by_sdk_cli() {
+    // §4.4 / §4.6 "index contents": a `claude -p` transcript is not a
+    // conversation — absent from search, exit 2 from show.
+    let home = tempfile::tempdir().unwrap();
+    write_home_transcript(home.path(), "scripted", &sdk_cli_conversation("a scripted prompt"));
+    write_home_transcript(
+        home.path(),
+        "with-prompt",
+        &simple_conversation("a real prompt", "ok"),
+    );
+    for args in [&["search", "--json"][..], &["search", "prompt", "--json"][..]] {
+        let out = run_binary(home.path(), args);
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+        let ids: Vec<&str> = v["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["session_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["with-prompt"], "{args:?}");
+    }
+
+    let missing = run_binary(home.path(), &["show", "scripted", "--json"]);
+    assert_eq!(missing.code, 2);
+    assert!(!missing.stderr.is_empty());
+    let unknown = run_binary(home.path(), &["show", "no-such-id", "--json"]);
+    assert_eq!(unknown.code, 2);
+    assert_eq!(missing.stdout, unknown.stdout);
 }
 
 #[test]

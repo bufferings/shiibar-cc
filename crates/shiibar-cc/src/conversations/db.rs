@@ -30,7 +30,11 @@ use std::time::Duration;
 // 4.6 / 8.64) and are recorded in `unregistered_files` instead; the bump
 // rebuilds the index once so conversations registered under the earlier
 // rule without a human utterance are dropped.
-const SCHEMA_VERSION: i64 = 4;
+// v5: files whose every `entrypoint` line holds `sdk-cli` (`claude -p`) are
+// not conversations either (DESIGN.md 4.6 / 8.67); the bump rebuilds the
+// index once so such conversations registered under the earlier rule are
+// dropped.
+const SCHEMA_VERSION: i64 = 5;
 
 /// Explicit SQLite lock wait (DESIGN.md §4.6: never rely on the default).
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -290,8 +294,9 @@ impl Db {
             "DELETE FROM conversations WHERE session_id = ?1",
             params![session_id],
         )?;
-        // A file that gained a human utterance moves from the unregistered
-        // record to the conversations in the same commit.
+        // A file that became a conversation (it gained a human utterance,
+        // or a line with an `entrypoint` other than `sdk-cli`) moves from
+        // the unregistered record to the conversations in the same commit.
         tx.execute(
             "DELETE FROM unregistered_files WHERE session_id = ?1",
             params![session_id],
@@ -337,9 +342,9 @@ impl Db {
         tx.commit()
     }
 
-    /// Record a re-read file that holds no human utterance (DESIGN.md
-    /// §4.6): drop the conversation registered under its session id, if
-    /// any, and keep only the file's stat so it is not re-read until it
+    /// Record a re-read file that is not a conversation — no human
+    /// utterance, or only driven non-interactively (DESIGN.md §4.6): drop
+    /// the conversation registered under its session id, if any, and keep only the file's stat so it is not re-read until it
     /// changes. One commit, together with the progress counter. Returns
     /// whether a registered conversation was dropped (it counts toward the
     /// `removed` of the `done` event — §4.4).
@@ -693,6 +698,7 @@ mod tests {
                 text: text.to_string(),
             }],
             last_prompt: None,
+            non_interactive: false,
         };
         db.replace_conversation("s1", "/Users/example/demo/s1.jsonl", 1, 1, 1, &extracted, 1, 1)
             .unwrap();
