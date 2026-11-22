@@ -2229,7 +2229,7 @@ shiibar-cc/
 ├── packaging/
 │   └── homebrew/           # cask テンプレート(tap リポジトリへは bump-cask.yml が描画して push。§8.28)
 ├── .github/workflows/
-│   ├── ci.yml              # push / PR で cargo test / clippy / swift build / swift test / cask style + cargo-deny(§10)
+│   ├── ci.yml              # main への push とプルリクエストで cargo test / clippy / swift build / swift test / cask style + cargo-deny(§10)
 │   ├── release.yml         # タグ push → 署名・公証・staple → draft Release(workflow_dispatch = dry-run。§8.28)
 │   └── bump-cask.yml       # release published → tap の cask を自動更新(§8.28)
 ├── deny.toml                       # cargo-deny 設定(advisories / licenses / bans。§10)
@@ -4497,5 +4497,6 @@ M39 から unicode-normalization — 検索の NFC 正規化 §8.38(12)。正準
 - **GitHub リポジトリ側の保護(適用済み)**: main への force-push・ブランチ削除の禁止
   (shiibar-cc / homebrew-tap 両方)と、`v*` タグの削除・更新の禁止(§8.28 の「公開後のタグ
   再利用禁止」のプラットフォーム側強制 — 公開済みリリース資産の差し替えを塞ぐ)。
+  shiibar-cc の main への変更は、プルリクエストと CI の成功を必須にする(CI が失敗する変更を、main に入れないため)。
   Dependabot(alerts + security updates)と secret scanning + push protection も有効。
   設定の一覧と運用(PAT の期限対応を含む)は DEVELOPMENT.md「リポジトリ設定と Secrets の運用」

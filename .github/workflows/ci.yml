@@ -1,5 +1,5 @@
 # CI: the same checks CLAUDE.md lists as the local commands, on every push
-# and PR, plus the supply-chain checks DESIGN.md §10 requires from the
+# to main and every pull request, plus the supply-chain checks DESIGN.md §10 requires from the
 # start (--locked enforces the committed Cargo.lock; cargo-deny covers
 # advisories / licenses / bans via deny.toml).
 #

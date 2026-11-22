@@ -17,8 +17,10 @@
    実装コードを読むのは最後(テストの網羅漏れ探しのみ)
 4. **実機スモーク(所有者)**: dev-reload / dev-install.sh で実機に反映し、目視・実操作で確認する。
    DESIGN.md §6 のとおり、これも完了条件の一部 — 自動テスト緑は完了ではない
-5. **push は 4 が終わってから**。push = 公開なので、受け入れが済んでいない変更を公開しない。
-   例外は実機で確認するものが無い変更(docs のみ・CI 設定のみ等)だけ
+5. **main へのマージは 4 が終わってから**。マージ = 公開なので、受け入れが済んでいない変更を main に入れない。
+   ブランチの push とプルリクエストの作成は、4 の前でもよい(CI の結果を、実機スモークと並行して得られる。
+   public リポジトリなので、ブランチの内容は push の時点で公開される)。
+   4 を待たずにマージできるのは、実機で確認するものが無い変更(docs のみ・CI 設定のみ等)だけ
 
 ## セットアップ
 
@@ -57,10 +59,11 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 
 ## CI
 
-- push / PR ごとに GitHub Actions が回る(`.github/workflows/ci.yml`: macOS ジョブで
+- main への push とプルリクエストごとに GitHub Actions が実行される(`.github/workflows/ci.yml`: macOS ジョブで
   cargo test / clippy(いずれも `--locked`)と swift build / swift test(いずれも警告をエラーにする)と cask テンプレートの
   `brew style` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
-- **push 後の結果確認は、必ずコミット SHA で run を特定する**。SHA は**フル(40 桁)が必須** —
+- **push 後の結果確認は、必ずコミット SHA で run を特定する**(プルリクエストでは、ブランチの先頭のコミットの SHA で特定する。
+  マージ後の main の run は、main を取得した後の `git rev-parse origin/main` の SHA で特定する)。SHA は**フル(40 桁)が必須** —
   `--commit` に短縮 SHA を渡すとエラーにならず黙って 0 件が返り、「run が無い」と誤診する
   (2026-07-08 実例)。run の登録は push から数秒〜十数秒遅れるので、登録待ちと完了待ちを分ける:
 
@@ -84,13 +87,19 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 - **ruleset `protect-main`**(shiibar-cc / homebrew-tap の両方): main への force-push と
   ブランチ削除を禁止。バイパスなし(管理者にも適用)。本当に必要になったら
   Settings → Rules で一時的に無効化する
+- **shiibar-cc の `protect-main` は、プルリクエストと CI の成功も必須にする**: main への変更は、プルリクエストの
+  マージだけで反映する(直接の push は拒否される)。必要な承認の数は 0 である(メンテナーが 1 人で、作成者は自分のプルリクエストを承認できないため)。
+  必須のステータスチェックは、CI の 2 つのジョブ(`test` と `deny`)である。どちらも、すべてのプルリクエストで実行される。
+  CI が失敗している間は、マージできない(偶発的に失敗したテストは、再実行するか、テストを修正する)。
+  Dependabot のプルリクエストにも、同じ条件を適用する。
+  homebrew-tap の `protect-main` には、この条件を入れない(`bump-cask.yml` が、tap の main に直接 push するため)
 - **ruleset `protect-release-tags`**(shiibar-cc): `v*` タグの削除・付け替えを禁止
   (DESIGN.md §8.28「公開後のタグ再利用禁止」の強制)。リリースに失敗したらタグを直すのではなく
   次のパッチ番号で切り直す
 - **Dependabot**(shiibar-cc): alerts + security updates が有効。依存の脆弱性が公表されると
   Security タブとメールで通知され、修正版があれば bump PR が自動で立つ(平時は無音)。
-  PR は CI(cargo test / clippy / cargo-deny)の緑を確認してマージする。
-  homebrew-tap は依存が無いので対象外。CI の cargo-deny は push 時にしか走らないので、
+  PR は、必須のステータスチェックが成功した後にマージする。
+  homebrew-tap は依存が無いので対象外。CI の cargo-deny は、main への push とプルリクエストでしか実行されないので、
   リリース間の無活動期間は Dependabot の常時監視が補完する
 - **secret scanning + push protection**: 両リポジトリで有効(public リポジトリの既定)。
   既知パターンのトークンは push 時にブロックされる。ただし `.p12` などのバイナリや任意の
@@ -309,6 +318,9 @@ shiibar-cc focus w9t9p9:garbage ; echo $?    # 該当なしで exit 2
 Actions タブ → Release → Run workflow(workflow_dispatch)。実 secrets で署名・公証・staple まで走り、
 Release は作らず zip を workflow artifact に置く。
 
+main への変更は、どの手順でも、プルリクエストのマージで反映する(上記「リポジトリ設定と Secrets の運用」)。
+タグは、マージ後の main のコミットに付ける。タグを付ける前に、そのコミットの CI(main への push で実行される)の成功を確認する。
+
 1. リリースコミットで `plugin/.claude-plugin/plugin.json` の `version` をタグと同じ番号に上げる
    (**hooks を変えていなくても**。bump = hooks 配布のゲート — Claude Code は version が変わらない限り
    キャッシュした plugin を使い続ける。DESIGN.md §4.1)。`Cargo.toml` とはタイミングが違う点に注意:
@@ -352,7 +364,7 @@ Release は作らず zip を workflow artifact に置く。
    (`untagged-…` のまま公開されたイベントで、tap の cask を `version "untagged-…"` に
    書き換えないためのガード)。失敗していたら、手順 5 の復旧で再 publish する
 7. **publish 直後に** `Cargo.toml` の `[workspace.package]` の version を次の番号(まず patch)へ
-   bump してコミットする(`plugin.json` は上げない — 次のリリースコミットまで公開済みの番号を保つ)
+   bump するプルリクエストを作成して、マージする(`plugin.json` は上げない — 次のリリースコミットまで公開済みの番号を保つ)
 
 **公開後のタグは再利用禁止**。公開前に失敗した draft は削除してよいが、タグは削除できない
 (ルールセット `protect-release-tags` が `v*` タグの削除と付け替えを禁止している)。タグを付け替える必要が
