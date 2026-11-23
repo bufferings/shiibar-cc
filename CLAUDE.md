@@ -71,8 +71,9 @@ cargo test                  # all tests
 cargo clippy --all-targets  # keep it warning-free
 (cd app && swift build --build-tests -Xswiftc -warnings-as-errors)  # app + tests build; keep it warning-free
 (cd app && swift test -Xswiftc -warnings-as-errors)                 # app unit tests (same flag, so the build is reused)
+(cd app && swift build -c release -Xswiftc -warnings-as-errors)     # release build; some warnings only appear with optimization
 SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground   # run daemon with logs
 ```
 
 Toolchain is pinned by `rust-toolchain.toml` (rustup picks it up automatically).
-Both `swift` commands above require full Xcode, not just CLT (a plain `swift build` works with CLT alone).
+The two `swift` commands that build or run the tests (`--build-tests`, `swift test`) require full Xcode, not just CLT; a `swift build` without `--build-tests` works with CLT alone.

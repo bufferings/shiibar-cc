@@ -30,16 +30,20 @@
   (CLT のみの環境では `could not determine XCTest paths` の警告が出るが、ビルドには無害)。
   Xcode を入れたら `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` で切り替える
 - **Swift の警告は 0 件を保つ**。変更後の確認には、警告をエラーにする次のコマンドを使用する
-  (テストのビルドを含むので Xcode 本体が必要)。
+  (1 つ目と 2 つ目は、テストのビルドを含むので Xcode 本体が必要)。
 
   ```sh
   (cd app && swift build --build-tests -Xswiftc -warnings-as-errors)
   (cd app && swift test -Xswiftc -warnings-as-errors)
+  (cd app && swift build -c release -Xswiftc -warnings-as-errors)
   ```
 
   `swift build` は変更したファイルだけを再コンパイルするので、フラグなしのビルドでは、変更していない
-  ファイルの警告が表示されない。2 つのコマンドに同じフラグを指定するのは、フラグの有無が変わると
-  全体が再ビルドされるためである。`scripts/` のビルドにはこのフラグを指定していない
+  ファイルの警告が表示されない。1 つ目と 2 つ目のコマンドに同じフラグを指定するのは、フラグの有無が変わると
+  全体が再ビルドされるためである。3 つ目のコマンドは、最適化ありのビルドである。最適化の処理だけが出す警告があり、
+  最適化なしのビルド(上の 2 つ)では検出できない。インストールとリリースのスクリプト(`scripts/dev-install.sh`、
+  `scripts/release/build-release-app.sh`)は、最適化ありでビルドするが、このフラグを指定していない。そのため、3 つ目のコマンドと CI が、
+  同じ構成のビルドを、警告をエラーにして実行する
 
 ## よく使うコマンド
 
@@ -60,7 +64,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ## CI
 
 - main への push とプルリクエストごとに GitHub Actions が実行される(`.github/workflows/ci.yml`: macOS ジョブで
-  cargo test / clippy(いずれも `--locked`)と swift build / swift test(いずれも警告をエラーにする)と cask テンプレートの
+  cargo test / clippy(いずれも `--locked`)と swift build / swift test / 最適化ありの swift build(いずれも警告をエラーにする)と cask テンプレートの
   `brew style` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
 - **push 後の結果確認は、必ずコミット SHA で run を特定する**(プルリクエストでは、ブランチの先頭のコミットの SHA で特定する。
   マージ後の main の run は、main を取得した後の `git rev-parse origin/main` の SHA で特定する)。SHA は**フル(40 桁)が必須** —

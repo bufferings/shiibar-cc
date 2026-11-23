@@ -76,6 +76,13 @@ jobs:
           PY
           done
 
+      # Some warnings only come from the optimizer, so the debug build above
+      # does not show them. The release configuration is what the install
+      # script and the release build use.
+      - name: App release build (warning-free)
+        run: swift build -c release -Xswiftc -warnings-as-errors
+        working-directory: app
+
       - name: Cask template check (brew style)
         # Renders packaging/homebrew/shiibar-cc.rb with dummy placeholder
         # values and runs it through `brew style` so a Ruby syntax
