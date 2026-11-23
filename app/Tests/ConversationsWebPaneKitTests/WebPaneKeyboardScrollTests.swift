@@ -29,7 +29,242 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
         wait(for: [rendered], timeout: 20)
         XCTAssertTrue(window.makeFirstResponder(controller.webView))
+        installProbe(in: controller)
         return (controller, window)
+    }
+
+    // MARK: - Diagnostics
+    //
+    // Every run prints `[kbscroll-diag]` lines so that a rare CI failure of
+    // the keyboard scroll can be compared with passing runs. They locate
+    // where the key-to-scroll chain breaks: the native event not reaching
+    // the web view, the JS keydown not firing, #doc not getting focus,
+    // WebKit's default scrolling not happening, or page script undoing the
+    // scroll. None of these helpers asserts anything, so they never change
+    // a test's outcome.
+
+    private var diagName: String {
+        name.split(separator: " ").last.map { String($0.dropLast()) } ?? name
+    }
+
+    private func diagPrint(_ attempt: String, _ message: String) {
+        print("[kbscroll-diag] \(diagName) attempt=\(attempt) \(message)")
+    }
+
+    /// Evaluates a script without failing the test on an error (a dead web
+    /// content process is one of the possible causes); the error is
+    /// printed instead.
+    @MainActor
+    private func diagEvaluate(_ script: String, in controller: WebPaneController, attempt: String) -> Any? {
+        var output: Any?
+        var finished = false
+        controller.webView.evaluateJavaScript(script) { [self] result, error in
+            if let error {
+                diagPrint(attempt, "js-error: \(error)")
+            }
+            output = result
+            finished = true
+        }
+        let deadline = Date().addingTimeInterval(10)
+        while !finished, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        if !finished {
+            diagPrint(attempt, "js-timeout: no reply in 10 s")
+        }
+        return output
+    }
+
+    /// Records key, scroll and focus events on the page into
+    /// `window.__kbdiag`. The capture listeners on `window` run before the
+    /// page's own capture listener on `document`; the bubble listener on
+    /// `window` runs after every other listener and so sees
+    /// `defaultPrevented` as final.
+    @MainActor
+    private func installProbe(in controller: WebPaneController) {
+        let result = diagEvaluate("""
+            (function() {
+              if (window.__kbdiag) { return 'already installed'; }
+              const doc = document.getElementById('doc');
+              const d = {
+                counts: { keydownCapture: 0, keyupCapture: 0, keydownBubble: 0, scroll: 0, focusin: 0, focusout: 0 },
+                records: [],
+                dropped: 0,
+              };
+              window.__kbdiag = d;
+              const describe = el => el ? (el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')) : 'null';
+              const record = (type, e) => {
+                const last = d.records[d.records.length - 1];
+                if (type === 'scroll' && last && last.type === 'scroll') {
+                  last.n += 1;
+                  last.top = doc.scrollTop;
+                  last.t = Math.round(performance.now());
+                  return;
+                }
+                if (d.records.length >= 40) { d.dropped += 1; return; }
+                d.records.push({
+                  type: type,
+                  key: e.key === undefined ? null : e.key,
+                  prevented: e.defaultPrevented,
+                  active: describe(document.activeElement),
+                  top: doc ? doc.scrollTop : null,
+                  t: Math.round(performance.now()),
+                  n: 1,
+                });
+              };
+              window.addEventListener('keydown', e => { d.counts.keydownCapture += 1; record('keydown-capture', e); }, true);
+              window.addEventListener('keyup', e => { d.counts.keyupCapture += 1; record('keyup-capture', e); }, true);
+              window.addEventListener('keydown', e => { d.counts.keydownBubble += 1; record('keydown-bubble', e); }, false);
+              if (doc) { doc.addEventListener('scroll', e => { d.counts.scroll += 1; record('scroll', e); }); }
+              document.addEventListener('focusin', e => { d.counts.focusin += 1; record('focusin', e); });
+              document.addEventListener('focusout', e => { d.counts.focusout += 1; record('focusout', e); });
+              return 'installed';
+            })()
+            """, in: controller, attempt: "setup")
+        diagPrint("setup", "probe=\(result.map { "\($0)" } ?? "nil")")
+    }
+
+    /// Prints one line with the page state (as JSON) and one with the
+    /// native window / responder state.
+    @MainActor
+    private func diagSnapshot(_ attempt: String, in controller: WebPaneController, window: NSWindow) {
+        let page = diagEvaluate("""
+            (function() {
+              const doc = document.getElementById('doc');
+              const describe = el => el ? (el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')) : 'null';
+              const sel = window.getSelection();
+              return JSON.stringify({
+                probe: window.__kbdiag || null,
+                active: describe(document.activeElement),
+                hasFocus: document.hasFocus(),
+                visibility: document.visibilityState,
+                scrollTop: doc ? doc.scrollTop : null,
+                scrollHeight: doc ? doc.scrollHeight : null,
+                clientHeight: doc ? doc.clientHeight : null,
+                overflowY: doc ? getComputedStyle(doc).overflowY : null,
+                selectionType: sel ? sel.type : null,
+              });
+            })()
+            """, in: controller, attempt: attempt)
+        diagPrint(attempt, "page=\(page.map { "\($0)" } ?? "nil")")
+
+        let webView = controller.webView
+        let responder = window.firstResponder
+        let responderType = responder.map { String(describing: type(of: $0)) } ?? "nil"
+        let responderIsWebView = responder === webView
+        let responderInWebView = (responder as? NSView)?.isDescendant(of: webView) ?? false
+        // Read without creating the shared application if no test made one.
+        let app: NSApplication? = NSApp
+        let keyWindow = app?.keyWindow
+        let mainWindow = app?.mainWindow
+        let native = [
+            "firstResponder=\(responderType)",
+            "firstResponderIsWebView=\(responderIsWebView)",
+            "firstResponderInWebView=\(responderInWebView)",
+            "isKeyWindow=\(window.isKeyWindow)",
+            "isVisible=\(window.isVisible)",
+            "occlusionState=\(window.occlusionState.rawValue)",
+            "appExists=\(app != nil)",
+            "appActive=\(app?.isActive ?? false)",
+            "appKeyWindow=\(keyWindow == nil ? "nil" : (keyWindow === window ? "this" : "other"))",
+            "appMainWindow=\(mainWindow == nil ? "nil" : (mainWindow === window ? "this" : "other"))",
+            "appWindows=\(app?.windows.count ?? -1)",
+            "webViewLoading=\(webView.isLoading)",
+            "webViewHasWindow=\(webView.window != nil)",
+            "webViewFrame=\(NSStringFromRect(webView.frame))",
+            "screens=\(NSScreen.screens.count)",
+        ].joined(separator: " ")
+        diagPrint(attempt, "native: \(native)")
+    }
+
+    /// Reads `#doc.scrollTop` without asserting on the evaluation.
+    @MainActor
+    private func diagScrollTop(_ attempt: String, in controller: WebPaneController) -> Double {
+        let value = diagEvaluate("document.getElementById('doc').scrollTop", in: controller, attempt: attempt)
+        return (value as? Double) ?? (value as? Int).map(Double.init) ?? -1
+    }
+
+    /// Lets any keyboard scroll animation settle, then puts `#doc` back at
+    /// `start` so the next probe starts from the same position.
+    @MainActor
+    private func diagReset(to start: Double, in controller: WebPaneController, attempt: String) {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        _ = diagEvaluate("document.getElementById('doc').scrollTop = \(start); 0", in: controller, attempt: attempt)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        diagPrint(attempt, "reset scrollTop=\(diagScrollTop(attempt, in: controller)) (start=\(start))")
+    }
+
+    /// Runs on the failure path of `tapUntilScrollChanges` only, before
+    /// the test's assertion fails: each probe bypasses one link of the
+    /// key-to-scroll chain to show which link is broken.
+    @MainActor
+    private func diagFailureProbes(
+        _ keyCode: UInt16, _ characters: String, from start: Double,
+        in controller: WebPaneController, window: NSWindow
+    ) {
+        let delta = keyCode == 125 ? 40 : -40
+
+        // 1. Programmatic scroll, read now and after a short run loop: does
+        // #doc scroll at all, and does page script snap it back?
+        let immediate = diagEvaluate("""
+            (function() {
+              const doc = document.getElementById('doc');
+              const before = doc.scrollTop;
+              doc.scrollBy({ top: \(delta), behavior: 'instant' });
+              return JSON.stringify({ before: before, after: doc.scrollTop });
+            })()
+            """, in: controller, attempt: "probe1")
+        diagPrint("probe1", "programmatic scrollBy(\(delta)) immediate=\(immediate.map { "\($0)" } ?? "nil")")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        diagPrint("probe1", "programmatic scrollBy(\(delta)) after 0.5 s scrollTop=\(diagScrollTop("probe1", in: controller))")
+        diagReset(to: start, in: controller, attempt: "probe1")
+
+        // 2. Focus #doc from the test: does a tap scroll once the scroller
+        // is focused without relying on the page's keydown listener?
+        let focused = diagEvaluate("""
+            (function() {
+              const doc = document.getElementById('doc');
+              doc.focus({ preventScroll: true });
+              const el = document.activeElement;
+              return el ? (el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')) : 'null';
+            })()
+            """, in: controller, attempt: "probe2")
+        diagPrint("probe2", "explicit focus, activeElement=\(focused.map { "\($0)" } ?? "nil")")
+        press(keyCode, characters, in: controller, window: window)
+        let afterFocus = waitForScrollChange(from: start, in: controller)
+        diagPrint("probe2", "tap after explicit focus scrollTop=\(afterFocus) scrolled=\(afterFocus != start)")
+        diagSnapshot("probe2", in: controller, window: window)
+        if afterFocus != start { diagReset(to: start, in: controller, attempt: "probe2") }
+
+        // 3. Make the web view first responder again: was the native
+        // responder chain the broken link?
+        let madeFirstResponder = window.makeFirstResponder(controller.webView)
+        diagPrint("probe3", "makeFirstResponder(webView)=\(madeFirstResponder)")
+        press(keyCode, characters, in: controller, window: window)
+        let afterResponder = waitForScrollChange(from: start, in: controller)
+        diagPrint("probe3", "tap after makeFirstResponder scrollTop=\(afterResponder) scrolled=\(afterResponder != start)")
+        diagSnapshot("probe3", in: controller, window: window)
+        if afterResponder != start { diagReset(to: start, in: controller, attempt: "probe3") }
+
+        // 4. Deliver the key through the window's event dispatch instead of
+        // calling the web view directly.
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: [.function, .numericPad],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: false, keyCode: keyCode)!
+            window.sendEvent(event)
+            if type == .keyDown {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+            }
+        }
+        let afterSendEvent = waitForScrollChange(from: start, in: controller)
+        diagPrint("probe4", "tap via window.sendEvent scrollTop=\(afterSendEvent) scrolled=\(afterSendEvent != start)")
+        if afterSendEvent != start { diagReset(to: start, in: controller, attempt: "probe4") }
+
+        // 5. Final state.
+        diagSnapshot("final", in: controller, window: window)
     }
 
     @MainActor
@@ -93,10 +328,17 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         in controller: WebPaneController, window: NSWindow
     ) -> Double {
         var current = start
-        for _ in 0..<5 {
+        diagSnapshot("0", in: controller, window: window)
+        for attempt in 1...5 {
             press(keyCode, characters, in: controller, window: window)
             current = waitForScrollChange(from: start, in: controller)
+            diagPrint("\(attempt)", "scrollTop=\(current) start=\(start) scrolled=\(current != start)")
+            diagSnapshot("\(attempt)", in: controller, window: window)
             if current != start { break }
+        }
+        if current == start {
+            diagPrint("exhausted", "no scroll after 5 taps; running failure probes")
+            diagFailureProbes(keyCode, characters, from: start, in: controller, window: window)
         }
         return current
     }
@@ -139,8 +381,12 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             """, in: controller) as? String
         XCTAssertFalse((selected ?? "").isEmpty)
         let start = scrollTop(controller)
+        diagSnapshot("0", in: controller, window: window)
         press(126, "\u{F700}", in: controller, window: window)
-        _ = waitForScrollChange(from: start, in: controller)
+        let current = waitForScrollChange(from: start, in: controller)
+        // Not asserted: this test is about the selection only.
+        diagPrint("1", "scrollTop=\(current) start=\(start) scrolled=\(current != start)")
+        diagSnapshot("1", in: controller, window: window)
         XCTAssertEqual(evaluate("window.getSelection().toString()", in: controller) as? String, selected)
     }
 }
