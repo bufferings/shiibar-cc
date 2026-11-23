@@ -43,6 +43,13 @@ jobs:
         run: swift test -Xswiftc -warnings-as-errors
         working-directory: app
 
+      # Some warnings only come from the optimizer, so the debug build above
+      # does not show them. The release configuration is what the install
+      # script and the release build use.
+      - name: App release build (warning-free)
+        run: swift build -c release -Xswiftc -warnings-as-errors
+        working-directory: app
+
       # When the test process itself dies (an abort in the Swift runtime
       # prints one line and no test failure), the crash report is the only
       # place that names the crashing thread's frames. Print them into the

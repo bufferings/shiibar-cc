@@ -35,11 +35,14 @@
   ```sh
   (cd app && swift build --build-tests -Xswiftc -warnings-as-errors)
   (cd app && swift test -Xswiftc -warnings-as-errors)
+  (cd app && swift build -c release -Xswiftc -warnings-as-errors)
   ```
 
   `swift build` は変更したファイルだけを再コンパイルするので、フラグなしのビルドでは、変更していない
   ファイルの警告が表示されない。2 つのコマンドに同じフラグを指定するのは、フラグの有無が変わると
-  全体が再ビルドされるためである。`scripts/` のビルドにはこのフラグを指定していない
+  全体が再ビルドされるためである。3 つ目のコマンドは、最適化ありのビルドである。最適化の処理だけが出す警告があり、
+  最適化なしのビルド(上の 2 つ)では検出できない。`scripts/` のビルド(最適化あり)にはこのフラグを指定していないので、
+  CI が同じ構成のビルドを、警告をエラーにして実行する
 
 ## よく使うコマンド
 
@@ -60,7 +63,7 @@ SHIIBAR_CC_STATE_DIR=$(mktemp -d) cargo run -p shiibar-ccd -- --foreground
 ## CI
 
 - main への push とプルリクエストごとに GitHub Actions が実行される(`.github/workflows/ci.yml`: macOS ジョブで
-  cargo test / clippy(いずれも `--locked`)と swift build / swift test(いずれも警告をエラーにする)と cask テンプレートの
+  cargo test / clippy(いずれも `--locked`)と swift build / swift test / 最適化ありの swift build(いずれも警告をエラーにする)と cask テンプレートの
   `brew style` 検査、Linux ジョブで cargo-deny(設定は `deny.toml`))
 - **push 後の結果確認は、必ずコミット SHA で run を特定する**(プルリクエストでは、ブランチの先頭のコミットの SHA で特定する。
   マージ後の main の run は、main を取得した後の `git rev-parse origin/main` の SHA で特定する)。SHA は**フル(40 桁)が必須** —
