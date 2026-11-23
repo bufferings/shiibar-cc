@@ -9,7 +9,6 @@
 
 import AppKit
 import Combine
-import os
 import ShiibarCcCore
 import SwiftUI
 import WebKit
@@ -78,9 +77,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
     /// Closes the popover when the app stops being active (§4.5 "popover",
     /// §8.58).
     private var deactivationCloser: PopoverDeactivationCloser?
-    /// Logs the windows the app did not create (§4.5 "making failures
-    /// visible").
-    private var unownedWindowMonitor: UnownedWindowMonitor?
 
     /// The window's `title` (§4.5: not drawn; Mission Control and the
     /// title filters use it).
@@ -102,9 +98,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         )
         setUpKeyMonitor()
         setUpMouseDownMonitor()
-        unownedWindowMonitor = UnownedWindowMonitor(kind: { [weak self] window in
-            self?.shownWindowKind(window) ?? .other
-        })
         model.onClosePopover = { [weak self] in self?.closePopover() }
         model.onOpenInWindow = { [weak self] in self?.openWindow() }
         model.onCloseWindowForPopover = { [weak self] in self?.closeWindowForPopover() }
@@ -170,18 +163,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
 
     private func refreshTrayImage() {
         trayImageUpdater?.refresh()
-    }
-
-    /// What a shown window is, for the log of windows the app did not
-    /// create: the app's own windows by identity, the rest by class name
-    /// (`UnownedWindowLog.kind`).
-    private func shownWindowKind(_ shown: NSWindow) -> ShownWindowKind {
-        if shown === window { return .mainWindow }
-        if let popoverWindow = popover.contentViewController?.view.window, shown === popoverWindow { return .popover }
-        if let aboutPanel, shown === aboutPanel { return .aboutPanel }
-        if let statusWindow = statusItem?.button?.window, shown === statusWindow { return .statusItem }
-        if shown.title == SettingsWindow.title { return .settings }
-        return UnownedWindowLog.kind(className: String(describing: type(of: shown)))
     }
 
     /// The window is open: on screen or minimized to the Dock (closing
@@ -395,7 +376,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         popover.appearance = NSApp.effectiveAppearance
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         installPopoverBackground()
-        unownedWindowMonitor?.surfaceShown()
         popover.contentViewController?.view.window?.makeKey()
         button.highlight(true)
         if let popoverWindow = popover.contentViewController?.view.window {
@@ -494,7 +474,6 @@ final class MainSurfaceController: NSObject, NSPopoverDelegate, NSWindowDelegate
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        unownedWindowMonitor?.surfaceShown()
         reportFocus(of: window, surface: .window)
         // Activation can complete later; `windowDidBecomeKey` reports then.
         model.surfaceKeyChanged(surface: .window, isKey: window.isKeyWindow)
@@ -1397,155 +1376,3 @@ struct SceneOpenerView: View {
             }
     }
 }
-
-/// One window of the app's process in the on-screen window list.
-struct OnScreenWindowInfo: Equatable {
-    let number: Int
-    let width: Double
-    let height: Double
-    /// The window list's layer (the window level).
-    let layer: Int
-}
-
-/// Logs a window shown in the app's process that the app did not create
-/// (DESIGN.md §4.5 "making failures visible", §8.65): its class name, size
-/// and level, once per showing (`UnownedWindowTracker`, shared by both
-/// detections). It only reads windows; display, focus and level are never
-/// changed.
-///
-/// Two detections:
-/// 1. Window notifications: a window's occlusion state changes when it is
-///    ordered on or off screen (`NSWindow.didChangeOcclusionStateNotification`),
-///    a panel that takes key status posts `didBecomeKey`, and a closing
-///    window posts `willClose`. A visible window counts as shown; one that is
-///    no longer visible, or closing, as hidden.
-/// 2. The on-screen window list: 0.5 and 2 seconds after the popover or the
-///    window is shown (§9), the app's process's on-screen windows
-///    (`CGWindowListCopyWindowInfo` filtered by the app's pid) are matched
-///    to the app's `NSWindow`s by window number. An unmatched window is
-///    logged with a marker instead of a class name.
-/// The notification center, the window list, the window lookup and the
-/// timer are injected so tests neither read the screen nor wait.
-@MainActor
-final class UnownedWindowMonitor {
-    typealias Schedule = (TimeInterval, @escaping @MainActor () -> Void) -> Void
-
-    private let center: NotificationCenter
-    private let kind: (NSWindow) -> ShownWindowKind
-    private let log: (String) -> Void
-    private let listWindows: () -> [OnScreenWindowInfo]
-    private let windowForNumber: @MainActor (Int) -> NSWindow?
-    private let isShown: @MainActor (NSWindow) -> Bool
-    private let numberOf: @MainActor (NSWindow) -> Int
-    private let schedule: Schedule
-    private var tracker = UnownedWindowTracker()
-    /// The number each window had when it was last seen shown (by either
-    /// detection): a closed window's number may no longer be readable.
-    /// An entry is dropped when its window is hidden or closes.
-    private var numbers: [ObjectIdentifier: Int] = [:]
-    private var observers: [NSObjectProtocol] = []
-
-    init(
-        center: NotificationCenter = .default,
-        kind: @escaping (NSWindow) -> ShownWindowKind,
-        log: @escaping (String) -> Void = { line in unownedWindowLog.notice("\(line, privacy: .public)") },
-        listWindows: @escaping () -> [OnScreenWindowInfo] = UnownedWindowMonitor.onScreenWindowsOfThisProcess,
-        windowForNumber: @escaping @MainActor (Int) -> NSWindow? = { NSApp.window(withWindowNumber: $0) },
-        isShown: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible },
-        numberOf: @escaping @MainActor (NSWindow) -> Int = { $0.windowNumber },
-        schedule: @escaping Schedule = { delay, work in
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
-        }
-    ) {
-        self.center = center
-        self.kind = kind
-        self.log = log
-        self.listWindows = listWindows
-        self.windowForNumber = windowForNumber
-        self.isShown = isShown
-        self.numberOf = numberOf
-        self.schedule = schedule
-        // No queue: AppKit posts these on the main thread.
-        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification] {
-            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] notification in
-                guard let window = notification.object as? NSWindow else { return }
-                MainActor.assumeIsolated { self?.windowChanged(window, closing: false) }
-            })
-        }
-        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: nil) { [weak self] notification in
-            guard let window = notification.object as? NSWindow else { return }
-            MainActor.assumeIsolated { self?.windowChanged(window, closing: true) }
-        })
-    }
-
-    deinit {
-        for observer in observers { center.removeObserver(observer) }
-    }
-
-    /// The popover or the window was shown: read the window list after
-    /// each of §9's delays.
-    func surfaceShown() {
-        for delay in UnownedWindowLog.scanDelays {
-            schedule(delay) { [weak self] in self?.scan() }
-        }
-    }
-
-    private func windowChanged(_ window: NSWindow, closing: Bool) {
-        let id = ObjectIdentifier(window)
-        let current = numberOf(window)
-        guard !closing, isShown(window), current > 0 else {
-            // Hidden or closing: whichever detection recorded it, the next
-            // showing is logged again.
-            let number = numbers.removeValue(forKey: id) ?? current
-            if number > 0 { tracker.windowHidden(number) }
-            return
-        }
-        let number = current
-        numbers[id] = number
-        guard tracker.windowShown(number, kind: kind(window)) else { return }
-        log(UnownedWindowLog.line(
-            className: String(describing: type(of: window)),
-            width: Double(window.frame.width), height: Double(window.frame.height),
-            level: window.level.rawValue))
-    }
-
-    private func scan() {
-        let scanned = listWindows().map { info -> ScannedWindow in
-            if let window = windowForNumber(info.number) {
-                numbers[ObjectIdentifier(window)] = info.number
-                return ScannedWindow(
-                    number: info.number, className: String(describing: type(of: window)), kind: kind(window),
-                    width: info.width, height: info.height, level: window.level.rawValue)
-            }
-            return ScannedWindow(number: info.number, className: nil, kind: .other,
-                                 width: info.width, height: info.height, level: info.layer)
-        }
-        for line in tracker.scanned(scanned) { log(line) }
-    }
-
-    /// The on-screen windows owned by this process
-    /// (`CGWindowListCopyWindowInfo`, on-screen only, filtered by pid).
-    nonisolated static func onScreenWindowsOfThisProcess() -> [OnScreenWindowInfo] {
-        let pid = Int(ProcessInfo.processInfo.processIdentifier)
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-        return list.compactMap { entry in
-            guard (entry[kCGWindowOwnerPID as String] as? Int) == pid,
-                  let number = entry[kCGWindowNumber as String] as? Int else { return nil }
-            let bounds = (entry[kCGWindowBounds as String] as? NSDictionary)
-                .flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) } ?? .zero
-            return OnScreenWindowInfo(
-                number: number, width: Double(bounds.width), height: Double(bounds.height),
-                layer: entry[kCGWindowLayer as String] as? Int ?? 0)
-        }
-    }
-}
-
-/// os_log sink for windows the app did not create. Same subsystem as the
-/// app's other loggers.
-///   log show --last 1h --predicate 'subsystem == "cc.shiibar.menubar" AND category == "window"'
-let unownedWindowLog = Logger(
-    subsystem: Bundle.main.bundleIdentifier ?? "cc.shiibar.menubar",
-    category: "window"
-)
