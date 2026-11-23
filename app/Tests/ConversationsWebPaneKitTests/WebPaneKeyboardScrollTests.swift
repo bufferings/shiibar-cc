@@ -27,6 +27,10 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         /// Moved far off every screen, then ordered front before the page
         /// loads.
         case offscreen
+        /// Fully transparent and click-through, then ordered front before
+        /// the page loads: on screen for AppKit and WebKit, invisible to
+        /// the person at the machine.
+        case transparent
     }
 
     private static let diagEnvironment = ProcessInfo.processInfo.environment
@@ -37,7 +41,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         Self.diagEnvironment["KBSCROLL_DELAY_MS"].flatMap { Int($0) } ?? 0
     }
 
-    /// `KBSCROLL_WINDOW`: `hidden` (default), `front` or `offscreen`.
+    /// `KBSCROLL_WINDOW`: `hidden` (default), `front`, `offscreen` or
+    /// `transparent`.
     private var diagWindowMode: DiagWindowMode {
         Self.diagEnvironment["KBSCROLL_WINDOW"].flatMap { DiagWindowMode(rawValue: $0) } ?? .hidden
     }
@@ -79,6 +84,10 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             window.orderFrontRegardless()
         case .offscreen:
             window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+            window.orderFrontRegardless()
+        case .transparent:
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
             window.orderFrontRegardless()
         }
         let rendered = expectation(description: "page rendered")

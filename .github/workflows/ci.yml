@@ -129,18 +129,15 @@ jobs:
           - name: baseline
             delay_ms: 0
             window: hidden
-          - name: delay-hidden
-            delay_ms: 1000
-            window: hidden
           - name: delay-front
             delay_ms: 1000
             window: front
-          - name: delay-offscreen
+          - name: delay-transparent
             delay_ms: 1000
-            window: offscreen
-          - name: nodelay-front
+            window: transparent
+          - name: nodelay-transparent
             delay_ms: 0
-            window: front
+            window: transparent
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
