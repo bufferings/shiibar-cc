@@ -76,4 +76,4 @@ SHIIBAR_CC_LOG=debug cargo run -p shiibar-ccd -- --foreground   # run daemon wit
 ```
 
 Toolchain is pinned by `rust-toolchain.toml` (rustup picks it up automatically).
-The `swift` commands that build or run tests require full Xcode, not just CLT (a plain `swift build` works with CLT alone).
+The two `swift` commands that build or run the tests (`--build-tests`, `swift test`) require full Xcode, not just CLT; a `swift build` without `--build-tests` works with CLT alone.

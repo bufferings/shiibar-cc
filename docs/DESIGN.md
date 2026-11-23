@@ -2243,7 +2243,7 @@ shiibar-cc/
 ├── packaging/
 │   └── homebrew/           # cask テンプレート(tap リポジトリへは bump-cask.yml が描画して push。§8.28)
 ├── .github/workflows/
-│   ├── ci.yml              # main への push とプルリクエストで cargo test / clippy / swift build / swift test / cask style + cargo-deny(§10)
+│   ├── ci.yml              # main への push とプルリクエストで cargo test / clippy / swift build / swift test / 最適化ありの swift build / cask style + cargo-deny(§10)
 │   ├── release.yml         # タグ push → 署名・公証・staple → draft Release(workflow_dispatch = dry-run。§8.28)
 │   └── bump-cask.yml       # release published → tap の cask を自動更新(§8.28)
 ├── deny.toml                       # cargo-deny 設定(advisories / licenses / bans。§10)
