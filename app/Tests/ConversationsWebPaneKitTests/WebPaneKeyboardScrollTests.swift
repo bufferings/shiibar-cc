@@ -8,10 +8,61 @@ import XCTest
 /// like Space and Page Up / Page Down). The scroller is the inner `#doc`
 /// element, which WebKit only scrolls from the keyboard while it (or
 /// something inside it) is focused — the page focuses it on the first key
-/// that arrives with nothing focused. The window is never ordered on screen.
+/// that arrives with nothing focused. By default the window is never
+/// ordered on screen (see the investigation knobs below).
 final class WebPaneKeyboardScrollTests: XCTestCase {
+    // MARK: - Investigation knobs
+    //
+    // Read from the process environment; when absent the tests behave as
+    // they do without them. By default the window is never ordered on
+    // screen. The delay and the other window modes exist only for the CI
+    // investigation job that measures when WebKit's keyboard scrolling
+    // stops working in a window that is not shown.
+
+    private enum DiagWindowMode: String {
+        /// Never ordered on screen (the default).
+        case hidden
+        /// Ordered front before the page loads.
+        case front
+        /// Moved far off every screen, then ordered front before the page
+        /// loads.
+        case offscreen
+    }
+
+    private static let diagEnvironment = ProcessInfo.processInfo.environment
+
+    /// `KBSCROLL_DELAY_MS`: how long to spin the main run loop right before
+    /// the first key of each test.
+    private var diagDelayMs: Int {
+        Self.diagEnvironment["KBSCROLL_DELAY_MS"].flatMap { Int($0) } ?? 0
+    }
+
+    /// `KBSCROLL_WINDOW`: `hidden` (default), `front` or `offscreen`.
+    private var diagWindowMode: DiagWindowMode {
+        Self.diagEnvironment["KBSCROLL_WINDOW"].flatMap { DiagWindowMode(rawValue: $0) } ?? .hidden
+    }
+
+    /// Spins the main run loop for `milliseconds`.
+    @MainActor
+    private func diagSpin(milliseconds: Int) {
+        let deadline = Date().addingTimeInterval(Double(milliseconds) / 1000)
+        while Date() < deadline {
+            RunLoop.main.run(until: deadline)
+        }
+    }
+
+    /// Spins the main run loop for the configured delay before the first
+    /// key; does nothing when no delay is configured.
+    @MainActor
+    private func diagDelayBeforeFirstKey() {
+        guard diagDelayMs > 0 else { return }
+        diagSpin(milliseconds: diagDelayMs)
+    }
+
     @MainActor
     private func hostedController() -> (WebPaneController, NSWindow) {
+        let windowEnv = Self.diagEnvironment["KBSCROLL_WINDOW"].map { " windowEnv=\($0)" } ?? ""
+        diagPrint("setup", "config delayMs=\(diagDelayMs) window=\(diagWindowMode.rawValue)\(windowEnv)")
         let controller = WebPaneController()
         controller.openExternalURL = { XCTFail("no test may open a URL: \($0)") }
         controller.pasteboard = NSPasteboard(name: NSPasteboard.Name("cc.shiibar.tests." + UUID().uuidString))
@@ -21,6 +72,15 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         window.isReleasedWhenClosed = false
         controller.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 400)
         window.contentView?.addSubview(controller.webView)
+        switch diagWindowMode {
+        case .hidden:
+            break
+        case .front:
+            window.orderFrontRegardless()
+        case .offscreen:
+            window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+            window.orderFrontRegardless()
+        }
         let rendered = expectation(description: "page rendered")
         controller.onRendered = { _ in rendered.fulfill() }
         let messages = (0..<30).map {
@@ -172,9 +232,39 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             "webViewLoading=\(webView.isLoading)",
             "webViewHasWindow=\(webView.window != nil)",
             "webViewFrame=\(NSStringFromRect(webView.frame))",
+            "windowFrame=\(NSStringFromRect(window.frame))",
             "screens=\(NSScreen.screens.count)",
         ].joined(separator: " ")
         diagPrint(attempt, "native: \(native)")
+    }
+
+    /// Counts `requestAnimationFrame` callbacks and 16 ms `setTimeout`
+    /// callbacks in the page while the main run loop spins for 300 ms:
+    /// shows whether WebKit still drives rendering updates (rAF) and
+    /// whether the page's timers still run.
+    @MainActor
+    private func diagRefreshProbe(_ attempt: String, in controller: WebPaneController) {
+        _ = diagEvaluate("""
+            (function() {
+              const p = { raf: 0, timeouts: 0, running: true, t0: performance.now() };
+              window.__kbrefresh = p;
+              const onFrame = () => { if (!p.running) { return; } p.raf += 1; requestAnimationFrame(onFrame); };
+              const onTimeout = () => { if (!p.running) { return; } p.timeouts += 1; setTimeout(onTimeout, 16); };
+              requestAnimationFrame(onFrame);
+              setTimeout(onTimeout, 16);
+              return 0;
+            })()
+            """, in: controller, attempt: attempt)
+        diagSpin(milliseconds: 300)
+        let result = diagEvaluate("""
+            (function() {
+              const p = window.__kbrefresh;
+              if (!p) { return 'no refresh probe'; }
+              p.running = false;
+              return 'raf=' + p.raf + ' timeouts=' + p.timeouts + ' elapsedMs=' + Math.round(performance.now() - p.t0);
+            })()
+            """, in: controller, attempt: attempt)
+        diagPrint(attempt, "refresh \(result.map { "\($0)" } ?? "nil")")
     }
 
     /// Reads `#doc.scrollTop` without asserting on the evaluation.
@@ -263,7 +353,21 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         diagPrint("probe4", "tap via window.sendEvent scrollTop=\(afterSendEvent) scrolled=\(afterSendEvent != start)")
         if afterSendEvent != start { diagReset(to: start, in: controller, attempt: "probe4") }
 
-        // 5. Final state.
+        // Rendering updates and timers after the probes, with the window
+        // still as configured.
+        diagRefreshProbe("probes-end", in: controller)
+
+        // 5. Show the window: does that revive keyboard scrolling in a page
+        // where it had stopped?
+        window.orderFrontRegardless()
+        diagSpin(milliseconds: 500)
+        diagRefreshProbe("probe5", in: controller)
+        press(keyCode, characters, in: controller, window: window)
+        let afterShow = waitForScrollChange(from: start, in: controller)
+        diagPrint("probe5", "tap after orderFrontRegardless scrollTop=\(afterShow) scrolled=\(afterShow != start)")
+        window.orderOut(nil)
+
+        // Final state.
         diagSnapshot("final", in: controller, window: window)
     }
 
@@ -328,12 +432,16 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         in controller: WebPaneController, window: NSWindow
     ) -> Double {
         var current = start
+        diagDelayBeforeFirstKey()
         diagSnapshot("0", in: controller, window: window)
         for attempt in 1...5 {
             press(keyCode, characters, in: controller, window: window)
             current = waitForScrollChange(from: start, in: controller)
             diagPrint("\(attempt)", "scrollTop=\(current) start=\(start) scrolled=\(current != start)")
             diagSnapshot("\(attempt)", in: controller, window: window)
+            if attempt == 1 {
+                diagRefreshProbe("1", in: controller)
+            }
             if current != start { break }
         }
         if current == start {
@@ -381,12 +489,14 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             """, in: controller) as? String
         XCTAssertFalse((selected ?? "").isEmpty)
         let start = scrollTop(controller)
+        diagDelayBeforeFirstKey()
         diagSnapshot("0", in: controller, window: window)
         press(126, "\u{F700}", in: controller, window: window)
         let current = waitForScrollChange(from: start, in: controller)
         // Not asserted: this test is about the selection only.
         diagPrint("1", "scrollTop=\(current) start=\(start) scrolled=\(current != start)")
         diagSnapshot("1", in: controller, window: window)
+        diagRefreshProbe("1", in: controller)
         XCTAssertEqual(evaluate("window.getSelection().toString()", in: controller) as? String, selected)
     }
 }

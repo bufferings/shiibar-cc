@@ -114,15 +114,33 @@ jobs:
       - name: cargo-deny (advisories / licenses / bans)
         uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
 
-  # Temporary investigation job: repeats the app tests to capture the
-  # [kbscroll-diag] diagnostics for the rare keyboard-scroll test failure.
+  # Temporary investigation job: repeats the keyboard scroll tests under
+  # named variants (delay before the first key, window shown or not) to
+  # test whether WebKit's keyboard scrolling stops when the page stops
+  # receiving rendering updates in a window that is never shown.
   investigate:
+    name: investigate (${{ matrix.name }})
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        include:
+          - name: baseline
+            delay_ms: 0
+            window: hidden
+          - name: delay-hidden
+            delay_ms: 1000
+            window: hidden
+          - name: delay-front
+            delay_ms: 1000
+            window: front
+          - name: delay-offscreen
+            delay_ms: 1000
+            window: offscreen
+          - name: nodelay-front
+            delay_ms: 0
+            window: front
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -130,39 +148,18 @@ jobs:
         run: swift build --build-tests -Xswiftc -warnings-as-errors
         working-directory: app
 
-      # The full run keeps the earlier suites in the same process, in case
-      # the failure depends on them.
-      - name: Repeat full app tests
+      - name: Repeat keyboard scroll tests (${{ matrix.name }})
         working-directory: app
+        env:
+          KBSCROLL_DELAY_MS: ${{ matrix.delay_ms }}
+          KBSCROLL_WINDOW: ${{ matrix.window }}
         run: |
-          total=12
-          failed=0
-          for i in $(seq 1 "$total"); do
-            log="$RUNNER_TEMP/full-$i.log"
-            set +e
-            swift test -Xswiftc -warnings-as-errors > "$log" 2>&1
-            code=$?
-            set -e
-            echo "::group::full iteration $i exit=$code"
-            echo "iteration $i exit code $code"
-            grep -F '[kbscroll-diag]' "$log" || true
-            grep -E "Test Case '.*WebPaneKeyboardScrollTests" "$log" || true
-            grep -E 'error:|signal code|freed pointer' "$log" || true
-            if [ "$code" -ne 0 ]; then
-              failed=$((failed + 1))
-              echo "---- full log of iteration $i"
-              cat "$log"
-            fi
-            echo "::endgroup::"
-          done
-          echo "full app tests: $failed failed of $total"
-          [ "$failed" -eq 0 ]
-
-      - name: Repeat keyboard scroll tests alone
-        if: always()
-        working-directory: app
-        run: |
-          total=60
+          echo "variant ${{ matrix.name }}: KBSCROLL_DELAY_MS=$KBSCROLL_DELAY_MS KBSCROLL_WINDOW=$KBSCROLL_WINDOW"
+          echo "::group::runner sw_vers and displays"
+          sw_vers
+          system_profiler SPDisplaysDataType || true
+          echo "::endgroup::"
+          total=20
           failed=0
           for i in $(seq 1 "$total"); do
             log="$RUNNER_TEMP/kbscroll-$i.log"
@@ -182,7 +179,7 @@ jobs:
             fi
             echo "::endgroup::"
           done
-          echo "keyboard scroll tests alone: $failed failed of $total"
+          echo "keyboard scroll tests (${{ matrix.name }}): $failed failed of $total"
           [ "$failed" -eq 0 ]
 
       - name: Print test crash reports
