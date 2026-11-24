@@ -114,10 +114,12 @@ jobs:
       - name: cargo-deny (advisories / licenses / bans)
         uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
 
-  # Temporary investigation job: repeats the keyboard scroll tests under
-  # named variants (delay before the first key, window shown or not) to
-  # test whether WebKit's keyboard scrolling stops when the page stops
-  # receiving rendering updates in a window that is never shown.
+  # Temporary investigation job. Keyboard scroll: the tests' window mode
+  # (never shown or shown fully transparent). Test process abort ("freed
+  # pointer was not the last allocation", seen in the first swift test run
+  # of a job): each job runs the given test filters in order, starting
+  # right after the build, and prints the [kbscroll-crash] steps, the
+  # toolchain versions, and every thread of any crash report.
   investigate:
     name: investigate (${{ matrix.name }})
     runs-on: macos-15
@@ -126,57 +128,66 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: baseline
-            delay_ms: 0
+          - name: hidden-a
             window: hidden
-          - name: delay-front
-            delay_ms: 1000
-            window: front
-          - name: delay-transparent
-            delay_ms: 1000
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: hidden-b
+            window: hidden
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: hidden-c
+            window: hidden
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: transparent-a
             window: transparent
-          - name: nodelay-transparent
-            delay_ms: 0
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: transparent-b
             window: transparent
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: core-first
+            window: hidden
+            filters: ConversationsRenderingTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
 
       - name: App build (warning-free)
         run: swift build --build-tests -Xswiftc -warnings-as-errors
         working-directory: app
 
-      - name: Repeat keyboard scroll tests (${{ matrix.name }})
+      - name: Run test filters in order (${{ matrix.name }})
         working-directory: app
         env:
-          KBSCROLL_DELAY_MS: ${{ matrix.delay_ms }}
           KBSCROLL_WINDOW: ${{ matrix.window }}
         run: |
-          echo "variant ${{ matrix.name }}: KBSCROLL_DELAY_MS=$KBSCROLL_DELAY_MS KBSCROLL_WINDOW=$KBSCROLL_WINDOW"
-          echo "::group::runner sw_vers and displays"
-          sw_vers
-          system_profiler SPDisplaysDataType || true
-          echo "::endgroup::"
-          total=20
+          echo "variant ${{ matrix.name }}: KBSCROLL_WINDOW=$KBSCROLL_WINDOW filters: ${{ matrix.filters }}"
+          i=0
           failed=0
-          for i in $(seq 1 "$total"); do
-            log="$RUNNER_TEMP/kbscroll-$i.log"
+          for filter in ${{ matrix.filters }}; do
+            i=$((i + 1))
+            log="$RUNNER_TEMP/run-$i.log"
             set +e
-            swift test -Xswiftc -warnings-as-errors --filter WebPaneKeyboardScrollTests > "$log" 2>&1
+            swift test -Xswiftc -warnings-as-errors --filter "$filter" > "$log" 2>&1
             code=$?
             set -e
-            echo "::group::kbscroll iteration $i exit=$code"
-            echo "iteration $i exit code $code"
-            grep -F '[kbscroll-diag]' "$log" || true
-            grep -E "Test Case '.*WebPaneKeyboardScrollTests" "$log" || true
+            echo "::group::run $i filter=$filter exit=$code"
+            echo "run $i filter $filter exit code $code"
+            grep -F '[kbscroll-crash]' "$log" || true
+            grep -E "\[kbscroll-diag\] .* attempt=1 scrollTop" "$log" || true
+            grep -E "Test Case '.*(started|passed|failed)" "$log" || true
             grep -E 'error:|signal code|freed pointer' "$log" || true
             if [ "$code" -ne 0 ]; then
               failed=$((failed + 1))
-              echo "---- full log of iteration $i"
+              echo "---- full log of run $i"
               cat "$log"
             fi
             echo "::endgroup::"
           done
-          echo "keyboard scroll tests (${{ matrix.name }}): $failed failed of $total"
+          echo "${{ matrix.name }}: $failed failed of $i"
           [ "$failed" -eq 0 ]
 
       - name: Print test crash reports
@@ -196,13 +207,12 @@ jobs:
           print(meta.get("app_name"), meta.get("timestamp"))
           print("exception:", data.get("exception"))
           print("asi:", data.get("asi"))
+          print("termination:", data.get("termination"))
           images = data.get("usedImages", [])
           for index, thread in enumerate(data.get("threads", [])):
               frames = thread.get("frames", [])
-              if not thread.get("triggered") and index != 0:
-                  continue
-              print(f"-- thread {index} triggered={thread.get('triggered', False)} queue={thread.get('queue')}")
-              for frame in frames[:80]:
+              print(f"-- thread {index} triggered={thread.get('triggered', False)} queue={thread.get('queue')} name={thread.get('name')}")
+              for frame in frames[:40]:
                   image = images[frame["imageIndex"]].get("name", "?")
                   print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))))
           PY

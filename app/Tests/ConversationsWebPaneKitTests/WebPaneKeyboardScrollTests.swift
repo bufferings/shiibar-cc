@@ -64,8 +64,27 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         diagSpin(milliseconds: diagDelayMs)
     }
 
+    // MARK: - Crash diagnostics
+    //
+    // The test process sometimes aborts with "freed pointer was not the
+    // last allocation" when a test method returns (XCTest's
+    // TaskLocal.withValue frees from a Swift task allocator). These lines
+    // record, unbuffered so they survive the abort, how far each test got
+    // and whether a Swift task is current on the main thread at each step.
+
+    override class func setUp() {
+        super.setUp()
+        setvbuf(stdout, nil, _IONBF, 0)
+    }
+
+    private func diagTask(_ step: String) {
+        let hasTask = withUnsafeCurrentTask { $0 != nil }
+        print("[kbscroll-crash] \(diagName) step=\(step) currentTask=\(hasTask) mainThread=\(Thread.isMainThread)")
+    }
+
     @MainActor
     private func hostedController() -> (WebPaneController, NSWindow) {
+        diagTask("setup-begin")
         let windowEnv = Self.diagEnvironment["KBSCROLL_WINDOW"].map { " windowEnv=\($0)" } ?? ""
         diagPrint("setup", "config delayMs=\(diagDelayMs) window=\(diagWindowMode.rawValue)\(windowEnv)")
         let controller = WebPaneController()
@@ -96,9 +115,12 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             ConversationMessage(seq: Int64($0), role: "assistant", text: "filler paragraph \($0)\n\nmore filler text to give the document height")
         }
         controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
+        diagTask("setup-loaded")
         wait(for: [rendered], timeout: 20)
+        diagTask("setup-rendered")
         XCTAssertTrue(window.makeFirstResponder(controller.webView))
         installProbe(in: controller)
+        diagTask("setup-end")
         return (controller, window)
     }
 
@@ -462,6 +484,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
 
     @MainActor
     func testUpArrowWithNothingFocusedScrollsTheConversation() {
+        diagTask("test-begin")
+        defer { diagTask("test-end") }
         let (controller, window) = hostedController()
         defer { window.close() }
         let start = scrollTop(controller)
@@ -473,6 +497,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
 
     @MainActor
     func testDownArrowScrollsTheConversation() {
+        diagTask("test-begin")
+        defer { diagTask("test-end") }
         let (controller, window) = hostedController()
         defer { window.close() }
         _ = evaluate("document.getElementById('doc').scrollTop = 0; 0", in: controller)
@@ -483,6 +509,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
     /// (§4.6: the selection is what copy acts on).
     @MainActor
     func testArrowKeepsTheSelection() {
+        diagTask("test-begin")
+        defer { diagTask("test-end") }
         let (controller, window) = hostedController()
         defer { window.close() }
         let selected = evaluate("""
