@@ -48,7 +48,7 @@ final class WebPaneDeliveryTests: XCTestCase {
     @MainActor
     func testLoadInjectedBeforeReadyRenders() {
         let controller = makeController()
-        let rendered = expectation(description: "rendered")
+        let rendered = renderExpectation(description: "rendered")
         controller.onRendered = { _ in rendered.fulfill() }
         // Immediately after init the page has not posted ready yet — this is
         // the cold-start path every selection takes.
@@ -67,7 +67,7 @@ final class WebPaneDeliveryTests: XCTestCase {
     func testRapidConsecutiveLoadsRenderTheLatestConversation() {
         let controller = makeController()
         var renderCount = 0
-        let renderedTwice = expectation(description: "both loads rendered")
+        let renderedTwice = renderExpectation(description: "both loads rendered")
         renderedTwice.expectedFulfillmentCount = 2
         controller.onRendered = { _ in
             renderCount += 1
@@ -109,7 +109,7 @@ final class WebPaneDeliveryTests: XCTestCase {
 
         // The view gets real bounds (production: SwiftUI attaches + sizes):
         // the held state flushes and renders into the real viewport.
-        let renderedNow = expectation(description: "rendered after sizing")
+        let renderedNow = renderExpectation(description: "rendered after sizing")
         controller.onRendered = { _ in renderedNow.fulfill() }
         controller.webView.setFrameSize(NSSize(width: 720, height: 600))
         wait(for: [renderedNow], timeout: 20)
@@ -172,7 +172,7 @@ final class WebPaneDeliveryTests: XCTestCase {
     @MainActor
     func testProcessTerminationRecoveryReplaysTheLatestState() {
         let controller = makeController()
-        let firstRender = expectation(description: "initial render")
+        let firstRender = renderExpectation(description: "initial render")
         controller.onRendered = { _ in firstRender.fulfill() }
         let messages = conversation("recovered", count: 4)
         load(messages, into: controller)
@@ -182,7 +182,7 @@ final class WebPaneDeliveryTests: XCTestCase {
         // Simulate the WebContent process dying (the classic silently-blank
         // pane): drive the public delegate hook, which reloads the page and
         // replays the latest scripts.
-        let reRender = expectation(description: "re-render after recovery")
+        let reRender = renderExpectation(description: "re-render after recovery")
         controller.onRendered = { _ in reRender.fulfill() }
         controller.webView.navigationDelegate?.webViewWebContentProcessDidTerminate?(controller.webView)
         wait(for: [reRender], timeout: 20)

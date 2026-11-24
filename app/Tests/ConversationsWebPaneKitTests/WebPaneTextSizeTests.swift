@@ -41,7 +41,7 @@ final class WebPaneTextSizeTests: XCTestCase {
 
     @MainActor
     private func loadAndWait(_ controller: WebPaneController) {
-        let rendered = expectation(description: "rendered")
+        let rendered = renderExpectation(description: "rendered")
         controller.onRendered = { _ in rendered.fulfill() }
         controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
         wait(for: [rendered], timeout: 20)
@@ -147,7 +147,7 @@ final class WebPaneTextSizeTests: XCTestCase {
         let controller = makeController(sized: false)
         controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
         controller.setTextSize(9)
-        let rendered = expectation(description: "rendered after sizing")
+        let rendered = renderExpectation(description: "rendered after sizing")
         controller.onRendered = { _ in rendered.fulfill() }
         controller.webView.setFrameSize(NSSize(width: 720, height: 600))
         wait(for: [rendered], timeout: 20)
@@ -162,7 +162,7 @@ final class WebPaneTextSizeTests: XCTestCase {
         let controller = makeController()
         loadAndWait(controller)
         controller.setTextSize(18)
-        let reRender = expectation(description: "re-render after recovery")
+        let reRender = renderExpectation(description: "re-render after recovery")
         controller.onRendered = { _ in reRender.fulfill() }
         controller.webView.navigationDelegate?.webViewWebContentProcessDidTerminate?(controller.webView)
         wait(for: [reRender], timeout: 20)

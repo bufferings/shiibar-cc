@@ -31,7 +31,7 @@ final class WebPaneSecurityTests: XCTestCase {
         controller.openExternalURL = { spy.record($0) }
         // WKWebView needs a real frame for layout-dependent behavior.
         controller.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 800)
-        let renderedOnce = expectation(description: "page rendered")
+        let renderedOnce = renderExpectation(description: "page rendered")
         controller.onRendered = { _ in renderedOnce.fulfill() }
         let rendered = messages.map { RenderedMessage(role: $0.role, text: $0.text) }
         controller.load(messages: messages, rendered: rendered, anchorSeq: nil)
