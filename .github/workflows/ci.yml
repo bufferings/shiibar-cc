@@ -195,6 +195,13 @@ jobs:
           echo "${{ matrix.name }}: $failed failed of $i"
           [ "$failed" -eq 0 ]
 
+      # The web pane's own log says which path rendered a load a second
+      # time: the re-injection after a load that was not acknowledged in
+      # time, or the re-injection after a render into a zero-height viewport.
+      - name: Print the web pane log
+        if: always()
+        run: log show --last 30m --style compact --info --predicate 'category == "webpane"' || true
+
       - name: Print test crash reports
         if: always()
         run: |
