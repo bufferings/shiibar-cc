@@ -128,24 +128,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: hidden-a
-            window: hidden
-            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
-          - name: hidden-b
-            window: hidden
-            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
-          - name: hidden-c
-            window: hidden
-            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
           - name: transparent-a
             window: transparent
-            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
           - name: transparent-b
             window: transparent
-            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
-          - name: core-first
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: transparent-c
+            window: transparent
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: transparent-d
+            window: transparent
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: hidden-a
             window: hidden
-            filters: ConversationsRenderingTests WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
+          - name: hidden-b
+            window: hidden
+            filters: WebPaneKeyboardScrollTests WebPaneKeyboardScrollTests
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -163,6 +163,10 @@ jobs:
         working-directory: app
         env:
           KBSCROLL_WINDOW: ${{ matrix.window }}
+          # Objective-C runtime logging: every exception thrown, with its
+          # backtrace, to find an exception that unwinds out of a test.
+          OBJC_PRINT_EXCEPTIONS: "YES"
+          OBJC_PRINT_EXCEPTION_THROW: "YES"
         run: |
           echo "variant ${{ matrix.name }}: KBSCROLL_WINDOW=$KBSCROLL_WINDOW filters: ${{ matrix.filters }}"
           i=0
@@ -180,6 +184,7 @@ jobs:
             grep -E "\[kbscroll-diag\] .* attempt=1 scrollTop" "$log" || true
             grep -E "Test Case '.*(started|passed|failed)" "$log" || true
             grep -E 'error:|signal code|freed pointer' "$log" || true
+            echo "objc exception log lines: $(grep -c 'objc\[' "$log" || true)"
             if [ "$code" -ne 0 ]; then
               failed=$((failed + 1))
               echo "---- full log of run $i"

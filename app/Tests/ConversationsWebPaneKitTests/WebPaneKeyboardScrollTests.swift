@@ -119,6 +119,7 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         wait(for: [rendered], timeout: 20)
         diagTask("setup-rendered")
         XCTAssertTrue(window.makeFirstResponder(controller.webView))
+        diagTask("setup-first-responder")
         installProbe(in: controller)
         diagTask("setup-end")
         return (controller, window)
