@@ -66,18 +66,20 @@ final class WebPaneDeliveryTests: XCTestCase {
     @MainActor
     func testRapidConsecutiveLoadsRenderTheLatestConversation() {
         let controller = makeController()
-        var renderCount = 0
-        let renderedTwice = renderExpectation(description: "both loads rendered")
-        renderedTwice.expectedFulfillmentCount = 2
-        controller.onRendered = { _ in
-            renderCount += 1
-            renderedTwice.fulfill()
+        // Generations are recorded rather than renders counted: a load whose
+        // acknowledgement is late is re-injected and renders a second time
+        // under the same generation (DESIGN.md §8.38).
+        var renderedGenerations: [Int] = []
+        let bothRendered = renderExpectation(description: "both loads rendered")
+        controller.onRendered = { [weak controller] _ in
+            renderedGenerations.append(controller?.lastRenderedAck?.generation ?? 0)
+            if Set(renderedGenerations).isSuperset(of: [1, 2]) { bothRendered.fulfill() }
         }
         // Two selections in quick succession, both queued before ready —
         // the second must be what ends up on screen.
         load(conversation("first", count: 2), into: controller)
         load(conversation("second", count: 5), into: controller)
-        wait(for: [renderedTwice], timeout: 20)
+        wait(for: [bothRendered], timeout: 20)
 
         let probe = evaluate(
             "JSON.stringify({count: document.querySelectorAll('[data-mi]').length, hasSecond: document.getElementById('doc').textContent.includes('second message 4'), hasFirst: document.getElementById('doc').textContent.includes('first message')})",
@@ -86,7 +88,8 @@ final class WebPaneDeliveryTests: XCTestCase {
         XCTAssertTrue(probe.contains(#""count":5"#), probe)
         XCTAssertTrue(probe.contains(#""hasSecond":true"#), probe)
         XCTAssertTrue(probe.contains(#""hasFirst":false"#), "the older generation must not survive: \(probe)")
-        XCTAssertEqual(renderCount, 2, "every generation renders; the last one wins")
+        XCTAssertEqual(Set(renderedGenerations), [1, 2], "every generation renders; the last one wins")
+        XCTAssertEqual(renderedGenerations.last, 2, "every generation renders; the last one wins")
     }
 
     // MARK: - The blank-pane fix (§8.38(8), field-confirmed): loads into a
@@ -130,24 +133,23 @@ final class WebPaneDeliveryTests: XCTestCase {
     @MainActor
     func testZeroViewportAckWithRealBoundsSelfHealsExactlyOnce() {
         let controller = makeController() // sized: 720x600-class bounds
-        var realRenders = 0
-        let firstRender = expectation(description: "initial render")
-        controller.onRendered = { [weak controller] _ in
-            if (controller?.lastRenderedAck?.viewportHeight ?? -1) > 0 { realRenders += 1 }
-            if realRenders == 1 { firstRender.fulfill() }
+        // The helper also waits for a second render of generation 1 when the
+        // controller re-injected it (DESIGN.md §8.38), so no render of the
+        // initial load is counted as the self-heal render below.
+        waitForRender(of: controller, description: "initial render") {
+            load(conversation("heal", count: 2), into: controller)
         }
-        load(conversation("heal", count: 2), into: controller)
-        wait(for: [firstRender], timeout: 20)
-        XCTAssertEqual(realRenders, 1)
+        XCTAssertGreaterThan(controller.lastRenderedAck?.viewportHeight ?? -1, 0, "the initial render is real")
 
         // A pathological ack: zero viewport while the native bounds are
         // real (any future path that slips past the gate). The controller
         // must re-inject the latest load ONCE.
+        var realRenders = 0
         let healed = expectation(description: "self-heal re-render")
         controller.onRendered = { [weak controller] _ in
             if (controller?.lastRenderedAck?.viewportHeight ?? -1) > 0 {
                 realRenders += 1
-                if realRenders == 2 { healed.fulfill() }
+                if realRenders == 1 { healed.fulfill() }
             }
         }
         _ = evaluate(
@@ -155,16 +157,16 @@ final class WebPaneDeliveryTests: XCTestCase {
             in: controller
         )
         wait(for: [healed], timeout: 20)
-        XCTAssertEqual(realRenders, 2, "the self-heal must re-inject and produce one real render")
+        XCTAssertEqual(realRenders, 1, "the self-heal must re-inject and produce one real render")
 
         // A second zero-viewport ack for the same generation: guarded — no
-        // loop, no third render.
+        // loop, no further real render.
         _ = evaluate(
             "window.webkit.messageHandlers.shiibar.postMessage({type:'rendered', gen: 1, ms: 1, docH: 500, vw: 0, vh: 0}); 0",
             in: controller
         )
         RunLoop.main.run(until: Date().addingTimeInterval(1.0))
-        XCTAssertEqual(realRenders, 2, "the self-heal must fire at most once per generation")
+        XCTAssertEqual(realRenders, 1, "the self-heal must fire at most once per generation")
     }
 
     // MARK: - WebContent process termination recovers with state replayed
@@ -172,12 +174,11 @@ final class WebPaneDeliveryTests: XCTestCase {
     @MainActor
     func testProcessTerminationRecoveryReplaysTheLatestState() {
         let controller = makeController()
-        let firstRender = renderExpectation(description: "initial render")
-        controller.onRendered = { _ in firstRender.fulfill() }
         let messages = conversation("recovered", count: 4)
-        load(messages, into: controller)
-        controller.setTextSize(16)
-        wait(for: [firstRender], timeout: 20)
+        waitForRender(of: controller, description: "initial render") {
+            load(messages, into: controller)
+            controller.setTextSize(16)
+        }
 
         // Simulate the WebContent process dying (the classic silently-blank
         // pane): drive the public delegate hook, which reloads the page and

@@ -29,10 +29,9 @@ final class WebPaneUpdateTests: XCTestCase {
 
     @MainActor
     private func load(_ messages: [ConversationMessage], into controller: WebPaneController, elapsed: String? = "5m") {
-        let done = renderExpectation(description: "loaded")
-        controller.onRendered = { _ in done.fulfill() }
-        controller.load(messages: messages, rendered: rendered(messages), anchorSeq: nil, elapsed: elapsed)
-        wait(for: [done], timeout: 20)
+        waitForRender(of: controller, description: "loaded") {
+            controller.load(messages: messages, rendered: rendered(messages), anchorSeq: nil, elapsed: elapsed)
+        }
     }
 
     /// Apply `messages` as an update, with Core's comparison against
@@ -43,10 +42,9 @@ final class WebPaneUpdateTests: XCTestCase {
         in controller: WebPaneController, elapsed: String? = "1m"
     ) {
         let change = ConversationPaneUpdate.classify(displayed: displayed, fetched: messages)
-        let done = renderExpectation(description: "updated")
-        controller.onRendered = { _ in done.fulfill() }
-        controller.update(messages: messages, rendered: rendered(messages), change: change, elapsed: elapsed)
-        wait(for: [done], timeout: 20)
+        waitForRender(of: controller, description: "updated") {
+            controller.update(messages: messages, rendered: rendered(messages), change: change, elapsed: elapsed)
+        }
     }
 
     @MainActor

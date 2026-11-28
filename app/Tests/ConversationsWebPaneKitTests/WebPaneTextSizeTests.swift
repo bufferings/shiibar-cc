@@ -41,10 +41,9 @@ final class WebPaneTextSizeTests: XCTestCase {
 
     @MainActor
     private func loadAndWait(_ controller: WebPaneController) {
-        let rendered = renderExpectation(description: "rendered")
-        controller.onRendered = { _ in rendered.fulfill() }
-        controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
-        wait(for: [rendered], timeout: 20)
+        waitForRender(of: controller) {
+            controller.load(messages: messages, rendered: messages.map { RenderedMessage(role: $0.role, text: $0.text) }, anchorSeq: nil)
+        }
     }
 
     @MainActor
