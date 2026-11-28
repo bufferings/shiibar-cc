@@ -20,7 +20,7 @@ final class WebPaneCopyShortcutTests: XCTestCase {
         controller.openExternalURL = { XCTFail("no test may open a URL: \($0)") }
         controller.pasteboard = NSPasteboard(name: NSPasteboard.Name("cc.shiibar.tests." + UUID().uuidString))
         controller.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 800)
-        let renderedOnce = expectation(description: "page rendered")
+        let renderedOnce = renderExpectation(description: "page rendered")
         controller.onRendered = { _ in renderedOnce.fulfill() }
         let rendered = messages.map { RenderedMessage(role: $0.role, text: $0.text) }
         controller.load(messages: messages, rendered: rendered, anchorSeq: nil)

@@ -29,10 +29,9 @@ final class WebPaneUpdateTests: XCTestCase {
 
     @MainActor
     private func load(_ messages: [ConversationMessage], into controller: WebPaneController, elapsed: String? = "5m") {
-        let done = expectation(description: "loaded")
-        controller.onRendered = { _ in done.fulfill() }
-        controller.load(messages: messages, rendered: rendered(messages), anchorSeq: nil, elapsed: elapsed)
-        wait(for: [done], timeout: 20)
+        waitForRender(of: controller, description: "loaded") {
+            controller.load(messages: messages, rendered: rendered(messages), anchorSeq: nil, elapsed: elapsed)
+        }
     }
 
     /// Apply `messages` as an update, with Core's comparison against
@@ -43,10 +42,9 @@ final class WebPaneUpdateTests: XCTestCase {
         in controller: WebPaneController, elapsed: String? = "1m"
     ) {
         let change = ConversationPaneUpdate.classify(displayed: displayed, fetched: messages)
-        let done = expectation(description: "updated")
-        controller.onRendered = { _ in done.fulfill() }
-        controller.update(messages: messages, rendered: rendered(messages), change: change, elapsed: elapsed)
-        wait(for: [done], timeout: 20)
+        waitForRender(of: controller, description: "updated") {
+            controller.update(messages: messages, rendered: rendered(messages), change: change, elapsed: elapsed)
+        }
     }
 
     @MainActor
@@ -340,7 +338,7 @@ final class WebPaneUpdateTests: XCTestCase {
         let generation = controller.lastRenderedAck?.generation ?? -1
         // The same delivery once more (a re-injection): nothing is added.
         let payload = "{\"messages\":[],\"elapsed\":null}"
-        let acked = expectation(description: "acked again")
+        let acked = renderExpectation(description: "acked again")
         controller.onRendered = { _ in acked.fulfill() }
         _ = evaluate("shiibarAPI.update(\(payload), 'append', 3, [], \(generation), \(generation - 1)); 0", in: controller)
         wait(for: [acked], timeout: 10)
@@ -393,7 +391,7 @@ final class WebPaneUpdateTests: XCTestCase {
         let second = first + conversation(2, from: 20)
         update(from: first, to: second, in: controller)
 
-        let reloaded = expectation(description: "replayed")
+        let reloaded = renderExpectation(description: "replayed")
         controller.onRendered = { _ in reloaded.fulfill() }
         controller.recoverFromProcessTermination()
         wait(for: [reloaded], timeout: 20)

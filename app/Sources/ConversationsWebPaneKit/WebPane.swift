@@ -115,7 +115,7 @@ public final class WebPaneController: NSObject, ObservableObject {
     // web view until the next interaction).
     private var loadGeneration = 0
     private var ackedLoadGeneration = 0
-    private var retriedLoadGeneration = 0
+    private(set) var retriedLoadGeneration = 0
     /// The newest generation the zero-viewport self-heal re-injected for
     /// (once per generation — never a loop).
     private var selfHealedGeneration = 0

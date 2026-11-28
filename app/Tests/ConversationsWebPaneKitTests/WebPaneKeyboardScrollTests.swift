@@ -8,7 +8,10 @@ import XCTest
 /// like Space and Page Up / Page Down). The scroller is the inner `#doc`
 /// element, which WebKit only scrolls from the keyboard while it (or
 /// something inside it) is focused — the page focuses it on the first key
-/// that arrives with nothing focused. The window is never ordered on screen.
+/// that arrives with nothing focused. The window is ordered on screen, fully
+/// transparent and click-through, because WebKit does not run the keyboard
+/// scroll animation in a window that is not on screen; ordering it front with
+/// `orderFrontRegardless()` does not activate the app.
 final class WebPaneKeyboardScrollTests: XCTestCase {
     @MainActor
     private func hostedController() -> (WebPaneController, NSWindow) {
@@ -19,9 +22,12 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 400),
             styleMask: [.titled], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
         controller.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 400)
         window.contentView?.addSubview(controller.webView)
-        let rendered = expectation(description: "page rendered")
+        window.orderFrontRegardless()
+        let rendered = renderExpectation(description: "page rendered")
         controller.onRendered = { _ in rendered.fulfill() }
         let messages = (0..<30).map {
             ConversationMessage(seq: Int64($0), role: "assistant", text: "filler paragraph \($0)\n\nmore filler text to give the document height")
@@ -83,24 +89,6 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         return current
     }
 
-    /// Taps the key until `#doc.scrollTop` differs from `start`, or the
-    /// attempts run out. The web content process can drop a synthesized key
-    /// that arrives while it is still settling after the render, so one tap
-    /// is not guaranteed to scroll on a slow machine.
-    @MainActor
-    private func tapUntilScrollChanges(
-        _ keyCode: UInt16, _ characters: String, from start: Double,
-        in controller: WebPaneController, window: NSWindow
-    ) -> Double {
-        var current = start
-        for _ in 0..<5 {
-            press(keyCode, characters, in: controller, window: window)
-            current = waitForScrollChange(from: start, in: controller)
-            if current != start { break }
-        }
-        return current
-    }
-
     @MainActor
     func testUpArrowWithNothingFocusedScrollsTheConversation() {
         let (controller, window) = hostedController()
@@ -109,7 +97,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         XCTAssertGreaterThan(start, 0, "the page opens at the bottom (latest)")
         XCTAssertEqual(evaluate("document.activeElement === document.body", in: controller) as? Bool, true)
 
-        XCTAssertLessThan(tapUntilScrollChanges(126, "\u{F700}", from: start, in: controller, window: window), start)
+        press(126, "\u{F700}", in: controller, window: window)
+        XCTAssertLessThan(waitForScrollChange(from: start, in: controller), start)
     }
 
     @MainActor
@@ -117,7 +106,8 @@ final class WebPaneKeyboardScrollTests: XCTestCase {
         let (controller, window) = hostedController()
         defer { window.close() }
         _ = evaluate("document.getElementById('doc').scrollTop = 0; 0", in: controller)
-        XCTAssertGreaterThan(tapUntilScrollChanges(125, "\u{F701}", from: 0, in: controller, window: window), 0)
+        press(125, "\u{F701}", in: controller, window: window)
+        XCTAssertGreaterThan(waitForScrollChange(from: 0, in: controller), 0)
     }
 
     /// Focusing the scroller on a key must not touch the page's selection
